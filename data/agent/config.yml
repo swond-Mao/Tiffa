@@ -1,0 +1,11 @@
+# omp config.yml — 主设置文件
+# 与 opencode 便携包一致：家用模型为 default，Kimi 为 slow/reasoning
+
+modelRoles:
+  default: "home-models/Qwen3.6-27B"
+  smol: "home-models/Qwen3.6-27B"
+  slow: "kimi/kimi-k3"
+  plan: "kimi/kimi-k3"
+  vision: "kimi/kimi-k3"
+  commit: "home-models/Qwen3.6-27B"
+  tiny: "xiaomi/mimo-v2-flash"
