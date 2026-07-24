@@ -1,0 +1,35 @@
+# Dependencies & runtime
+npm-global/
+node/
+python/
+home/
+
+# Build artifacts & cache
+.temp/
+__pycache__/
+*.pyc
+
+# Workspace (user data, sessions)
+workspace/
+
+# Large binaries
+omp-desktop.exe
+
+# Session & cache data
+data/agent/sessions/
+data/cache/
+data/memory/daily-log/
+data/memory/inbox/
+
+# Skill output/artifacts (user-generated)
+skills/*/output/
+
+# Skill vendor/build dirs (large, reproducible)
+skills/dashiai-ppt/project/node_modules/
+skills/dashiai-ppt/project/.cache/
+skills/dashiai-ppt/output/
+skills/craftman/output/
+
+# OS files
+Thumbs.db
+Desktop.ini
