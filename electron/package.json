@@ -1,0 +1,73 @@
+{
+  "name": "omp-desktop",
+  "version": "1.0.0",
+  "description": "oh-my-pi Desktop - Electron frontend for omp coding agent",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable",
+    "dev": "electron . --dev"
+  },
+  "author": "omp-portable",
+  "license": "MIT",
+  "devDependencies": {
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "electron": "^33.0.0",
+    "marked": "^15.0.0",
+    "highlight.js": "^11.10.0"
+  },
+  "build": {
+    "appId": "com.omp.desktop",
+    "productName": "omp Desktop",
+    "directories": {
+      "output": "../dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": null
+    },
+    "portable": {
+      "artifactName": "omp-desktop-portable-${version}.exe"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "node_modules/**/*",
+      "!node_modules/electron/dist/**/*",
+      "!node_modules/electron-builder/**/*",
+      "!node_modules/.cache/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../npm-global",
+        "to": "npm-global",
+        "filter": [
+          "**/*",
+          "!**/node_modules/@oh-my-pi/pi-coding-agent/src/**/*",
+          "!**/node_modules/@oh-my-pi/pi-coding-agent/examples/**/*",
+          "!**/node_modules/@oh-my-pi/pi-coding-agent/docs/**/*"
+        ]
+      },
+      {
+        "from": "../plugins",
+        "to": "plugins"
+      },
+      {
+        "from": "../data",
+        "to": "data"
+      },
+      {
+        "from": "../home",
+        "to": "home"
+      },
+      {
+        "from": "../workspace",
+        "to": "workspace"
+      }
+    ],
+    "asar": false
+  }
+}
