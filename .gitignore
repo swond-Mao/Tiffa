@@ -17,18 +17,45 @@ omp-desktop.exe
 
 # Session & cache data
 data/agent/sessions/
+data/agent/agent.db*
+data/agent/models.db*
+data/agent/hidden-models.json
+data/agent/session-model-map.json
+data/agent/xml-translation-enabled
+data/agent/models.yml.bak*
+data/agent/models.yml.example
 data/cache/
 data/memory/daily-log/
 data/memory/inbox/
 
+# Log files
+data/log/
+plugins/*.log
+electron/stdout.log
+electron/stderr.log
+
+# Backup files
+*.bak*
+plugins/*.bak*
+
+# Electron runtime
+electron/node_modules/
+electron/package-lock.json
+
 # Skill output/artifacts (user-generated)
 skills/*/output/
+skills/dashiai-ppt/project/output/
 
 # Skill vendor/build dirs (large, reproducible)
 skills/dashiai-ppt/project/node_modules/
 skills/dashiai-ppt/project/.cache/
 skills/dashiai-ppt/output/
 skills/craftman/output/
+skills/*/node_modules/
+skills/*/.cache/
+
+# Large font files (MiSans ~80MB total, can re-download)
+skills/canvas-design/canvas-fonts/MiSans-*.ttf
 
 # OS files
 Thumbs.db

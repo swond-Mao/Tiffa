@@ -1,0 +1,23 @@
+{
+  "76": {"class_type": "LoadImage", "inputs": {"image": "PLACEHOLDER_IMG", "upload": "image"}},
+  "107": {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": ["76", 0], "upscale_method": "bicubic", "megapixels": 1, "resolution_steps": 1}},
+  "112": {"class_type": "GetImageSize", "inputs": {"image": ["107", 0]}},
+  "105": {"class_type": "VAELoader", "inputs": {"vae_name": "flux2-vae.safetensors"}},
+  "115": {"class_type": "VAEEncode", "inputs": {"pixels": ["107", 0], "vae": ["105", 0]}},
+  "104": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2", "device": "default"}},
+  "117": {"class_type": "CR Text", "inputs": {"text": "PLACEHOLDER_PROMPT"}},
+  "110": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["104", 0], "text": ["117", 0]}},
+  "111": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["110", 0]}},
+  "114": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["111", 0], "latent": ["115", 0]}},
+  "116": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["110", 0], "latent": ["115", 0]}},
+  "127": {"class_type": "UNETLoader", "inputs": {"unet_name": "FLUX\\flux-2-klein-9b🔥NSFW🔥_V1.safetensors", "weight_dtype": "default"}},
+  "126": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["127", 0], "lora_name": "klein\\Klein 一致性增强.safetensors", "strength_model": 0.4}},
+  "109": {"class_type": "Flux2Scheduler", "inputs": {"steps": 8, "width": ["112", 0], "height": ["112", 1]}},
+  "106": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": ["112", 0], "height": ["112", 1], "batch_size": 1}},
+  "99": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+  "102": {"class_type": "RandomNoise", "inputs": {"noise_seed": 383784658073002, "type": "randomize"}},
+  "108": {"class_type": "CFGGuider", "inputs": {"model": ["126", 0], "positive": ["116", 0], "negative": ["114", 0], "cfg": 1}},
+  "100": {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": ["102", 0], "guider": ["108", 0], "sampler": ["99", 0], "sigmas": ["109", 0], "latent_image": ["106", 0]}},
+  "101": {"class_type": "VAEDecode", "inputs": {"samples": ["100", 0], "vae": ["105", 0]}},
+  "9": {"class_type": "SaveImage", "inputs": {"images": ["101", 0], "filename_prefix": "Flux2-Klein-Edit"}}
+}
