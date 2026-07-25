@@ -718,13 +718,12 @@ async function archiveProject(project) {
       addNotice('error', `归档失败: ${result.error}`);
       return;
     }
-    // 如果归档的是当前项目，清空聊天区
-    if (project.dirName === state.activeProjectDirName) {
-      state.activeProjectDirName = null;
-      state.activeSessionPath = null;
-      dom.messages.innerHTML = '';
-      showWelcome();
-    }
+    // 归档后清空聊天区并显示欢迎页面
+    state.activeProjectDirName = null;
+    state.activeSessionPath = null;
+    state.activeSessionPaths.clear();
+    dom.messages.innerHTML = '';
+    showWelcome();
     addNotice('info', `已归档: ${project.displayName}`);
     await loadProjects();
   } catch (err) {
