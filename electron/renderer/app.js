@@ -1545,50 +1545,90 @@ function handleMessageStart(message) {
   }
 }
 
-// ── N-gram 重复检测：弱量化模型容易陷入重复循环，提前中断节省时间 ──
-let _ngramCheckCounter = 0;
-function checkNgramRepetition() {
-  // 每 20 个 delta 检查一次，避免频繁计算
-  if (++_ngramCheckCounter % 20 !== 0) return;
-  const text = state.currentTextBuffer;
-  if (!text || text.length < 80) return;
+// ── 重复输出检测：弱量化模型容易陷入重复循环，提前中断节省时间 ──
+let _repeatCheckCounter = 0;
+let _repeatDetected = false;
 
-  // 取末尾 200 字符做滑动窗口
-  const window = text.slice(-200);
-  // 4-gram 检测：把窗口按 4 字符步进切分，统计频次
-  const gramSize = 4;
+function checkRepetition(text) {
+  if (!text || text.length < 100) return false;
+  // 每 15 个 delta 检查一次
+  if (++_repeatCheckCounter % 15 !== 0) return false;
+  if (_repeatDetected) return true; // 已检测到，不再重复触发
+
+  // 取末尾 500 字符做分析
+  const window = text.slice(-500);
+  const lines = window.split('\n').filter(l => l.trim().length > 2);
+
+  // 策略1: 连续重复行检测（代码重复的典型模式）
+  let consecutiveRepeat = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === lines[i - 1]) {
+      consecutiveRepeat++;
+      if (consecutiveRepeat >= 3) {
+        triggerRepeatAbort('连续重复行');
+        return true;
+      }
+    } else {
+      consecutiveRepeat = 0;
+    }
+  }
+
+  // 策略2: 行频次检测（散布式重复，如同一行出现很多次）
+  if (lines.length >= 10) {
+    const lineCounts = new Map();
+    for (const line of lines) {
+      const key = line.trim();
+      if (key.length < 3) continue;
+      lineCounts.set(key, (lineCounts.get(key) || 0) + 1);
+    }
+    for (const [, count] of lineCounts) {
+      if (count >= 4) {
+        triggerRepeatAbort('高频重复行');
+        return true;
+      }
+    }
+  }
+
+  // 策略3: 短语级 n-gram 检测（兜底，捕获非换行的重复片段）
+  const gramSize = 6;
   const counts = new Map();
   for (let i = 0; i <= window.length - gramSize; i++) {
     const gram = window.slice(i, i + gramSize);
     counts.set(gram, (counts.get(gram) || 0) + 1);
   }
-  // 如果任何 4-gram 出现超过 5 次，判定为重复循环
   for (const [, count] of counts) {
-    if (count > 5) {
-      console.warn('[N-gram 检测] 检测到重复输出，自动中断');
-      addNotice('warning', '检测到模型输出重复，已自动中断');
-      _ngramCheckCounter = 0;
-      abortMessage();
-      return;
+    if (count > 8) {
+      triggerRepeatAbort('n-gram 重复');
+      return true;
     }
   }
+
+  return false;
+}
+
+function triggerRepeatAbort(reason) {
+  _repeatDetected = true;
+  console.warn(`[重复检测] ${reason}，自动中断`);
+  addNotice('warning', `检测到模型输出重复(${reason})，已自动中断`);
+  abortMessage();
 }
 
 function handleMessageUpdate(message, assistantEvent) {
   if (!assistantEvent) return;
   switch (assistantEvent.type) {
-    case 'text_start': state.currentTextBuffer = ''; _ngramCheckCounter = 0; break;
+    case 'text_start': state.currentTextBuffer = ''; _repeatCheckCounter = 0; _repeatDetected = false; break;
     case 'text_delta':
       state.currentTextBuffer += assistantEvent.delta;
       updateAssistantContent(state.currentTextBuffer);
       scrollToBottom();
-      checkNgramRepetition();
+      checkRepetition(state.currentTextBuffer);
       break;
     case 'text_end':
       state.currentTextBuffer = assistantEvent.content || state.currentTextBuffer;
       updateAssistantContent(state.currentTextBuffer);
       break;
     case 'thinking_start': {
+      _repeatCheckCounter = 0; _repeatDetected = false;
       const el = createThinkingBlock();
       appendToAssistant(el);
       state.currentThinkingEl = el;
@@ -1597,6 +1637,7 @@ function handleMessageUpdate(message, assistantEvent) {
     case 'thinking_delta':
       if (state.currentThinkingEl && state.currentThinkingEl._content) {
         state.currentThinkingEl._content.textContent += assistantEvent.delta;
+        checkRepetition(state.currentThinkingEl._content.textContent);
       }
       break;
     case 'thinking_end':
