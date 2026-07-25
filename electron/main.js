@@ -523,6 +523,7 @@ function createWindow() {
     minHeight: 600,
     title: 'Tiffa',
     backgroundColor: '#1a1a2e',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -532,6 +533,11 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // 等渲染进程准备好再显示窗口，避免黑屏闪烁
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
