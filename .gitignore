@@ -23,11 +23,11 @@ data/agent/hidden-models.json
 data/agent/session-model-map.json
 data/agent/projects.json
 data/agent/xml-translation-enabled
+data/agent/models.yml
 data/agent/models.yml.bak*
 data/agent/models.yml.example
 data/cache/
-data/memory/daily-log/
-data/memory/inbox/
+data/memory/
 
 # Log files
 data/log/
