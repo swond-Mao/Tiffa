@@ -489,7 +489,7 @@ body {
 
 .titlebar-model {
   font-size: 12px;
-  color: hsl(var(--text-200));
+  color: #fff;
   background: hsl(var(--accent-main-000));
   padding: 2px 8px;
   border-radius: 10px;
@@ -1594,7 +1594,7 @@ body {
   padding: 10px 14px;
   cursor: pointer;
   font-size: 13px;
-  color: hsl(var(--text-200));
+  color: hsl(var(--text-100));
   border-bottom: 1px solid hsl(var(--border-200));
 }
 
