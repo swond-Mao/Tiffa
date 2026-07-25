@@ -40,7 +40,7 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | kimi | kimi-k3 | 最新旗舰，262K 上下文，支持推理+视觉 |
 | minimax | MiniMax-M3 | 100 万上下文，MiniMax-M2.7 (204.8K) |
 | xiaomi | mimo-v2-flash / mimo-v2-pro | 轻量快速 / 旗舰推理 |
-| qwen | localmodel | 本地模型 (llama.cpp，通过 frp 中继 127.0.0.1:9876) |
+| qwen | localmodel | 本地模型 (llama.cpp，通过 frp 中继) |
 
 ### 模型角色 (config.yml)
 
