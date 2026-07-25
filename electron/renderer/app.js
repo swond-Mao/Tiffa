@@ -613,12 +613,19 @@ async function loadProjects() {
         state.activeSessionPath = latest.path;
         state.activeSessionPaths.add(latest.path);
         renderSessionTabs();
-        try {
-          await ompDesktop.switchSession(latest.path);
-          dom.messages.innerHTML = '';
-          await loadAndRenderHistory(latest.path);
-        } catch (err) {
-          // 恢复失败不影响使用
+        const doRestore = async () => {
+          try {
+            await ompDesktop.switchSession(latest.path);
+            dom.messages.innerHTML = '';
+            await loadAndRenderHistory(latest.path);
+          } catch (err) {
+            // 恢复失败不影响使用
+          }
+        };
+        if (state.welcomePhase === 'showing') {
+          setTimeout(doRestore, 5500);
+        } else {
+          await doRestore();
         }
       }
     }
