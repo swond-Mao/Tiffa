@@ -491,7 +491,7 @@ function showWelcome() {
   dom.messages.innerHTML = `
     <div class="welcome-screen">
       <div class="welcome-logo">Tiffa</div>
-      <div class="welcome-title">你的超级编程助手</div>
+      <div class="welcome-title">你的全能AI助手</div>
       <div class="welcome-motto">${escapeHtml(motto)}</div>
       <div class="welcome-features">
         <div class="welcome-feature">
@@ -504,19 +504,19 @@ function showWelcome() {
         </div>
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span>弱模型友好</span>
+          <span>弱模适配</span>
         </div>
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          <span>7 套主题</span>
+          <span>主题切换</span>
         </div>
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          <span>Diff 视图</span>
+          <span>差异对比</span>
         </div>
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          <span>Todo 面板</span>
+          <span>待办面板</span>
         </div>
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
@@ -524,7 +524,7 @@ function showWelcome() {
         </div>
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span>便携包</span>
+          <span>便携即用</span>
         </div>
       </div>
       <div class="welcome-hint">输入消息开始对话</div>
