@@ -1,5 +1,5 @@
 /**
- * tiffa Desktop - Electron Main Process
+ * Tiffa Desktop - Electron Main Process
  *
  * Manages omp rpc-ui subprocess, IPC communication, and window lifecycle.
  * Protocol: JSONL over stdin/stdout (one JSON object per line)
@@ -521,7 +521,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'tiffa',
+    title: 'Tiffa',
     backgroundColor: '#1a1a2e',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
