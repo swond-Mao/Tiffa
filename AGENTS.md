@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v2.3) + Electron 桌面前端 (v1.4)。
+oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v2.8) + Electron 桌面前端 (v1.5)。
 
 ## 关键路径
 
@@ -15,7 +15,7 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | `node\node.exe` | Node.js 运行时 |
 | `data\agent\` | 配置目录 (config.yml, models.yml, projects.json) |
 | `data\memory\` | 长期记忆目录 (MEMORY.md, constraints.md, inbox/, daily-log/) |
-| `plugins\claude-mode-extension.ts` | Claude 化扩展 (v2.3) |
+| `plugins\claude-mode-extension.ts` | Claude 化扩展 (v2.8) |
 | `plugins\xml-tool-translator.ts` | XML 工具调用翻译层 (v7.0, 已退役) |
 | `skills\` | 专业技能目录 (18 个 skill) |
 | `workspace\` | 工作区根目录 |
@@ -56,11 +56,11 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 
 ---
 
-## Claude 化扩展 (v2.3)
+## Claude 化扩展 (v2.8)
 
 扩展文件：`plugins/claude-mode-extension.ts`，通过 `-e` 参数加载。
 
-### 架构变化 (v1.0 → v2.3)
+### 架构变化 (v1.0 → v2.8)
 
 | 版本 | 变化 |
 |------|------|
@@ -73,17 +73,50 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | v2.1 | **恢复违反检测机制**：4 个检测器 + 针对性补强 |
 | v2.2 | 工具调用纪律改为仅第 1 轮约定 + 违反检测触发重申 |
 | v2.3 | **XML 工具调用自动纠正**：检测→自动发 steer 消息→2 次失败才通知用户 |
+| v2.4 | **eval 工具从工具列表移除**（模型不可见，零 token 浪费）；**伪完成检测**（stop 但无文本输出→自动续行）；**interrupted 续行**（token 截断也自动续行） |
+| v2.5 | **session_stop 续行修复**：检查 stop_hook_active 防递归续行；续行轮中改用 sendUserMessage 绕过 omp 内部 session-stop-continuation 机制 |
+| v2.6 | **彻底弃用 omp 原生续行**：所有续行统一走 sendUserMessage + 2秒延迟，避免 omp 内部同步续行竞态崩溃；新增续行计数器（上限5次）+ 用户输入自动取消待定续行 |
+| v2.7 | **error 独立计数器**（MAX_ERROR_CONTINUE=1）：确定性错误最多续行1次，不再5次空转；complete/aborted/用户取消时重置 error 计数器 |
+| v2.8 | **移除 detectRepetitiveOutput**：正则检测重复输出误杀率过高，三次验证（代码层/Qwen规则/K3规则）均不可行；保留 error 独立计数器 |
 
-### 8 个事件 Hook
+### TTSR 规则系统（零 Context 成本约束）
+
+传统做法：每轮把约束写进 systemPrompt，占几百 token。TTSR（Time Traveling Stream Rules）的做法：规则写在 `.md` 文件里，**流式匹配**——模型输出时实时检测，违规立即拦截，不占一轮 token。
+
+**规则目录**：`data/agent/rules/`
+
+| 规则文件 | 拦截行为 | scope | interruptMode |
+|----------|---------|-------|--------------|
+| `no-bare-codeblock.md` | 代码块必须标注语言 | text | always |
+| `no-filler-opening.md` | 禁止废话开头 | text | always |
+| `no-xml-toolcall.md` | 禁止 XML 格式调用工具 | text, thinking | always |
+| `no-md-filepath-link.md` | 禁止链接包装文件路径 | text | always |
+| `no-hardcoded-secrets.md` | 禁止硬编码密钥 | tool:write(*), tool:edit(*) | always |
+| `no-git-add-all.md` | 禁止 git add -A | tool | always |
+| `no-git-push-force.md` | 禁止 git push --force | tool | always |
+| `cwd-file-placement.md` | 文件必须放在项目目录内 | tool:write(*) | never |
+| `chinese-punctuation.md` | 中文标点 | text | never |
+| `tool-call-commentary.md` | 禁止工具调用废话 | text | never |
+
+**从 constraints.md 迁移**：代码块标注、废话开头、XML工具调用、工具调用废话、裸URL（前端处理）、中文标点、文件路径链接、文件存放位置、硬编码密钥、git add -A、git push --force 已全部迁至 TTSR。constraints.md 保留语义/行为类约束（无法用正则检测）。
+
+### /omfg 命令（一句话创建 TTSR 规则）
+
+Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生成/修复 prompt，模型直接用 write 工具写 `.md` 规则文件，即时生效。
+
+**prompt 设计**：融合 OI3 标准格式（精确 regex 指导）+ 灵活修复能力（模型可直接修复已有规则漏洞），不走 JSON 中间步骤（因 RPC 模式无 ephemeral turn 能力做验证循环）。
+
+**已知问题**：`/omfg` 后需空格（已修复为 `\s*` 容错）；重复输出检测规则（`no-repetitive-output.md`）经三次验证均误杀结构化输出，已删除。
 
 | # | 事件 | 功能 |
 |---|------|------|
-| 1 | `before_agent_start` | AGENTS.md + PROJECT.md + MEMORY.md + constraints.md 注入、gap-fill 断片补救、违反检测、eval 禁用、工具调用纪律（仅第 1 轮）、长命令执行规范 |
-| 2 | `tool_call` | 权限拦截（danger 级拒绝、eval 禁用、危险路径拦截、workspace mkdir 拦截、配置文件自改拦截） |
+| 0 | `session_start` | eval 工具移除（从活跃工具列表中剔除，模型完全不可见） |
+| 1 | `before_agent_start` | AGENTS.md + PROJECT.md + MEMORY.md + constraints.md 注入、gap-fill 断片补救、违反检测、工具调用纪律（仅第 1 轮）、长命令执行规范 |
+| 2 | `tool_call` | 权限拦截（danger 级拒绝、危险路径拦截、workspace mkdir 拦截、配置文件自改拦截） |
 | 3 | `tool_result` | 审计日志 |
 | 4 | `session.compacting` | gap-fill 确定性提取（文件/命令/决策）+ compact dump（最近 50 条消息）+ constraints 关键条目重注入 |
 | 5 | `tool_approval_requested` | 自动审批契约（read 自动批、danger 自动拒、危险路径拦截） |
-| 6 | `session_stop` | 审计日志 |
+| 6 | `session_stop` | 伪完成检测 + 自动续行 + 审计日志 |
 | 7 | `input` | 敏感信息检测（密码/API密钥/身份证/手机号），只记录不阻断 |
 | 8 | `after_provider_response` | 审计日志 + 违反检测（记录上一轮输出）+ XML 工具调用自动纠正 |
 
@@ -123,9 +156,8 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 4. **gap-fill** — 压缩前自动提取的断片补救
 5. **constraints.md** — 每轮注入的核心约束
 6. **违反检测** — 针对性补强（仅违规时触发）
-7. **eval 禁用** — 每轮注入
-8. **工具调用纪律** — 仅第 1 轮约定
-9. **长命令执行规范** — 仅第 1 轮约定
+7. **工具调用纪律** — 仅第 1 轮约定
+8. **长命令执行规范** — 仅第 1 轮约定
 
 ### 权限契约
 
@@ -136,10 +168,48 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | danger | 自动拒绝 | rm/format/shutdown |
 
 **额外拦截**：
-- eval 工具（Windows 管道死锁）
 - 危险路径（System32、Windows、Program Files）
 - 配置文件自改（config.yml、models.yml、claude-mode-extension.ts）
 - workspace 根目录下新建一级子目录
+
+### session_stop 伪完成检测 + 自动续行 (v2.4→v2.6)
+
+从 `last_assistant_message.stopReason + content` 推导停止原因：
+
+| stopReason | hasText | isRepetitive | reason | 自动续行？ |
+|---|---|---|---|---|
+| `stop` | 有 | 否 | `complete` | 否 |
+| `stop` | 有 | 是 | `interrupted` | **是** |
+| `stop` | 无 | - | `interrupted` | **是** |
+| `length` | - | - | `interrupted` | **是** |
+| `error` | - | - | `error` | 是 |
+| `aborted` | - | - | `aborted` | 否 |
+| (无 lastMsg) | - | - | `unknown` | 是 |
+
+**核心逻辑**：正常完成一定有文本输出给用户；`stop` 但无文本 = 伪完成（模型"想了想就停了"或"调完工具就停了"），必须续行。
+
+**续行提示语区分**：
+- `error` → "上一轮请求出错，请继续"
+- `interrupted` + isRepetitive → "上一轮输出出现重复循环，换一种方式表达，避免重复"
+- `interrupted` → "上一轮输出未完成（无文本回复），请给出完整结果"
+- `unknown` → "会话异常终止，请继续"
+
+**v2.6 续行机制（全面弃用 omp 原生续行）**：
+
+v2.5 的问题：首次续行仍使用 omp 原生 `{ continue: true }`，这是**同步路径**——handler 返回后 omp 立即注入 session-stop-continuation 消息并启动新 agent loop，上一轮的异步清理（工具结果归档、状态重置）来不及完成，造成竞态条件导致进程崩溃。
+
+v2.6 方案：**所有续行统一走 `sendUserMessage` + 2秒延迟**：
+
+| 步骤 | 说明 |
+|------|------|
+| 1. handler 返回 `undefined` | 不返回 `{ continue: true }`，让 omp 正常结束本轮，完成异步清理 |
+| 2. 等 2 秒 | 确保上一轮所有异步操作已完成（工具结果归档、状态重置等） |
+| 3. `sendUserMessage(ctx, { deliverAs: "steer" })` | 发送续行指令，触发新 agent loop |
+
+**安全机制**：
+- **续行计数器**：上限 5 次，达到上限后停止续行并通知用户手动干预
+- **用户输入取消**：2 秒延迟期间如果用户发送了真实消息，自动取消待定续行并重置计数器
+- **正常完成重置**：模型正常完成（`complete`）或用户中断（`aborted`）时重置计数器
 
 ---
 
@@ -157,11 +227,11 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 
 | 文件 | 说明 |
 |------|------|
-| `electron/main.js` (~1968 行) | 主进程：OmpInstanceManager + IPC handler + 窗口管理 |
+| `electron/main.js` (~1789 行) | 主进程：OmpInstanceManager + IPC handler + 窗口管理 + /omfg 拦截 |
 | `electron/preload.js` (~133 行) | contextBridge + marked + hljs + IPC 桥接 |
 | `electron/renderer/index.html` | 主界面 HTML |
-| `electron/renderer/styles.css` (~3165 行) | HSL Token 主题系统 + 全组件样式 |
-| `electron/renderer/app.js` (~3930 行) | 渲染进程主逻辑 |
+| `electron/renderer/styles.css` (~2846 行) | HSL Token 主题系统 + 全组件样式 |
+| `electron/renderer/app.js` (~3853 行) | 渲染进程主逻辑 |
 | `electron/renderer/themes.js` (~659 行) | 主题引擎：7 套预设 × light/dark/system |
 
 ### 主题系统（移植自 OpenCodeUI）
@@ -184,6 +254,7 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | LRU 淘汰 | 淘汰 `lastActiveTime` 最久远且非当前活跃的实例 |
 | stall 检测 | 3 分钟无事件 → 发 abort + steer；再 30 秒未恢复 → forceKill |
 | forceKill | SIGTERM → 5 秒后 SIGKILL；被 forceKill 的实例 3 秒后自动重启 |
+| 崩溃自动重启 | code≠0 非用户 kill 的退出 → 3 秒后自动重启 → ready 后 2 秒自动续行（gap-fill 断片补救由扩展自动注入） |
 | 正常 kill | SIGTERM，不自动重启 |
 | 看门狗间隔 | 30 秒 |
 | ask 工具豁免 | 等待用户回复时暂停 stall 超时检测 |

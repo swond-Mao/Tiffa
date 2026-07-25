@@ -135,6 +135,9 @@ const state = {
   todoPhases: [],
   // 启动欢迎页阶段：'showing' | 'done'
   welcomePhase: 'showing',
+  // 新建对话标志：新建后到收到 session_switch 之前，忽略 message_* 事件
+  pendingNewSession: false,
+  _newSessionSwitched: false,  // session_switch 是否已到达
 };
 
 // ── sessionModelMap 持久化 ──
@@ -171,6 +174,7 @@ const dom = {
   btnNewSession: document.getElementById('btnNewSession'),
   sessionTabs: document.getElementById('sessionTabs'),
   messages: document.getElementById('messages'),
+  newSessionOverlay: document.getElementById('newSessionOverlay'),
   input: document.getElementById('messageInput'),
   btnSend: document.getElementById('btnSend'),
   btnAbort: document.getElementById('btnAbort'),
@@ -278,6 +282,12 @@ async function init() {
     addNotice('info', 'omp 正在自动重启，请稍候...');
   });
 
+  ompDesktop.onCrashRecovered(() => {
+    state.ompReady = true;
+    updateInputState();
+    addNotice('info', 'omp 崩溃后已自动重启，正在自动续行（断片补救已注入）...');
+  });
+
   setupInput();
   setupProjectPanel();
   setupSessionTabs();
@@ -291,10 +301,11 @@ async function init() {
   setupThemeToggle();
   setupXmlTranslation();
   setupApprovalMode();
-  showWelcome();
+  // 先标记 welcomePhase=done，让 loadProjects 里的会话恢复不走 5.5s 延迟
+  state.welcomePhase = 'done';
   await loadModelMap();
   await loadEnabledModels();
-  loadProjects();
+  await loadProjects();
 
   const ready = await ompDesktop.isReady();
   if (ready) {
@@ -303,14 +314,27 @@ async function init() {
     fetchCurrentModel();
   }
 
-  // 启动欢迎页停留一段时间后标记完成，允许加载对话内容
-  setTimeout(() => { state.welcomePhase = 'done'; }, 5000);
+  // 全部加载完成，淡出启动遮罩
+  const overlay = document.getElementById('startupOverlay');
+  if (overlay) {
+    overlay.classList.add('fade-out');
+    setTimeout(() => { overlay.remove(); }, 400);
+  }
+  // 如果没有恢复到历史会话，显示欢迎页
+  if (dom.messages.children.length === 0) showWelcome();
+  dom.input.focus();
 }
 
 // ── Event Handler ──
 function handleEvent(event) {
   // 记录事件时间，用于卡住检测
   state.lastEventTime = Date.now();
+
+  // 新建对话过渡期：忽略所有 message_* 事件，防止旧会话消息残留
+  if (state.pendingNewSession && (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')) {
+    console.log('[渲染] 新建对话过渡期，忽略消息事件:', event.type);
+    return;
+  }
 
   switch (event.type) {
     case 'ready':
@@ -410,20 +434,47 @@ function handleEvent(event) {
       break;
     case 'session_switch':
       if (event.sessionPath) {
-        // 新对话创建后，omp 返回真实路径，需要把 __new__ 的模型映射迁移过来
         const newPath = event.sessionPath;
         const oldPath = state.activeSessionPath;
-        if (oldPath && oldPath.startsWith('__new__') && state.sessionModelMap[oldPath]) {
-          state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
-          delete state.sessionModelMap[oldPath];
-          saveModelMap();
-          // 更新 sessions 列表中的路径
-          const ns = state.sessions.find(s => s.path === oldPath);
-          if (ns) ns.path = newPath;
+
+        if (state.pendingNewSession) {
+          // 新建对话过渡期：清屏 + 关遮罩，但不关 pendingNewSession
+          // （omp 可能在 session_switch 后继续发旧会话的 message_* 事件）
+          // pendingNewSession 由新建对话流程在 await 返回后延迟关闭
+          if (oldPath && oldPath.startsWith('__new__') && state.sessionModelMap[oldPath]) {
+            state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
+            delete state.sessionModelMap[oldPath];
+            saveModelMap();
+          }
+          if (oldPath && oldPath.startsWith('__new__')) {
+            const ns = state.sessions.find(s => s.path === oldPath);
+            if (ns) ns.path = newPath;
+          } else {
+            state.sessions.push({ path: newPath, title: '新对话', firstMessage: '', messageCount: 0 });
+          }
+          // 清屏 + showWelcome
+          dom.messages.innerHTML = '';
+          showWelcome();
+          state.sessionMessageCache.delete(newPath);
+          // 标记 session_switch 已到达（但不关 pendingNewSession）
+          state._newSessionSwitched = true;
+          // 延迟关闭 pendingNewSession，拦截残留的 message_* 事件
+          setTimeout(() => {
+            if (state.pendingNewSession) {
+              state.pendingNewSession = false;
+              updateStatus('就绪');
+              dom.input.focus();
+            }
+          }, 300);
         }
+
         state.activeSessionPath = newPath;
         state.activeSessionPaths.add(newPath);
         renderSessionTabs();
+        if (!state.pendingNewSession) {
+          updateStatus('就绪');
+          dom.input.focus();
+        }
       }
       break;
   }
@@ -1019,7 +1070,9 @@ async function loadSessions(dirName) {
   if (result.error) {
     state.sessions = [];
   } else {
-    state.sessions = result;
+    // 保留 __new__ 临时 tab（新建对话后磁盘刷新可能还没写入）
+    const newTabs = state.sessions.filter(s => s.path.startsWith('__new__'));
+    state.sessions = [...result, ...newTabs];
   }
   // 初始时只激活 activeSessionPath 对应的 tab
   // （首次加载或切换项目时调用）
@@ -1195,44 +1248,64 @@ function setupSessionTabs() {
       }
 
       updateStatus('新建对话...');
+      state.pendingNewSession = true;  // 开启过渡期，忽略旧会话消息事件
+      state._newSessionSwitched = false;
+      // 立即清屏 + 显示欢迎页，不让用户看到加载过程
+      dom.messages.innerHTML = '';
+      showWelcome();
       await ompDesktop.newSession();
       // 新会话会重置为默认模型，把当前模型设回去（继承之前的模型）
       if (state.currentProvider && state.currentModel && state.currentModel !== '--') {
         try { await ompDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
       }
-      // 直接在 UI 上创建新 tab，不依赖磁盘刷新
-      const newSession = {
-        path: '__new__' + Date.now(),
-        title: '新对话',
-        firstMessage: '',
-        messageCount: 0,
-      };
-      state.sessions.push(newSession);
-      state.activeSessionPath = newSession.path;
-      state.activeSessionPaths.add(newSession.path);
-      // 记住新对话使用的模型
-      if (state.currentProvider && state.currentModel) {
-        state.sessionModelMap[newSession.path] = { provider: state.currentProvider, modelId: state.currentModel };
-        saveModelMap();
+
+      if (state._newSessionSwitched) {
+        // session_switch 已在 await 期间到达，清屏已在事件处理器中完成
+        if (state.currentProvider && state.currentModel) {
+          const sp = state.activeSessionPath;
+          if (sp && !state.sessionModelMap[sp]) {
+            state.sessionModelMap[sp] = { provider: state.currentProvider, modelId: state.currentModel };
+            saveModelMap();
+          }
+        }
+        setTimeout(() => {
+          state.pendingNewSession = false;
+          updateStatus('就绪');
+          dom.input.focus();
+        }, 300);
+      } else {
+        // session_switch 还没来，创建临时 __new__ tab
+        const newSession = {
+          path: '__new__' + Date.now(),
+          title: '新对话',
+          firstMessage: '',
+          messageCount: 0,
+        };
+        state.sessions.push(newSession);
+        state.activeSessionPath = newSession.path;
+        state.activeSessionPaths.add(newSession.path);
+        if (state.currentProvider && state.currentModel) {
+          state.sessionModelMap[newSession.path] = { provider: state.currentProvider, modelId: state.currentModel };
+          saveModelMap();
+        }
+        renderSessionTabs();
       }
-      renderSessionTabs();
-      dom.messages.innerHTML = '';
-      showWelcome();
-      updateStatus('就绪');
       // 后台异步刷新真实会话列表（文件写入后）
       setTimeout(async () => {
         if (state.activeProjectDirName) {
           await loadSessions(state.activeProjectDirName);
-          // 自动选中最新会话
-          if (state.sessions.length > 0) {
-            const latest = state.sessions[state.sessions.length - 1];
-            state.activeSessionPath = latest.path;
-            state.activeSessionPaths.add(latest.path);
-            renderSessionTabs();
-          }
         }
       }, 2000);
+      // 兜底：5秒后如果 session_switch 没来，强制关闭过渡期
+      setTimeout(() => {
+        if (state.pendingNewSession) {
+          state.pendingNewSession = false;
+          updateStatus('就绪');
+          dom.input.focus();
+        }
+      }, 5000);
     } catch (err) {
+      state.pendingNewSession = false;
       addNotice('error', `新建对话失败: ${err.message}`);
       updateStatus('就绪');
     }
@@ -1324,6 +1397,13 @@ async function switchToSession(sessionPath) {
         const oldest = state.sessionMessageCache.keys().next().value;
         state.sessionMessageCache.delete(oldest);
       }
+    }
+
+    // __new__ tab 还没写盘，不能 switchSession/loadHistory
+    if (sessionPath.startsWith('__new__')) {
+      dom.messages.innerHTML = '';
+      showWelcome();
+      return;
     }
 
     // 先通知 omp 切换会话上下文
@@ -1607,10 +1687,37 @@ function checkRepetition(text) {
 }
 
 function triggerRepeatAbort(reason) {
+  if (_repeatDetected) return; // 避免重复通知
   _repeatDetected = true;
-  console.warn(`[重复检测] ${reason}，自动中断`);
-  addNotice('warning', `检测到模型输出重复(${reason})，已自动中断`);
+  console.warn(`[重复检测] ${reason}，中断并等待续行`);
+  addNotice('warning', `检测到模型输出重复(${reason})，已中断，等待自动续行...`);
   abortMessage();
+  // abort 后等 agent 恢复空闲再自动续行
+  waitAndContinue(reason);
+}
+
+// 等待 agent 空闲后自动续行（用于重复检测中断后的自动恢复）
+function waitAndContinue(reason) {
+  const maxWait = 20000; // 最多等 20 秒
+  const interval = 500;
+  let waited = 0;
+  const tryContinue = () => {
+    if (!state.agentRunning) {
+      // agent 已空闲，发送续行消息
+      ompDesktop.send(`[system] 上一轮输出因重复(${reason})被中断，请继续之前的任务，换一种方式表达，避免重复相同内容，给出完整结果。`).catch(err => {
+        console.warn('[重复检测] 续行发送失败:', err);
+      });
+      return;
+    }
+    waited += interval;
+    if (waited < maxWait) {
+      setTimeout(tryContinue, interval);
+    } else {
+      console.warn('[重复检测] 等待 agent 空闲超时，放弃自动续行');
+      addNotice('warning', '自动续行超时，请手动继续');
+    }
+  };
+  setTimeout(tryContinue, 2000); // 先等 2 秒让 abort 完成
 }
 
 function handleMessageUpdate(message, assistantEvent) {

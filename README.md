@@ -64,6 +64,38 @@ Tiffa 是一个基于 `@oh-my-pi/pi-coding-agent` 的便携 AI 助手，做了�
 
 ---
 
+## TTSR — 零成本规则系统
+
+传统做法：每轮把约束写进 systemPrompt，占几百 token，弱模型上下文本来就短，越写越傻。
+
+TTSR（Time Traveling Stream Rules）的做法：规则写在 `.md` 文件里，**流式匹配**——模型输出时实时检测，违规立即拦截，不占一轮 token。
+
+```
+data/agent/rules/
+├── no-bare-codeblock.md      # 代码块必须标注语言
+├── no-filler-opening.md       # 禁止废话开头
+├── no-xml-toolcall.md         # 禁止 XML 格式调用工具
+├── no-md-filepath-link.md     # 禁止链接包装文件路径
+├── no-hardcoded-secrets.md    # 禁止硬编码密钥
+├── no-git-add-all.md          # 禁止 git add -A
+├── no-git-push-force.md       # 禁止 git push --force
+├── cwd-file-placement.md      # 文件必须放在项目目录内
+├── chinese-punctuation.md     # 中文标点
+└── tool-call-commentary.md    # 禁止工具调用废话
+```
+
+### /omfg — 一句话创建规则
+
+不满意模型的行为？直接说：
+
+```
+/omfg 你总是用英文回复
+```
+
+模型会分析问题，生成一条 TTSR 规则文件，即时生效。不用改代码，不用重启。
+
+---
+
 ## 三层记忆
 
 AI 不该是金鱼。
@@ -76,6 +108,10 @@ daily-log/   今天做了什么      "2026-07-25: 品牌重命名、欢迎页重
 
 关了重开，它还认得你。换个项目，它知道上下文。隔了一周，翻日志还能接上。
 
+### 断片补救（Gap-fill）
+
+上下文压缩或进程崩溃时，自动提取关键信息（已读文件、改动文件、决策要点），下一轮对话自动注入。模型不会突然"失忆"。
+
 ---
 
 ## 桌面前端
@@ -84,10 +120,28 @@ Electron GUI，不是终端里的一行行文字：
 
 - 项目侧栏 — 多工作区切换，归档不丢
 - 会话标签 — 每个对话独立模型、独立记忆
+- 模型选择器 — 一键切换本地/云模型
 - 文件浏览器 — 侧栏文件树 + 实时预览
 - Diff 视图 — 代码变更红绿分明
 - Todo 面板 — 任务追踪，不会忘
 - 7 套主题 — 日夜模式一键切
+
+---
+
+## 弱模型增强
+
+不是所有模型都叫 Claude。Tiffa 的七层基础设施让弱模型也能干活：
+
+| 机制 | 效果 |
+|------|------|
+| TTSR 规则拦截 | 零 context 成本约束，每轮省 ~500 token |
+| 废话开头拦截 | 弱模型最高频犯蠢模式，直接砍掉 |
+| XML 工具调用拦截 | 从"完全无法调工具"到能调 |
+| 工具调用废话拦截 | 少说多做，省 token |
+| 取消 eval 注册 | 从"一条命令跑不了"到能完成简单任务 |
+| 断片补救 | 崩溃续行有上下文 |
+| omp 原生 Loop Guard | 精确重复检测 + 自动重试 |
+| omp 原生 Tool Call Loop | 相同参数连续调工具拦截 |
 
 ---
 
@@ -98,7 +152,7 @@ oh-my-tiffa/        ← 这一个文件夹就是全部
 ├── electron/       ← 桌面前端
 ├── npm-global/     ← Bun + 内核
 ├── plugins/        ← 扩展 + 技能
-├── data/           ← 配置 + 记忆 + 会话
+├── data/           ← 配置 + 记忆 + 会话 + 规则
 └── workspace/      ← 你的项目
 ```
 

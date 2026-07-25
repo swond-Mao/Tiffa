@@ -1222,7 +1222,7 @@ body {
 
 .input-wrapper {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
   background: hsl(var(--bg-200));
   border: 1px solid hsl(var(--border-200));
@@ -1448,6 +1448,79 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 启动全屏遮罩 */
+.startup-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: hsl(var(--bg-100));
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  transition: opacity 0.4s ease;
+}
+
+.startup-overlay.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.startup-logo {
+  font-size: 48px;
+  font-weight: 700;
+  color: hsl(var(--accent));
+  letter-spacing: 2px;
+}
+
+.startup-title {
+  font-size: 16px;
+  color: hsl(var(--text-200));
+  opacity: 0.7;
+}
+
+.startup-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid hsl(var(--border-200));
+  border-top-color: hsl(var(--accent));
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 新建对话过渡遮罩 */
+.new-session-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: hsl(var(--bg-100) / 0.85);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  backdrop-filter: blur(4px);
+}
+
+.new-session-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid hsl(var(--border-200));
+  border-top-color: hsl(var(--accent));
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.new-session-text {
+  color: hsl(var(--text-200));
+  font-size: 14px;
 }
 
 .settings-panel {
@@ -1715,7 +1788,7 @@ body {
   top: calc(var(--titlebar-height) + 4px + 36px); /* below titlebar + tab bar */
   left: calc(var(--project-panel-width) + 12px);
   width: 320px;
-  max-height: 300px;
+  max-height: min(500px, calc(100vh - var(--titlebar-height) - 60px));
   background: hsl(var(--bg-200));
   border: 1px solid hsl(var(--border-200));
   border-radius: var(--radius-md);
@@ -1734,7 +1807,7 @@ body {
 }
 
 .model-switcher-list {
-  max-height: 260px;
+  max-height: calc(min(500px, calc(100vh - var(--titlebar-height) - 60px)) - 80px);
   overflow-y: auto;
 }
 

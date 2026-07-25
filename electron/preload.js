@@ -53,6 +53,9 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   onRestarting: (callback) => {
     ipcRenderer.on('omp:restarting', (event, data) => callback(data));
   },
+  onCrashRecovered: (callback) => {
+    ipcRenderer.on('omp:crash-recovered', (event, data) => callback(data));
+  },
 
   // ── 文件系统 ──
   listDir: (dirPath) => ipcRenderer.invoke('fs:listDir', dirPath),
