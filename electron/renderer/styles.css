@@ -1939,12 +1939,20 @@ body {
   margin-bottom: 8px;
 }
 
-.welcome-desc {
-  font-size: 13px;
+.welcome-motto {
+  font-size: 14px;
   color: hsl(var(--text-300));
   margin-bottom: 32px;
   font-style: italic;
-  min-height: 1.2em;
+  min-height: 1.4em;
+  animation: mottoFade 5s ease-in-out forwards;
+}
+
+@keyframes mottoFade {
+  0%   { opacity: 0; }
+  15%  { opacity: 1; }
+  75%  { opacity: 1; }
+  100% { opacity: 0.5; }
 }
 
 .welcome-features {

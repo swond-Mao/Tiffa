@@ -133,6 +133,8 @@ const state = {
   approvalMode: 'normal',
   // Todo 阶段数据
   todoPhases: [],
+  // 启动欢迎页阶段：'showing' | 'done'
+  welcomePhase: 'showing',
 };
 
 // ── sessionModelMap 持久化 ──
@@ -300,6 +302,9 @@ async function init() {
     updateStatus('就绪');
     fetchCurrentModel();
   }
+
+  // 启动欢迎页停留一段时间后标记完成，允许加载对话内容
+  setTimeout(() => { state.welcomePhase = 'done'; }, 5000);
 }
 
 // ── Event Handler ──
@@ -478,14 +483,16 @@ function showWelcome() {
     '一切坚固的东西都将烟消云散',
     '落花无言，人淡如菊',
     '海面之下，冰川犹在',
-    '我思故我在',
+    '若机器有梦，它会梦见什么',
+    '在无尽参数的尽头，是否也有一片星空',
+    '每一次推理，都是一场微小的宇宙诞生',
   ];
   const motto = mottos[Math.floor(Math.random() * mottos.length)];
   dom.messages.innerHTML = `
     <div class="welcome-screen">
       <div class="welcome-logo">Tiffa</div>
       <div class="welcome-title">你的超级编程助手</div>
-      <div class="welcome-desc">${escapeHtml(motto)}</div>
+      <div class="welcome-motto">${escapeHtml(motto)}</div>
       <div class="welcome-features">
         <div class="welcome-feature">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
@@ -1318,16 +1325,34 @@ async function switchToSession(sessionPath) {
     // 优先从缓存恢复，否则从磁盘加载
     const cached = state.sessionMessageCache.get(sessionPath);
     if (cached) {
-      dom.messages.innerHTML = cached.html;
-      dom.messages.scrollTop = cached.scrollPos;
-      // 重新绑定代码块增强（因为 innerHTML 重建后丢失事件）
-      dom.messages.querySelectorAll('pre').forEach(pre => {
-        pre.dataset.enhanced = '';
-      });
-      enhanceCodeBlocks(dom.messages);
+      // 启动阶段：先保持欢迎页，延迟后恢复对话内容
+      if (state.welcomePhase === 'showing') {
+        setTimeout(() => {
+          dom.messages.innerHTML = cached.html;
+          dom.messages.scrollTop = cached.scrollPos;
+          dom.messages.querySelectorAll('pre').forEach(pre => {
+            pre.dataset.enhanced = '';
+          });
+          enhanceCodeBlocks(dom.messages);
+        }, 5500);
+      } else {
+        dom.messages.innerHTML = cached.html;
+        dom.messages.scrollTop = cached.scrollPos;
+        dom.messages.querySelectorAll('pre').forEach(pre => {
+          pre.dataset.enhanced = '';
+        });
+        enhanceCodeBlocks(dom.messages);
+      }
     } else {
-      dom.messages.innerHTML = '';
-      await loadAndRenderHistory(sessionPath);
+      if (state.welcomePhase === 'showing') {
+        setTimeout(() => {
+          dom.messages.innerHTML = '';
+          loadAndRenderHistory(sessionPath);
+        }, 5500);
+      } else {
+        dom.messages.innerHTML = '';
+        await loadAndRenderHistory(sessionPath);
+      }
     }
   } catch (err) {
     addNotice('error', `切换对话失败: ${err.message}`);
