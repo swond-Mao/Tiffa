@@ -1922,6 +1922,12 @@ body {
   padding: 40px 20px;
   text-align: center;
   user-select: none;
+  animation: welcomeFadeIn 2s ease forwards;
+}
+
+@keyframes welcomeFadeIn {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
 }
 
 .welcome-logo {
@@ -1945,13 +1951,6 @@ body {
   margin-bottom: 32px;
   font-style: italic;
   min-height: 1.4em;
-  opacity: 0;
-  animation: mottoFadeIn 2.5s ease forwards;
-}
-
-@keyframes mottoFadeIn {
-  0%   { opacity: 0; }
-  100% { opacity: 1; }
 }
 
 .welcome-features {
