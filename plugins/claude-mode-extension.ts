@@ -1,13 +1,6 @@
 /**
- * claude-mode-extension.ts - omp 扩展 v3.0
+ * claude-mode-extension.ts — omp 扩展 v2.8
  *
- * v3.0: 大幅扩展 REMOVED_TOOLS（14 个无用工具移除）：goal/advise/yield/
- *       vibe_*/init_experiment/run_experiment/log_experiment/update_notes/sonic/resolve；
- *       模型工具列表从 ~40 缩减到 ~26，减少弱模型误调浪费
- * v2.9: hub 工具从工具列表移除（单 agent 场景无用，与 eval 同处理）；
- *       tool_call hook 新增静默工具调用检测（连续3次无文本说明->steer）；
- *       tool_call hook 新增 hub/peer 工具拦截（session_start 移除后的兜底）；
- *       移除 tool-call-commentary.md TTSR 规则（条件对 function calling 无效）
  * v2.8: 移除重复输出检测器（副作用大于收益）；保留 error 独立计数器
  * v2.7: error 独立计数器（MAX_ERROR_CONTINUE=1），避免确定性错误5次空转；
  *       complete/aborted 时重置 error 计数器；用户取消续行也重置 error 计数器
@@ -27,7 +20,7 @@
  * 保留：
  * - AGENTS.md / MEMORY.md / PROJECT.md 注入
  * - gap-fill 断片补救
- * - eval + hub 工具从工具列表移除（模型不可见）
+ * - eval 工具硬拦截
  * - 危险路径 / 配置文件自改 / workspace mkdir 拦截
  * - 权限契约自动审批
  * - session.compacting gap-fill 提取 + constraints 关键条目重注入
@@ -231,6 +224,9 @@ export default async function (pi: any) {
   // ── 静默工具调用检测（v2.9：拦截连续无文本说明的工具调用）──
   let silentToolCallCount = 0        // 本轮连续无文本的工具调用计数
   const SILENT_TOOL_CALL_THRESHOLD = 3  // 连续 N 次无文本后干预
+  const HUB_CALL_THRESHOLD = 2      // hub 单独计数，更激进
+  let hubCallCount = 0               // 本轮 hub 调用计数
+  const USELESS_PEER_TOOLS = new Set(["hub"])  // 单 agent 场景无意义的工具
 
   // ── 约束违反检测器 ──
   // v2.6: 裸URL、无语言代码块、废话开头、工具调用不汇报 已迁移至 TTSR 规则（data/agent/rules/）
@@ -260,45 +256,25 @@ export default async function (pi: any) {
   }
 
   log("init", [
-    "=== claude-mode extension loaded (v2.9) ===",
+    "=== claude-mode extension loaded (v2.6) ===",
     `pid: ${process.pid}`,
     `agentDir: ${AGENT_DIR}`,
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
 
   // ═══════════════════════════════════════════════════════════
-  // 0. session_start - 移除无用工具（从 LLM 工具列表中彻底移除，模型不可见）
-  //    eval: Windows 管道死锁问题，已禁用
-  //    hub: 单 agent 场景无 peer agent 可通信，弱模型会乱调浪费 prefill
-  //    goal: token/时间预算目标跟踪，单 agent 单任务场景不需要
-  //    advise: advisor 代理提建议，无 advisor 代理
-  //    yield: 子代理结构化结果返回，无子代理体系
-  //    vibe_spawn/send/wait/kill/list: 持久化 worker 多代理编排，无此场景
-  //    init/run/log/update_notes: autoresearch 自动调优框架，Tiffa 不需要
-  //    sonic: 低推理子代理，无独立使用场景
-  //    resolve: 挂起操作决议（apply/reject），Tiffa 无此需求
+  // 0. session_start — 移除 eval 工具（从 LLM 工具列表中彻底移除，模型不可见）
   // ═══════════════════════════════════════════════════════════
-  const REMOVED_TOOLS = [
-    "eval", "hub",                          // 旧版移除
-    "goal", "advise", "yield",              // 预算/顾问/子代理返回
-    "vibe_spawn", "vibe_send", "vibe_wait",  // 多代理 worker
-    "vibe_kill", "vibe_list",                // 多代理 worker
-    "init_experiment", "run_experiment",     // autoresearch
-    "log_experiment", "update_notes",        // autoresearch
-    "sonic",                                 // 低推理子代理
-    "resolve"                                // 挂起操作决议
-  ]
   pi.on("session_start", async () => {
     try {
       const all = pi.getActiveTools()
-      const filtered = all.filter(t => !REMOVED_TOOLS.includes(t))
-      if (filtered.length < all.length) {
+      if (all.includes("eval")) {
+        const filtered = all.filter(t => t !== "eval")
         await pi.setActiveTools(filtered)
-        const removed = all.filter(t => !filtered.includes(t))
-        log("session_start.tools_removed", `removed [${removed.join(", ")}] from active tools (${all.length} -> ${filtered.length})`)
+        log("session_start.eval_removed", `removed eval from active tools (${all.length} → ${filtered.length})`)
       }
     } catch (err: any) {
-      log("session_start.tools_remove_error", err?.message || String(err))
+      log("session_start.eval_remove_error", err?.message || String(err))
     }
   })
 
@@ -309,6 +285,7 @@ export default async function (pi: any) {
     try {
       agentTurnCount++
       silentToolCallCount = 0   // v2.9: 新轮次重置
+      hubCallCount = 0          // v2.9: 新轮次重置
       const injections: string[] = []
 
       // 1) AGENTS.md 每轮注入
@@ -442,6 +419,19 @@ export default async function (pi: any) {
     try {
       const tool = event.toolName || ""
       const input = event.input || {}
+
+      // ── v2.9: 静默工具调用检测 ──
+      // hub 等单 agent 场景无意义的工具，单独更激进拦截
+      if (USELESS_PEER_TOOLS.has(tool)) {
+        hubCallCount++
+        if (hubCallCount >= HUB_CALL_THRESHOLD) {
+          log("tool_call.blocked", `${tool} → useless peer tool (count=${hubCallCount})`)
+          return {
+            block: true,
+            reason: `[claude-mode] 工具 "${tool}" 在当前单 agent 场景下无意义。当前没有其他 agent 可以通信。请改用其他方式完成任务，或直接向用户说明情况。`,
+          }
+        }
+      }
 
       // 连续无文本说明的工具调用检测
       silentToolCallCount++
@@ -1161,6 +1151,9 @@ export default async function (pi: any) {
         if (silentToolCallCount > 0) {
           log("silent_tool_call.reset", `had text output, reset silentToolCallCount from ${silentToolCallCount}`)
           silentToolCallCount = 0
+        }
+        if (hubCallCount > 0) {
+          hubCallCount = 0
         }
       }
 
