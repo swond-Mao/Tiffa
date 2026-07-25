@@ -460,7 +460,7 @@ const THEME_STYLE_ID = 'tiffa-theme-vars'
 
 // localStorage key（从 omp 迁移到 tiffa）
 const LS_THEME_KEY = 'tiffa-theme'
-const LS_MODE_KEY = 'tiffa-theme-mode'
+const LS_MODE_KEY = 'tiffa-theme-mode';
 
 // ── 旧 key 迁移：首次检测到旧 key 时自动迁移到新 key ──
 (function migrateOldThemeKeys() {
