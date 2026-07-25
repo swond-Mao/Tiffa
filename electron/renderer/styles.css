@@ -1922,7 +1922,7 @@ body {
   padding: 40px 20px;
   text-align: center;
   user-select: none;
-  animation: welcomeFadeIn 2s ease forwards;
+  animation: welcomeFadeIn 4s ease forwards;
 }
 
 @keyframes welcomeFadeIn {
