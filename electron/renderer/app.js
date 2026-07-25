@@ -965,40 +965,52 @@ async function selectProject(dirName) {
       state.activeSessionPaths.add(latest.path);
       renderSessionTabs();
 
-      if (state.agentRunning) {
-        // agent 正在跑：加载历史 + 创建接续元素，不 switchSession（避免干扰运行中的任务）
-        try {
-          dom.messages.innerHTML = '';
-          await loadAndRenderHistory(latest.path);
-        } catch {}
-        const el = createAssistantMessageElement();
-        dom.messages.appendChild(el);
-        state.currentAssistantEl = el;
-        state.currentTextBuffer = '';
-        scrollToBottom();
-      } else {
-        try {
-          await ompDesktop.switchSession(latest.path);
-          // 切换会话后恢复该对话之前使用的模型
-          const saved = state.sessionModelMap[latest.path];
-          if (saved && saved.provider && saved.modelId) {
-            try {
-              await ompDesktop.setModel(saved.provider, saved.modelId);
-              state.currentModel = saved.modelId;
-              state.currentProvider = saved.provider;
-              dom.currentModel.textContent = saved.modelId;
-            } catch {}
+      const doLoad = async () => {
+        if (state.agentRunning) {
+          // agent 正在跑：加载历史 + 创建接续元素，不 switchSession（避免干扰运行中的任务）
+          try {
+            dom.messages.innerHTML = '';
+            await loadAndRenderHistory(latest.path);
+          } catch {}
+          const el = createAssistantMessageElement();
+          dom.messages.appendChild(el);
+          state.currentAssistantEl = el;
+          state.currentTextBuffer = '';
+          scrollToBottom();
+        } else {
+          try {
+            await ompDesktop.switchSession(latest.path);
+            // 切换会话后恢复该对话之前使用的模型
+            const saved = state.sessionModelMap[latest.path];
+            if (saved && saved.provider && saved.modelId) {
+              try {
+                await ompDesktop.setModel(saved.provider, saved.modelId);
+                state.currentModel = saved.modelId;
+                state.currentProvider = saved.provider;
+                dom.currentModel.textContent = saved.modelId;
+              } catch {}
+            }
+            dom.messages.innerHTML = '';
+            await loadAndRenderHistory(latest.path);
+          } catch (err) {
+            showWelcome();
           }
-          dom.messages.innerHTML = '';
-          await loadAndRenderHistory(latest.path);
-        } catch (err) {
-          showWelcome();
         }
+      };
+
+      if (state.welcomePhase === 'showing') {
+        setTimeout(doLoad, 5500);
+      } else {
+        await doLoad();
       }
     }
   } else {
-    dom.messages.innerHTML = '';
-    showWelcome();
+    if (state.welcomePhase === 'showing') {
+      // 启动阶段不覆盖欢迎页
+    } else {
+      dom.messages.innerHTML = '';
+      showWelcome();
+    }
   }
 }
 
