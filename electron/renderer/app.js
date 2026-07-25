@@ -491,7 +491,7 @@ function showWelcome() {
   dom.messages.innerHTML = `
     <div class="welcome-screen">
       <div class="welcome-logo">Tiffa</div>
-      <div class="welcome-title">你的全能AI助手</div>
+      <div class="welcome-title">与万物对谈</div>
       <div class="welcome-motto">${escapeHtml(motto)}</div>
       <div class="welcome-features">
         <div class="welcome-feature">
