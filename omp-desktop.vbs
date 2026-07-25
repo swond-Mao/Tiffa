@@ -1,4 +1,4 @@
-' omp Desktop Launcher - 无控制台窗口启动 Electron
+' Tiffa Desktop Launcher - 无控制台窗口启动 Electron
 ' 放置在便携包根目录，双击运行
 
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -14,7 +14,7 @@ electronDir = scriptDir & "\electron"
 
 ' 检查 Electron 是否存在
 If Not fso.FileExists(electronExe) Then
-    MsgBox "未找到 Electron：" & vbCrLf & electronExe & vbCrLf & vbCrLf & "请确认 electron 目录完整。", vbCritical, "omp 桌面版"
+    MsgBox "未找到 Electron：" & vbCrLf & electronExe & vbCrLf & vbCrLf & "请确认 electron 目录完整。", vbCritical, "Tiffa 桌面版"
     WScript.Quit 1
 End If
 

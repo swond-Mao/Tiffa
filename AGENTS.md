@@ -1,4 +1,4 @@
-# AGENTS.md — oh-my-tiffa 项目规范
+# AGENTS.md — Tiffa 项目规范
 
 ## 项目概述
 

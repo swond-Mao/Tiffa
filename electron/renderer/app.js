@@ -1,5 +1,5 @@
 /**
- * tiffa - Renderer Application v1.4
+ * Tiffa - Renderer Application v1.4
  * 
  * Layout: Left project panel + Top session tabs + Chat + File sidebar
  */
@@ -384,7 +384,7 @@ function handleEvent(event) {
       break;
     case 'session_info_update':
       if (event.title) {
-        document.title = `tiffa - ${event.title}`;
+        document.title = `Tiffa - ${event.title}`;
         updateSessionTabTitle(event.title);
       }
       break;
@@ -466,17 +466,61 @@ function handleExited(data) {
 // ── Welcome Screen ──
 function showWelcome() {
   if (dom.messages.children.length > 0) return;
+  const mottos = [
+    '知识是基座，模型是执行器',
+    '弱模型也能干大事，靠的是基础设施',
+    '不是模型不行，是你没给它工作台',
+    '量化到 1.58bit，照样写代码',
+    '本地部署，数据不出门',
+    '打工人打工魂，AI 也是生产力',
+    '7 套主题换着穿，每天一个新心情',
+    '三层记忆架构，比你老板记得还多',
+    'Claude 化扩展，让裸模变工作台',
+    '便携包一个文件夹带走，不留痕迹',
+    'Bun 跑 omp，快到飞起',
+    'Diff 视图一看便知，Todo 面板不会忘',
+  ];
+  const motto = mottos[Math.floor(Math.random() * mottos.length)];
   dom.messages.innerHTML = `
     <div class="welcome-screen">
-      <div class="welcome-logo">tiffa</div>
-      <div class="welcome-title">oh-my-tiffa</div>
-      <div class="welcome-desc">AI 辅助编码助手 · 知识是基座，模型是执行器</div>
-      <div class="welcome-tips">
-        <div class="welcome-tip">左侧栏切换项目，顶栏切换对话</div>
-        <div class="welcome-tip">点击右上角 📂 浏览工作目录文件</div>
-        <div class="welcome-tip">点击模型名称快速切换 AI 模型</div>
-        <div class="welcome-tip">输入消息开始对话</div>
+      <div class="welcome-logo">Tiffa</div>
+      <div class="welcome-title">你的超级编程助手</div>
+      <div class="welcome-desc">${escapeHtml(motto)}</div>
+      <div class="welcome-features">
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+          <span>记忆管理</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>项目管理</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <span>弱模型友好</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <span>7 套主题</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          <span>Diff 视图</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Todo 面板</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <span>本地部署</span>
+        </div>
+        <div class="welcome-feature">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>便携包</span>
+        </div>
       </div>
+      <div class="welcome-hint">输入消息开始对话</div>
     </div>`;
 }
 
@@ -1991,7 +2035,7 @@ function handleExtensionUI(event) {
       ompDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'setTitle':
-      document.title = `tiffa - ${event.title || ''}`;
+      document.title = `Tiffa - ${event.title || ''}`;
       ompDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'cancel':

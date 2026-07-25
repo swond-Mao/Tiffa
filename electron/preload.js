@@ -1,5 +1,5 @@
 /**
- * tiffa 桌面版 - 预加载脚本
+ * Tiffa 桌面版 - 预加载脚本
  *
  * 安全 IPC 桥接，连接渲染进程和主进程。
  * 通过 contextBridge 暴露受控 API。
