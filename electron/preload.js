@@ -1,5 +1,5 @@
 /**
- * omp 桌面版 - 预加载脚本
+ * tiffa 桌面版 - 预加载脚本
  *
  * 安全 IPC 桥接，连接渲染进程和主进程。
  * 通过 contextBridge 暴露受控 API。
@@ -83,11 +83,18 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   deleteSession: (sessionPath) => ipcRenderer.invoke('sessions:deleteSession', sessionPath),
   listArchivedSessions: (projectDirName) => ipcRenderer.invoke('sessions:listArchivedSessions', projectDirName),
   restoreSession: (sessionPath) => ipcRenderer.invoke('sessions:restoreSession', sessionPath),
+  getUserEntries: (sessionPath) => ipcRenderer.invoke('sessions:getUserEntries', sessionPath),
+  exportSessionHtml: (sessionPath) => ipcRenderer.invoke('sessions:exportHtml', sessionPath),
+  getRemovedCwds: () => ipcRenderer.invoke('sessions:getRemovedCwds'),
+  addRemovedCwd: (cwd) => ipcRenderer.invoke('sessions:addRemovedCwd', cwd),
+  removeRemovedCwd: (cwd) => ipcRenderer.invoke('sessions:removeRemovedCwd', cwd),
 
   // ── 模型配置 ──
   readModelsYml: () => ipcRenderer.invoke('models:read'),
   writeModelsYml: (content) => ipcRenderer.invoke('models:write', content),
   restartOmp: () => ipcRenderer.invoke('models:restart'),
+  writeOmpProvider: (providerId, cfg) => ipcRenderer.invoke('models:writeProvider', providerId, cfg),
+  deleteOmpProvider: (providerId) => ipcRenderer.invoke('models:deleteProvider', providerId),
 
   // ── 工作区/项目管理 ──
   openFolderDialog: () => ipcRenderer.invoke('workspace:openFolderDialog'),

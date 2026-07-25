@@ -1,26 +1,27 @@
 {
-  "name": "omp-desktop",
-  "version": "1.0.0",
-  "description": "oh-my-pi Desktop - Electron frontend for omp coding agent",
+  "name": "oh-my-tiffa",
+  "version": "1.4.0",
+  "description": "oh-my-tiffa - Portable AI coding assistant with Electron frontend",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win portable",
     "dev": "electron . --dev"
   },
-  "author": "omp-portable",
+  "author": "tiffa",
   "license": "MIT",
   "devDependencies": {
     "electron-builder": "^25.0.0"
   },
   "dependencies": {
     "electron": "^33.0.0",
+    "highlight.js": "^11.10.0",
     "marked": "^15.0.0",
-    "highlight.js": "^11.10.0"
+    "yaml": "^2.9.0"
   },
   "build": {
-    "appId": "com.omp.desktop",
-    "productName": "omp Desktop",
+    "appId": "com.tiffa.desktop",
+    "productName": "tiffa",
     "directories": {
       "output": "../dist"
     },
@@ -29,7 +30,7 @@
       "icon": null
     },
     "portable": {
-      "artifactName": "omp-desktop-portable-${version}.exe"
+      "artifactName": "tiffa-portable-${version}.exe"
     },
     "files": [
       "main.js",

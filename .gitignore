@@ -21,6 +21,7 @@ data/agent/agent.db*
 data/agent/models.db*
 data/agent/hidden-models.json
 data/agent/session-model-map.json
+data/agent/projects.json
 data/agent/xml-translation-enabled
 data/agent/models.yml.bak*
 data/agent/models.yml.example
