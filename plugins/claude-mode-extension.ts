@@ -567,9 +567,6 @@ export default async function (pi: any) {
           const role = m.role || "unknown"
           const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")
           const truncated = content.length > 2000 ? content.slice(0, 2000) + "..." : content
-          if (content.length > 2000) {
-            try { pi.notify?.(`compact 截断: 消息过长(${content.length}字)，已截断至2000字`, "info") } catch {}
-          }
           return `[${role}] ${truncated}`
         }).join("\n\n")
         writeFileSync(inboxPath, formatted, "utf8")
