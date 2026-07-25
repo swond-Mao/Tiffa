@@ -4,15 +4,16 @@
       "cwd": "G:\\oh-my-pi\\workspace\\ppt制作",
       "displayName": "ppt制作",
       "addedAt": "2026-07-24T05:19:07.228Z",
-      "lastOpenedAt": "2026-07-25T05:47:37.398Z",
+      "lastOpenedAt": "2026-07-25T07:16:03.530Z",
       "archived": false
     },
     {
       "cwd": "G:\\oh-my-pi\\workspace\\omp调试",
       "displayName": "omp调试",
       "addedAt": "2026-07-24T07:33:58.137Z",
-      "lastOpenedAt": "2026-07-25T05:47:37.389Z",
-      "archived": false
+      "lastOpenedAt": "2026-07-25T07:15:52.158Z",
+      "archived": true,
+      "archivedAt": "2026-07-25T07:16:03.508Z"
     }
   ]
 }
