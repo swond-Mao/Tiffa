@@ -221,6 +221,13 @@ export default async function (pi: any) {
   const AUTO_CONTINUE_DELAY_MS = 2000
   let pendingContinueTimer: ReturnType<typeof setTimeout> | null = null
 
+  // ── 静默工具调用检测（v2.9：拦截连续无文本说明的工具调用）──
+  let silentToolCallCount = 0        // 本轮连续无文本的工具调用计数
+  const SILENT_TOOL_CALL_THRESHOLD = 3  // 连续 N 次无文本后干预
+  const HUB_CALL_THRESHOLD = 2      // hub 单独计数，更激进
+  let hubCallCount = 0               // 本轮 hub 调用计数
+  const USELESS_PEER_TOOLS = new Set(["hub"])  // 单 agent 场景无意义的工具
+
   // ── 约束违反检测器 ──
   // v2.6: 裸URL、无语言代码块、废话开头、工具调用不汇报 已迁移至 TTSR 规则（data/agent/rules/）
   // 保留违反检测框架供未来添加非 TTSR 适用的检测器
@@ -277,6 +284,8 @@ export default async function (pi: any) {
   pi.on("before_agent_start", async (event: any, ctx: any) => {
     try {
       agentTurnCount++
+      silentToolCallCount = 0   // v2.9: 新轮次重置
+      hubCallCount = 0          // v2.9: 新轮次重置
       const injections: string[] = []
 
       // 1) AGENTS.md 每轮注入
@@ -410,6 +419,30 @@ export default async function (pi: any) {
     try {
       const tool = event.toolName || ""
       const input = event.input || {}
+
+      // ── v2.9: 静默工具调用检测 ──
+      // hub 等单 agent 场景无意义的工具，单独更激进拦截
+      if (USELESS_PEER_TOOLS.has(tool)) {
+        hubCallCount++
+        if (hubCallCount >= HUB_CALL_THRESHOLD) {
+          log("tool_call.blocked", `${tool} → useless peer tool (count=${hubCallCount})`)
+          return {
+            block: true,
+            reason: `[claude-mode] 工具 "${tool}" 在当前单 agent 场景下无意义。当前没有其他 agent 可以通信。请改用其他方式完成任务，或直接向用户说明情况。`,
+          }
+        }
+      }
+
+      // 连续无文本说明的工具调用检测
+      silentToolCallCount++
+      if (silentToolCallCount >= SILENT_TOOL_CALL_THRESHOLD) {
+        log("tool_call.silent_warn", `silentToolCallCount=${silentToolCallCount}, tool=${tool}`)
+        // 不 block，通过 steer 要求模型先汇报
+        silentToolCallCount = 0  // 重置，避免反复 steer
+        return {
+          steer: "你已连续调用多次工具但没有向用户说明你在做什么。请先用中文简要说明当前的进展和发现，再继续操作。",
+        }
+      }
 
       // 危险工具直接拒绝
       const tier = getToolTier(tool)
@@ -1114,6 +1147,14 @@ export default async function (pi: any) {
       const responseText = event.text || event.content || event.message || ""
       if (typeof responseText === "string" && responseText) {
         lastAssistantOutput = responseText
+        // v2.9: 模型输出了文本，说明不是静默调用，重置计数器
+        if (silentToolCallCount > 0) {
+          log("silent_tool_call.reset", `had text output, reset silentToolCallCount from ${silentToolCallCount}`)
+          silentToolCallCount = 0
+        }
+        if (hubCallCount > 0) {
+          hubCallCount = 0
+        }
       }
 
       // 审计日志
@@ -1166,5 +1207,5 @@ export default async function (pi: any) {
     }
   })
 
-  log("init", "=== claude-mode extension v2.6 ready ===")
+  log("init", "=== claude-mode extension v2.9 ready ===")
 }
