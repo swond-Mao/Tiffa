@@ -1945,14 +1945,13 @@ body {
   margin-bottom: 32px;
   font-style: italic;
   min-height: 1.4em;
-  animation: mottoFade 5s ease-in-out forwards;
+  opacity: 0;
+  animation: mottoFadeIn 2.5s ease forwards;
 }
 
-@keyframes mottoFade {
+@keyframes mottoFadeIn {
   0%   { opacity: 0; }
-  15%  { opacity: 1; }
-  75%  { opacity: 1; }
-  100% { opacity: 0.5; }
+  100% { opacity: 1; }
 }
 
 .welcome-features {
