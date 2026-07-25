@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v2.8) + Electron 桌面前端 (v1.5)。
+oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v3.0) + Electron 桌面前端 (v1.5)。
 
 ## 关键路径
 
@@ -15,11 +15,12 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | `node\node.exe` | Node.js 运行时 |
 | `data\agent\` | 配置目录 (config.yml, models.yml, projects.json) |
 | `data\memory\` | 长期记忆目录 (MEMORY.md, constraints.md, inbox/, daily-log/) |
-| `plugins\claude-mode-extension.ts` | Claude 化扩展 (v2.8) |
+| `plugins\claude-mode-extension.ts` | Claude 化扩展 (v3.0) |
 | `plugins\xml-tool-translator.ts` | XML 工具调用翻译层 (v7.0, 已退役) |
 | `skills\` | 专业技能目录 (18 个 skill) |
 | `workspace\` | 工作区根目录 |
 | `omp-desktop.exe` | 桌面启动器 (C# winexe) |
+| `install.bat` / `install.ps1` | 一键安装脚本（Node -> Bun -> omp -> Electron -> models.yml） |
 
 ## 启动方式
 
@@ -40,7 +41,7 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | kimi | kimi-k3 | 最新旗舰，262K 上下文，支持推理+视觉 |
 | minimax | MiniMax-M3 | 100 万上下文，MiniMax-M2.7 (204.8K) |
 | xiaomi | mimo-v2-flash / mimo-v2-pro | 轻量快速 / 旗舰推理 |
-| qwen | localmodel | 本地模型 (llama.cpp，通过 frp 中继) |
+| qwen | localmodel | 本地模型 (llama.cpp，通过 llm-panel 代理)；已配置 `providerHandlesStreamTimeouts: true` 避免大上下文 prefill 超时 |
 
 ### 模型角色 (config.yml)
 
@@ -56,11 +57,11 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 
 ---
 
-## Claude 化扩展 (v2.8)
+## Claude 化扩展 (v3.0)
 
 扩展文件：`plugins/claude-mode-extension.ts`，通过 `-e` 参数加载。
 
-### 架构变化 (v1.0 → v2.8)
+### 架构变化 (v1.0 → v3.0)
 
 | 版本 | 变化 |
 |------|------|
@@ -78,6 +79,8 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | v2.6 | **彻底弃用 omp 原生续行**：所有续行统一走 sendUserMessage + 2秒延迟，避免 omp 内部同步续行竞态崩溃；新增续行计数器（上限5次）+ 用户输入自动取消待定续行 |
 | v2.7 | **error 独立计数器**（MAX_ERROR_CONTINUE=1）：确定性错误最多续行1次，不再5次空转；complete/aborted/用户取消时重置 error 计数器 |
 | v2.8 | **移除 detectRepetitiveOutput**：正则检测重复输出误杀率过高，三次验证（代码层/Qwen规则/K3规则）均不可行；保留 error 独立计数器 |
+| v2.9 | **hub 工具从工具列表移除**（与 eval 同处理，模型不可见）；**静默工具调用检测**（连续 3 次无文本说明 -> steer 引导中文汇报）；**删除无效 TTSR 规则** tool-call-commentary.md |
+| v3.0 | **大幅扩展 REMOVED_TOOLS**：14 个无用工具移除（goal/advise/yield/vibe_*/init_experiment/run_experiment/log_experiment/update_notes/sonic/resolve），模型工具列表从 ~40 缩减到 ~26，减少弱模型误调浪费 prefill |
 
 ### TTSR 规则系统（零 Context 成本约束）
 
@@ -96,9 +99,41 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | `no-git-push-force.md` | 禁止 git push --force | tool | always |
 | `cwd-file-placement.md` | 文件必须放在项目目录内 | tool:write(*) | never |
 | `chinese-punctuation.md` | 中文标点 | text | never |
-| `tool-call-commentary.md` | 禁止工具调用废话 | text | never |
+
+> `tool-call-commentary.md` 已删除（条件对 function calling 无效，v2.9）
 
 **从 constraints.md 迁移**：代码块标注、废话开头、XML工具调用、工具调用废话、裸URL（前端处理）、中文标点、文件路径链接、文件存放位置、硬编码密钥、git add -A、git push --force 已全部迁至 TTSR。constraints.md 保留语义/行为类约束（无法用正则检测）。
+
+### TTSR 局限性：无法拦截 function calling 通道
+
+TTSR 规则匹配模型的**文本流输出**。当 omp 使用结构化 function calling（JSON 工具调用）时，工具调用不走文本流，TTSR 无法拦截。这意味着：
+- TTSR **能拦截**：裸代码块、废话开头、XML 工具调用（文本中的）、裸 URL、中文标点、文件路径链接
+- TTSR **不能拦截**：连续工具调用无文字说明、hub 工具反复调用、语义/行为违规
+
+**v3.0 解决方案**：14 个无用工具已从工具列表中移除（模型不可见），不再有误调风险。扩展层 `tool_call` hook 仍保留通用静默工具调用检测（连续 3 次工具调用无文本说明 -> steer 引导用中文汇报进度）。
+
+### 已移除工具（v2.9 + v3.0）
+
+omp 内置 40 个工具中，以下 16 个已在 session_start 时从工具列表移除（模型不可见，零 token 浪费）：
+
+| 移除版本 | 工具 | 移除理由 |
+|---------|------|---------|
+| v2.4 | `eval` | Windows 管道死锁问题 |
+| v2.9 | `hub` | 单 agent 场景无 peer agent，弱模型乱调浪费 prefill |
+| v3.0 | `goal` | token/时间预算目标跟踪，单 agent 单任务不需要 |
+| v3.0 | `advise` | advisor 代理提建议，无 advisor 代理 |
+| v3.0 | `yield` | 子代理结构化结果返回，无子代理体系 |
+| v3.0 | `vibe_spawn` | 持久化 worker 多代理编排，无此场景 |
+| v3.0 | `vibe_send` | 同上 |
+| v3.0 | `vibe_wait` | 同上 |
+| v3.0 | `vibe_kill` | 同上 |
+| v3.0 | `vibe_list` | 同上 |
+| v3.0 | `init_experiment` | autoresearch 自动调优框架，Tiffa 不需要 |
+| v3.0 | `run_experiment` | 同上 |
+| v3.0 | `log_experiment` | 同上 |
+| v3.0 | `update_notes` | 同上 |
+| v3.0 | `sonic` | 低推理子代理，无独立使用场景 |
+| v3.0 | `resolve` | 挂起操作决议（apply/reject），Tiffa 无此需求 |
 
 ### /omfg 命令（一句话创建 TTSR 规则）
 
@@ -369,6 +404,37 @@ Skills 目录：`G:\oh-my-pi\skills\`
 | xlsx | Excel 助手 |
 
 **注意**：用户明确说"用 XX skill"才加载对应 skill。不要主动建议或预判用户要哪个 skill——听到明确指令才动。
+
+---
+
+## 一键安装脚本
+
+`install.bat` 是薄包装，调用 `install.ps1`（UTF-8 编码，通过 .NET API 写入避免编码问题）。
+
+**5 步幂等安装**：
+
+| 步骤 | 检查 | 行为 |
+|------|------|------|
+| 1 | Node.js | 检查 `node\node.exe` 存在 |
+| 2 | Bun | `bun --version` 验证 |
+| 3 | omp 核心 | `npm-global\node_modules\@oh-my-pi\pi-coding-agent` 存在 |
+| 4 | Electron 依赖 | `electron\node_modules` 存在 |
+| 5 | models.yml | 存在且非空 |
+
+**注意**：不覆盖已有 models.yml 和 config.yml。bat 文件必须 ASCII 编码；ps1 必须 UTF-8 编码。
+
+---
+
+## 本地模型超时配置
+
+omp 内部有 `streamFirstEventTimeoutMs`（首 token 超时，约 30-60 秒）和 `streamIdleTimeoutMs`（chunk 间超时）机制。本地 llama.cpp 大上下文 prefill 可能耗时 60-90 秒，超过默认超时会导致 omp 中止流 -> 崩溃 -> Electron 自动重启 -> 同样的大上下文 prefill -> 崩溃循环。
+
+**解决方案**：在 models.yml 的 `qwen` provider 中设置：
+- `providerHandlesStreamTimeouts: true` - 让 omp 跳过对此 provider 的流超时检查
+- `streamFirstEventTimeoutMs: 300000` - 5 分钟首 token 超时（备用）
+- `streamIdleTimeoutMs: 300000` - 5 分钟 chunk 间超时（备用）
+
+仅对本地 qwen provider 生效，云 API（Kimi、Volcengine 等）不受影响。
 
 ---
 
