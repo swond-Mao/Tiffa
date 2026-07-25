@@ -534,6 +534,9 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // 隐藏原生菜单栏
+  mainWindow.setMenu(null);
+
   // 等渲染进程准备好再显示窗口，避免黑屏闪烁
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
