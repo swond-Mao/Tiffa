@@ -1,6 +1,11 @@
 /**
- * claude-mode-extension.ts — omp 扩展 v2.3
+ * claude-mode-extension.ts — omp 扩展 v2.8
  *
+ * v2.8: 移除重复输出检测器（副作用大于收益）；保留 error 独立计数器
+ * v2.7: error 独立计数器（MAX_ERROR_CONTINUE=1），避免确定性错误5次空转；
+ *       complete/aborted 时重置 error 计数器；用户取消续行也重置 error 计数器
+ * v2.6: session_stop 续行全面改用 sendUserMessage + 延迟，彻底弃用 omp 原生 { continue: true }
+ *       避免 omp 内部同步续行的竞态条件导致进程崩溃；新增续行计数器（上限5次）+ 用户输入取消机制
  * v2.3: XML 工具调用自动纠正（检测→自动发约束+继续，2次失败才通知用户）
  * v2.2: 工具调用纪律改为仅第1轮约定+违反检测触发重申；恢复敏感信息检测、长时间命令执行规范
  *
@@ -208,42 +213,22 @@ export default async function (pi: any) {
   let xmlAutoRetryCount = 0
   const XML_AUTO_RETRY_MAX = 2
 
+  // ── 自动续行状态（v2.8：error 独立计数器；重复检测已移除）──
+  let autoContinueCount = 0
+  const MAX_AUTO_CONTINUE = 5
+  let consecutiveErrorCount = 0
+  const MAX_ERROR_CONTINUE = 1       // error 只续行1次：确定性错误重试无意义
+  const AUTO_CONTINUE_DELAY_MS = 2000
+  let pendingContinueTimer: ReturnType<typeof setTimeout> | null = null
+
   // ── 约束违反检测器 ──
+  // v2.6: 裸URL、无语言代码块、废话开头、工具调用不汇报 已迁移至 TTSR 规则（data/agent/rules/）
+  // 保留违反检测框架供未来添加非 TTSR 适用的检测器
   const VIOLATION_DETECTIONS: Array<{
     name: string
     test: (text: string) => boolean
     remedy: string
-  }> = [
-    {
-      name: "裸URL",
-      test: (t) => {
-        const stripped = t.replace(/```[\s\S]*?```/g, "")
-        return /(?:^|\s|[,，;；])(https?:\/\/[^\s)\]"']+)/.test(stripped) &&
-               !/\[.*?\]\(https?:\/\/[^)]+\)/.test(stripped.replace(/```[\s\S]*?```/g, ""))
-      },
-      remedy: "输出链接必须用 Markdown 格式 [显示文字](URL)，禁止裸 URL",
-    },
-    {
-      name: "无语言代码块",
-      test: (t) => /(^|\n)```\s*\n/.test(t),
-      remedy: "代码块必须标注语言，如 ```python、```javascript，不能只写 ```",
-    },
-    {
-      name: "废话开头",
-      test: (t) => /^(好的[，,]我来|好的[，,]我|当然[，,]我|没问题[，,]我|让我来)/.test(t.trim()),
-      remedy: "禁止'好的，我来帮您'等废话开头，直接进入主题",
-    },
-    {
-      name: "工具调用不汇报",
-      test: (t) => {
-        const stripped = t.replace(/```[\s\S]*?```/g, "").trim()
-        const hasChinese = /[\u4e00-\u9fff]/.test(stripped)
-        const tooShort = stripped.length < 20
-        return !hasChinese || tooShort
-      },
-      remedy: "每次调用工具后，必须用中文文字说明你的发现或判断——不能只调工具不说话",
-    },
-  ]
+  }> = []
 
   function detectViolations(text: string): string[] {
     const violations: string[] = []
@@ -255,6 +240,7 @@ export default async function (pi: any) {
     return violations
   }
 
+
   function readConstraints(): string {
     try {
       if (!existsSync(CONSTRAINTS_PATH)) return ""
@@ -263,11 +249,27 @@ export default async function (pi: any) {
   }
 
   log("init", [
-    "=== claude-mode extension loaded (v2.3) ===",
+    "=== claude-mode extension loaded (v2.6) ===",
     `pid: ${process.pid}`,
     `agentDir: ${AGENT_DIR}`,
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
+
+  // ═══════════════════════════════════════════════════════════
+  // 0. session_start — 移除 eval 工具（从 LLM 工具列表中彻底移除，模型不可见）
+  // ═══════════════════════════════════════════════════════════
+  pi.on("session_start", async () => {
+    try {
+      const all = pi.getActiveTools()
+      if (all.includes("eval")) {
+        const filtered = all.filter(t => t !== "eval")
+        await pi.setActiveTools(filtered)
+        log("session_start.eval_removed", `removed eval from active tools (${all.length} → ${filtered.length})`)
+      }
+    } catch (err: any) {
+      log("session_start.eval_remove_error", err?.message || String(err))
+    }
+  })
 
   // ═══════════════════════════════════════════════════════════
   // 1. before_agent_start — 记忆注入 + 约束重申 + 违反检测
@@ -356,16 +358,7 @@ export default async function (pi: any) {
         }
       }
 
-      // 6) eval 工具禁用（Windows 管道死锁）
-      injections.push([
-        "# ⛔ eval 工具禁用（Windows 管道死锁）",
-        "eval 工具（IPython kernel）在 Windows 上存在管道死锁 bug。",
-        "禁止使用 eval 工具。需要执行 Python 代码时，改用 bash 工具：",
-        "- 短代码：bash 执行 `python -c \"...\"`",
-        "- 长代码：bash 执行 `python script.py`",
-      ].join("\n"))
-
-      // 7) 工具调用纪律（仅第 1 轮约定一次，后续靠违反检测触发重申）
+      // 6) 工具调用纪律（仅第 1 轮约定一次，后续靠违反检测触发重申）
       if (agentTurnCount === 1) {
         injections.push([
           "# 工具调用纪律",
@@ -425,15 +418,6 @@ export default async function (pi: any) {
         return {
           block: true,
           reason: `[claude-mode] 工具 "${tool}" 属于危险操作，已被自动拦截。`,
-        }
-      }
-
-      // 禁止 eval 工具
-      if (tool === "eval") {
-        log("tool_call.blocked", `${tool} (eval blocked)`)
-        return {
-          block: true,
-          reason: `[claude-mode] eval 工具在 Windows 上会管道死锁，已拦截。用 bash 代替。`,
         }
       }
 
@@ -683,6 +667,12 @@ export default async function (pi: any) {
 
   // ═══════════════════════════════════════════════════════════
   // 6. session_stop — 自动续行 + 审计日志
+  //
+  // v2.6 改造：
+  //   - 彻底弃用 omp 原生 { continue: true } 续行机制
+  //   - 所有续行统一使用 sendUserMessage + 延迟（2秒），让 omp 有时间完成异步清理
+  //   - 避免 omp 内部同步续行的竞态条件导致进程崩溃
+  //   - 新增续行计数器（上限5次）+ 用户输入自动取消待定续行
   // ═══════════════════════════════════════════════════════════
   pi.on("session_stop", async (event: any) => {
     try {
@@ -692,34 +682,88 @@ export default async function (pi: any) {
       let reason: string
       if (lastMsg && typeof lastMsg === "object") {
         const sr = lastMsg.stopReason
-        const hasToolCalls = Array.isArray(lastMsg.content) && lastMsg.content.some((c: any) => c.type === "toolCall")
+        const content = Array.isArray(lastMsg.content) ? lastMsg.content : []
+        const hasText = content.some((c: any) => c.type === "text" && typeof c.text === "string" && c.text.trim().length > 0)
         if (sr === "error") reason = "error"
         else if (sr === "aborted") reason = "aborted"
         else if (sr === "length") reason = "interrupted"
-        else if (sr === "stop" && hasToolCalls) reason = "interrupted"
+        // 伪完成检测：stop 但无文本输出
+        else if (sr === "stop" && !hasText) reason = "interrupted"
         else if (sr === "stop") reason = "complete"
         else reason = "unknown"
       } else {
         reason = "unknown"
       }
 
-      auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason })
-      log("session_stop", `reason=${reason} stopReason=${lastMsg?.stopReason}`)
+      auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason, autoContinueCount, consecutiveErrorCount })
+      log("session_stop", `reason=${reason} stopReason=${lastMsg?.stopReason} autoContinueCount=${autoContinueCount} consecutiveErrorCount=${consecutiveErrorCount}`)
 
-      // 自动续行：error（模型出错，重试可能恢复）和 unknown（无 lastMsg，不明原因停止）
-      // 不续行：complete / interrupted / aborted — 正常结束或用户中断
-      if (reason === "error" || reason === "unknown") {
-        log("session_stop.auto_continue", `auto-continuing after reason=${reason}`)
-        try {
-          pi.notify?.(`会话异常停止(${reason})，自动续行中...`, "info")
-        } catch {}
-        return {
-          continue: true,
-          additionalContext: reason === "error"
-            ? "上一轮请求出错，请继续之前的任务。如果无法继续，向用户说明情况。"
-            : "会话异常终止（无停止原因），请继续之前的任务。如果无法继续，向用户说明情况。"
-        }
+      // 自动续行：
+      // - error：模型出错，最多续行1次（确定性错误重试无意义）
+      // - unknown：无 lastMsg，不明原因停止
+      // - interrupted：伪完成（stop但无文本）或 token 截断，任务未实际完成
+      // 不续行：complete（正常完成）/ aborted（用户主动中断）
+      if (reason === "complete" || reason === "aborted") {
+        // 正常结束，重置所有续行计数器
+        autoContinueCount = 0
+        consecutiveErrorCount = 0
+        return
       }
+
+      // error 独立计数：连续 error 最多续行1次
+      if (reason === "error") {
+        if (consecutiveErrorCount >= MAX_ERROR_CONTINUE) {
+          log("session_stop.error_max", `连续error已达上限(${MAX_ERROR_CONTINUE})，停止续行`)
+          try {
+            pi.notify?.(`请求连续出错(${consecutiveErrorCount}次)，可能需要手动干预。`, "warning")
+          } catch {}
+          consecutiveErrorCount = 0
+          autoContinueCount = 0
+          return
+        }
+        consecutiveErrorCount++
+      } else {
+        // 非 error 续行时，重置 error 计数器
+        consecutiveErrorCount = 0
+      }
+
+      // 总续行次数上限
+      if (autoContinueCount >= MAX_AUTO_CONTINUE) {
+        log("session_stop.max_continue", `已达到最大自动续行次数(${MAX_AUTO_CONTINUE})，停止续行`)
+        try {
+          pi.notify?.(`已自动续行${autoContinueCount}次仍异常，任务可能需要手动干预。`, "warning")
+        } catch {}
+        autoContinueCount = 0
+        return
+      }
+
+      autoContinueCount++
+      let ctx: string
+      if (reason === "error") {
+        ctx = "上一轮请求出错，请继续之前的任务。如果无法继续，向用户说明情况。"
+      } else if (reason === "interrupted") {
+        ctx = "上一轮输出未完成（无文本回复），请继续之前的任务，给出完整结果。"
+      } else {
+        ctx = "会话异常终止（无停止原因），请继续之前的任务。如果无法继续，向用户说明情况。"
+      }
+
+      log("session_stop.auto_continue", `reason=${reason} count=${autoContinueCount}/${MAX_AUTO_CONTINUE} delay=${AUTO_CONTINUE_DELAY_MS}ms`)
+      try {
+        pi.notify?.(`会话异常停止(${reason})，${AUTO_CONTINUE_DELAY_MS / 1000}秒后自动续行(${autoContinueCount}/${MAX_AUTO_CONTINUE})...`, "info")
+      } catch {}
+
+      // 延迟后通过 sendUserMessage 发送续行指令
+      // 不返回 { continue: true }，让 omp 正常结束本轮、完成异步清理
+      // 延迟期间如果用户发送了真实消息，则取消自动续行
+      pendingContinueTimer = setTimeout(() => {
+        pendingContinueTimer = null
+        try {
+          pi.runtime?.sendUserMessage?.(ctx, { deliverAs: "steer" })
+          log("session_stop.sendUserMessage.sent", `sent steer message, reason=${reason} count=${autoContinueCount}`)
+        } catch (e: any) {
+          log("session_stop.sendUserMessage.error", e?.message || String(e))
+        }
+      }, AUTO_CONTINUE_DELAY_MS)
     } catch (err: any) {
       log("session_stop.error", err?.message || String(err))
     }
@@ -730,8 +774,105 @@ export default async function (pi: any) {
   // ═══════════════════════════════════════════════════════════
   pi.on("input", async (event: any) => {
     try {
-      const message = event.message || event.input || ""
+      const message = event.text || event.message || event.input || ""
       if (typeof message !== "string" || !message) return
+
+      // v2.7: 用户发送真实消息时，取消待定的自动续行 + 重置所有计数器
+      if (pendingContinueTimer) {
+        clearTimeout(pendingContinueTimer)
+        pendingContinueTimer = null
+        autoContinueCount = 0
+        consecutiveErrorCount = 0
+        log("input.cancel_continue", "用户发送消息，取消待定自动续行")
+      }
+
+      // /omfg 命令拦截 — 让模型自己生成 TTSR 规则
+      const omfgMatch = message.match(/^\/omfg\s+(.+)/)
+      if (omfgMatch) {
+        try {
+          const complaint = omfgMatch[1].trim()
+          const ruleDir = join(DATA_DIR, "agent", "rules")
+          ensureDir(ruleDir)
+
+          const existingRules = existsSync(ruleDir)
+            ? readdirSync(ruleDir).filter(f => f.endsWith('.md')).join(', ') || '(无)'
+            : '(无)'
+
+          const omfgPrompt = [
+            `用户投诉: "${complaint}"`,
+            "",
+            "请为这条投诉创建一条 TTSR (Time Traveling Stream Rule) 规则。",
+            "",
+            "## TTSR 规则机制",
+            "TTSR 规则实时监控模型的**流式输出**（不是用户输入），匹配到违规内容时可以中断生成或注入提醒。规则**零 context 开销**——只在触发时才消耗 token。",
+            "",
+            "## 规则文件格式",
+            "Markdown 文件，路径: `data/agent/rules/<英文名>.md`，内容结构：",
+            "```",
+            "---",
+            'description: "简短描述规则目的"',
+            'condition: "JavaScript 正则表达式（匹配模型流式输出）"',
+            'scope: "逗号分隔的流作用域"',
+            'interruptMode: "always 或 never"',
+            "---",
+            "",
+            "这里是规则触发后注入给模型的提醒内容（正文）。",
+            "告诉模型做错了什么、应该怎么做。",
+            "```",
+            "",
+            "## 字段说明",
+            "- `condition`: JavaScript 正则（字符串或字符串数组），匹配模型的**流式输出文本**",
+            "- `scope`: `text`(助手文字), `thinking`(推理), `tool`(所有工具参数), `tool:edit(*.ts)`(编辑特定类型文件)",
+            "- `interruptMode`: `always`=匹配时立刻中断生成并注入提醒; `never`=不中断，仅在工具结果中注入提醒",
+            "",
+            "## 现有规则（避免重复）",
+            existingRules,
+            "",
+            "## 示例",
+            "",
+            "示例1（中断型）:",
+            "```",
+            "---",
+            'description: "Never use XML format to call tools like <function=xxx>"',
+            'condition: "<function[=\\\\s]"',
+            'scope: "text, thinking"',
+            'interruptMode: "always"',
+            "---",
+            "",
+            "You used XML format to call a tool. This is NOT supported.",
+            "You MUST use the standard function calling format.",
+            "```",
+            "",
+            "示例2（提醒型）:",
+            "```",
+            "---",
+            'description: "Use io and os instead of deprecated io/ioutil"',
+            'condition: \'"io/ioutil"\'',
+            'scope: "tool:edit(*.go), tool:write(*.go)"',
+            'interruptMode: never',
+            "---",
+            "",
+            "You used deprecated io/ioutil. Use io and os instead.",
+            "```",
+            "",
+            "## 要求",
+            "1. condition 正则要精准，能匹配到违规输出但不误杀",
+            "2. scope 要合理——只检查可能违规的流",
+            "3. interruptMode: 严重违规(如格式错误、安全隐患)用 `always`，轻微问题(如风格建议)用 `never`",
+            "4. 文件名用有意义的英文名（如 no-bare-url.md），不要用时间戳",
+            `5. 写入路径: ${join(ruleDir, "<name>.md")}`,
+            "6. 写完规则文件后，告诉用户：规则已创建，需要重启 omp 才会生效",
+          ].join("\n")
+
+          log("omfg.redirected", `complaint="${complaint}" → sent prompt to model`)
+          try {
+            pi.notify?.(`TTSR 规则生成中: "${complaint}"`, "info")
+          } catch {}
+          return { text: omfgPrompt }
+        } catch (err: any) {
+          log("omfg.error", err?.message || String(err))
+        }
+      }
 
       // 敏感信息检测：不阻断，只记录审计日志
       const sensitive = detectSensitiveInfo(message)
@@ -986,7 +1127,8 @@ export default async function (pi: any) {
       log("after_provider_response", `model=${event.model || "?"} tokens=${usage.totalTokens || usage.total_tokens || 0} turn=${agentTurnCount}`)
 
       // XML 工具调用自动纠正
-      // 检测到 XML → 自动发约束+继续，连续失败2次才通知用户
+      // v2.6: TTSR 规则 no-xml-toolcall.md 已接管实时拦截，此处保留作为兜底
+      // （TTSR 在流式输出阶段中断，此处是输出完成后的二次检查）
       if (typeof responseText === "string" && /<function[=\s]/i.test(responseText)) {
         log("xml_tool_call.detected", `xmlAutoRetryCount=${xmlAutoRetryCount}`)
 
@@ -1024,5 +1166,5 @@ export default async function (pi: any) {
     }
   })
 
-  log("init", "=== claude-mode extension v2.3 ready ===")
+  log("init", "=== claude-mode extension v2.6 ready ===")
 }

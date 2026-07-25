@@ -10,6 +10,13 @@
   <link rel="stylesheet" id="hljs-light" href="../node_modules/highlight.js/styles/atom-one-light.min.css" disabled>
 </head>
 <body>
+  <!-- 启动全屏遮罩：覆盖一切，加载完成后移除 -->
+  <div id="startupOverlay" class="startup-overlay">
+    <div class="startup-logo">Tiffa</div>
+    <div class="startup-title">与万物对弈，共时间同行</div>
+    <div class="startup-spinner"></div>
+  </div>
+
   <div id="app">
     <!-- ── 左侧项目栏 ── -->
     <aside id="projectPanel">
@@ -129,6 +136,12 @@
           </div>
         </aside>
       </div>
+    </div>
+
+    <!-- 新建对话过渡遮罩 -->
+    <div id="newSessionOverlay" class="new-session-overlay hidden">
+      <div class="new-session-spinner"></div>
+      <div class="new-session-text">正在创建对话...</div>
     </div>
 
     <!-- 设置面板浮层 -->

@@ -89,10 +89,13 @@ class OmpInstance {
     this.stallPhase = 0;
     this.watchdogTimer = null;
     this.forceKilled = false;
+    this._userKilled = false;  // 用户主动 kill，不触发崩溃自动重启
+    this._pendingCrashContinue = false;  // 崩溃重启后自动续行
   }
 
   start() {
     if (this.process) return;
+    this._userKilled = false;  // 新启动时重置用户主动关闭标记
 
     const env = {
       ...process.env,
@@ -160,13 +163,18 @@ class OmpInstance {
         mainWindow.webContents.send('omp:exited', { code, signal, cwd: this.cwd });
       }
 
-      // 如果是被 forceKillOmp 杀掉的（abort-timeout / agent-unresponsive），自动重启
-      if (this.forceKilled) {
+      // 自动重启判断：
+      // 1. 被 forceKill 杀掉的（abort-timeout / agent-unresponsive）
+      // 2. 进程异常退出（code !== 0 且非用户主动 kill），可能是内部崩溃
+      const shouldRestart = this.forceKilled || (code !== 0 && code !== null && !this._userKilled);
+      if (shouldRestart) {
+        const reason = this.forceKilled ? 'force-killed' : 'crashed';
         this.forceKilled = false;
+        this._pendingCrashContinue = true;  // 重启后自动续行
         const restartCwd = this.cwd;
-        console.log(`[OmpInstance:${this._shortCwd()}] forceKill，3 秒后自动重启...`);
+        console.log(`[OmpInstance:${this._shortCwd()}] ${reason}，3 秒后自动重启...`);
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('omp:restarting', { reason: 'force-killed', cwd: this.cwd });
+          mainWindow.webContents.send('omp:restarting', { reason, cwd: this.cwd });
         }
         setTimeout(() => {
           if (!this.process && mainWindow && !mainWindow.isDestroyed()) {
@@ -188,6 +196,7 @@ class OmpInstance {
   kill(sync = false) {
     if (!this.process) return;
     this.forceKilled = false; // 正常关闭不自动重启
+    this._userKilled = true;  // 用户主动关闭，不触发崩溃自动重启
     _killTree(this.process.pid, sync);
     this._cleanup();
     this.stopWatchdog();
@@ -318,6 +327,21 @@ class OmpInstance {
       this.ready = true;
       this.agentRunning = false;
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
+
+      // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
+      if (this._pendingCrashContinue) {
+        this._pendingCrashContinue = false;
+        console.log(`[OmpInstance:${this._shortCwd()}] 崩溃重启就绪，2秒后自动续行`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('omp:crash-recovered', { cwd: this.cwd });
+        }
+        setTimeout(() => {
+          if (this.process && this.ready && !this.agentRunning) {
+            console.log(`[OmpInstance:${this._shortCwd()}] 发送自动续行消息`);
+            this.sendRaw({ type: 'prompt', message: '进程异常重启，请继续之前的任务。' });
+          }
+        }, 2000);
+      }
     }
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
@@ -566,6 +590,80 @@ function setupIpc() {
 
   // omp commands
   ipcMain.handle('omp:send', async (event, message, images) => {
+    // /omfg 命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
+    const omfgMatch = typeof message === 'string' && message.match(/^\/omfg\s*(.+)/);
+    if (omfgMatch) {
+      const complaint = omfgMatch[1].trim();
+      const ruleDir = path.join(PORTABLE_ROOT, 'data', 'agent', 'rules');
+      try { if (!fs.existsSync(ruleDir)) fs.mkdirSync(ruleDir, { recursive: true }); } catch {}
+      let existingRules = '(无)';
+      let existingRuleDetails = '';
+      try {
+        const files = fs.readdirSync(ruleDir).filter(f => f.endsWith('.md'));
+        if (files.length > 0) {
+          existingRules = files.join(', ');
+          // 读取每条规则的 frontmatter 摘要
+          existingRuleDetails = files.map(f => {
+            try {
+              const content = fs.readFileSync(path.join(ruleDir, f), 'utf8');
+              const descMatch = content.match(/^description:\s*"?(.+?)"?\s*$/m);
+              const desc = descMatch ? descMatch[1] : '(无描述)';
+              return `- ${f}: ${desc}`;
+            } catch { return `- ${f}`; }
+          }).join('\n');
+        }
+      } catch {}
+
+      const omfgPrompt = [
+        '<omfg>',
+        'The user is frustrated about recurring agent behavior.',
+        'Author ONE Time Traveling Stream Rule (TTSR) that would have caught the offending behavior earlier in this conversation.',
+        '',
+        'TTSR mechanics:',
+        '- A rule is a markdown file with YAML frontmatter, stored in ' + ruleDir,
+        '- `condition` is one or more JavaScript regex patterns tested against assistant streamed output.',
+        '- `scope` is a comma-separated allowlist. If present, only listed streams are checked.',
+        '- `text` = assistant prose only. `thinking` = hidden reasoning summaries. `tool` = every tool\'s arguments.',
+        '- `tool:<name>(<glob>)` = one tool, only when path-like args match the glob.',
+        '- SHOULD use file-specific tool scopes for code complaints.',
+        '- Tool arguments may be serialized while streaming. Conditions for code containing quotes SHOULD tolerate JSON escaping.',
+        '- When `condition` matches within `scope`, the stream is interrupted and the markdown body is injected as correction guidance.',
+        '- `interruptMode`: `always` = immediately abort generation, `never` = inject warning without interrupting.',
+        '- `repeatMode` (optional): `once` = fire once per session (default), `after-gap` = re-trigger after N messages.',
+        '',
+        'Action: Write the rule file directly using the write tool.',
+        '',
+        'File format (markdown with YAML frontmatter):',
+        '```',
+        '---',
+        'description: "One-line summary of what the rule prevents"',
+        'condition: "regex pattern or array of patterns"',
+        'scope: "text" or "tool:write(*.ts)" or ["tool:edit(*.ts)", "tool:write(*.ts)"]',
+        'interruptMode: "always" or "never"',
+        '---',
+        '',
+        'Markdown body explaining the correct behavior.',
+        '```',
+        '',
+        'Guidelines:',
+        '- File name MUST be kebab-case with .md extension (e.g. no-hardcoded-secrets.md)',
+        '- `condition` MUST match the specific offending output visible in this conversation. Keep it precise; NEVER use broad catch-alls.',
+        '- Escape regex backslashes once in YAML: use `"\\beval\\s*\\("`, NOT `"\\\\beval\\\\s*\\\\("`.',
+        '- Keep `scope` as narrow as the complaint allows. NEVER use `tool, text` unless the same bad behavior occurred in both.',
+        '- If an existing rule has a bug (regex too narrow/broad, wrong scope), fix it directly by rewriting that file.',
+        '',
+        'Existing rules (avoid duplicates):',
+        existingRuleDetails || '(none)',
+        '',
+        'Complaint:',
+        complaint,
+        '</omfg>',
+      ].join('\n');
+
+      message = omfgPrompt;
+      console.log(`[/omfg] intercepted: complaint="${complaint}"`);
+    }
+
     const frame = { type: 'prompt', message };
     if (images && images.length > 0) {
       frame.images = images;
