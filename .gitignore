@@ -30,6 +30,11 @@ data/agent/models.yml.example
 data/cache/
 data/memory/
 
+# Mnemopi runtime (databases + embedding cache)
+data/agent/memories/
+data/agent/mnemopi/
+data/agent/removed-cwds.json
+
 # Log files
 data/log/
 plugins/*.log

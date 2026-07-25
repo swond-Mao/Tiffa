@@ -9,3 +9,15 @@ modelRoles:
   vision: "kimi/kimi-k3"
   commit: "home-models/Qwen3.6-27B"
   tiny: "xiaomi/mimo-v2-flash"
+
+# Mnemopi 记忆系统（v4.0 启用）
+memory:
+  backend: mnemopi
+  mnemopi:
+    embeddingModel: "fast-bge-small-zh-v1.5"
+    scoping: "per-project-plus-global"
+    autoRecall: true
+    autoRetain: true
+    retainEveryNTurns: 5
+    recallLimit: 10
+    injectionTokenLimit: 2000
