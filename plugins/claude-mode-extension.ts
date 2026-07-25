@@ -350,6 +350,9 @@ export default async function (pi: any) {
             "以上约束你已经违反。下一条回复必须严格遵守。",
           ].join("\n"))
           log("constraints.violation", `detected ${fresh.length} violations: ${fresh.join(", ")}`)
+          try {
+            pi.notify?.(`约束违反检测: ${fresh.join("; ")}`, "info")
+          } catch {}
         }
       }
 
@@ -564,6 +567,9 @@ export default async function (pi: any) {
           const role = m.role || "unknown"
           const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")
           const truncated = content.length > 2000 ? content.slice(0, 2000) + "..." : content
+          if (content.length > 2000) {
+            try { pi.notify?.(`compact 截断: 消息过长(${content.length}字)，已截断至2000字`, "info") } catch {}
+          }
           return `[${role}] ${truncated}`
         }).join("\n\n")
         writeFileSync(inboxPath, formatted, "utf8")
@@ -707,6 +713,9 @@ export default async function (pi: any) {
       // 不续行：complete / interrupted / aborted — 正常结束或用户中断
       if (reason === "error" || reason === "unknown") {
         log("session_stop.auto_continue", `auto-continuing after reason=${reason}`)
+        try {
+          pi.notify?.(`会话异常停止(${reason})，自动续行中...`, "info")
+        } catch {}
         return {
           continue: true,
           additionalContext: reason === "error"
