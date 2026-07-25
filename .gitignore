@@ -17,6 +17,7 @@ omp-desktop.exe
 
 # Session & cache data
 data/agent/sessions/
+data/agent/sessions-archive/
 data/agent/agent.db*
 data/agent/models.db*
 data/agent/hidden-models.json
