@@ -1,8 +1,8 @@
-# AGENTS.md — omp 便携包项目规范
+# AGENTS.md — oh-my-tiffa 项目规范
 
 ## 项目概述
 
-oh-my-pi (omp) 便携包：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v2.3) + XML 工具调用翻译层 (v7.0) + Electron 桌面前端。
+oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v2.3) + Electron 桌面前端 (v1.4)。
 
 ## 关键路径
 
@@ -157,9 +157,22 @@ oh-my-pi (omp) 便携包：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 
 
 | 文件 | 说明 |
 |------|------|
-| `electron/main.js` (1682 行) | 主进程：OmpInstanceManager + 36 个 IPC handler + 窗口管理 |
-| `electron/preload.js` | contextBridge + marked + hljs |
-| `electron/renderer/` | index.html + styles.css + app.js |
+| `electron/main.js` (~1968 行) | 主进程：OmpInstanceManager + IPC handler + 窗口管理 |
+| `electron/preload.js` (~133 行) | contextBridge + marked + hljs + IPC 桥接 |
+| `electron/renderer/index.html` | 主界面 HTML |
+| `electron/renderer/styles.css` (~3165 行) | HSL Token 主题系统 + 全组件样式 |
+| `electron/renderer/app.js` (~3930 行) | 渲染进程主逻辑 |
+| `electron/renderer/themes.js` (~659 行) | 主题引擎：7 套预设 × light/dark/system |
+
+### 主题系统（移植自 OpenCodeUI）
+
+- **7 套预设**：Eucalyptus / Claude / Breeze / Sakura / Ocean / Dracula / Obsidian
+- **3 种模式**：亮色 / 暗色 / 跟随系统
+- **架构**：`themes.js` 包含预设数据 + 注入引擎，通过 JS 动态写 `<style>` 到 `:root`
+- **颜色格式**：HSL 不带 `hsl()` 包装（如 `210 20% 18%`），CSS 中用 `hsl(var(--bg-200))`
+- **Legacy 别名**：旧 `--bg-primary` 等变量自动映射到新 HSL 变量，旧 CSS 仍可用
+- **UI**：快速切换按钮（月亮/太阳）只 light/dark 互切；设置面板有三态选择器（含 system）
+- **highlight.js**：亮暗主题随模式自动切换
 
 ### OmpInstanceManager — 多实例管理
 
@@ -191,14 +204,49 @@ oh-my-pi (omp) 便携包：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 
 
 **系统 (4)**：shell:openExternal, shell:openPath, path:workspace, path:root, fetch:providerModels
 
-### Renderer 输出后处理
+### Renderer 功能清单
+
+**输出后处理**：
 
 | 函数 | 功能 |
 |------|------|
-| `fixBareUrls(text)` | 裸 URL → `[domain](url)` Markdown 链接 |
-| `inferCodeLanguage(code)` | 启发式推断代码语言（支持 jsx/js/python/html/css/sql/go/rust/xml/toml/yaml） |
+| `fixBareUrls(text)` | 裸 URL → `[domain](url)`；`file:///` → `omp-local://`；Windows 路径自动链接化 |
+| `inferCodeLanguage(code)` | 启发式推断代码语言（jsx/js/python/html/css/sql/go/rust/xml/toml/yaml） |
 | `fixCodeBlockLanguages(text)` | 无语言标注代码块自动填充推断语言 |
 | `applyOutputFixes(text)` | 总入口：fixBareUrls → fixCodeBlockLanguages |
+
+**ToolCard 智能摘要 + Diff 视图**：
+
+| 函数 | 功能 |
+|------|------|
+| `summarizeToolCall(toolName, args)` | 从工具参数提取一行摘要（路径/命令/查询等），折叠时显示 |
+| `extractDiff(result)` | 自动检测工具结果中的 unified diff（递归查找 diff/patch/edits 等字段） |
+| `looksLikeDiff(s)` | 正则判断文本是否像 diff（`---`/`+++`/`@@`/`+`/`-` 行首） |
+| `renderDiffView(diffText)` | 渲染着色 diff：增行(绿) / 删行(红) / hunk(蓝) / 上下文(灰) |
+
+**右侧栏**：
+
+| 区域 | 功能 |
+|------|------|
+| 文件树 | 递归展开、.git/node_modules 过滤、文件大小显示（B/KB/MB）、文件图标 |
+| Todo 面板 | AI 多步任务进度可视化（按阶段分组，✓/◎/✗/○ 四种状态） |
+| 预览区 | 代码高亮、图片预览、HTML/MD 实时预览、可拖拽分隔线、多标签 |
+
+**模型管理**：
+
+- 37 个供应商预设 + YAML 注释保留（Eemeli Aro `yaml` 包 `parseDocument`）
+- 2 步模型发现向导 + 3 态白名单（全部显示/仅白名单/白名单+隐藏）
+- 模型快速切换浮层（搜索 + 供应商分组）
+- `enabledModels === undefined` 时 fallback 到 `modelsConfigData` 过滤
+
+**会话/项目管理**：
+
+- 64KB header scan 快速加载会话列表
+- 两轮 tool 重建（tool_execution_start → toolResult 匹配）
+- 项目按最近会话活动排序（`lastSessionMtime`）
+- `removedCwds` 防复活机制
+- 分支命令（`entryId` 格式）、导出 HTML、历史面板人性化时间
+- Per-workspace 审批模式（normal/auto/yolo）
 
 ### 项目去重机制
 

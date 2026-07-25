@@ -1,6 +1,6 @@
 /**
- * omp Desktop - Electron Main Process
- * 
+ * tiffa Desktop - Electron Main Process
+ *
  * Manages omp rpc-ui subprocess, IPC communication, and window lifecycle.
  * Protocol: JSONL over stdin/stdout (one JSON object per line)
  */
@@ -8,8 +8,10 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, execSync: _execSync } = require('child_process');
+const cp = require('child_process');
 const yaml = require('js-yaml');
+const { parseDocument, Document } = require('yaml');
 
 // ── Configuration ──
 // PORTABLE_ROOT: 1) --portable-root CLI arg  2) PORTABLE_ROOT env  3) parent of __dirname
@@ -28,6 +30,41 @@ const EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'claude-mode-extensio
 const DEFAULT_WORKSPACE_DIR = path.join(PORTABLE_ROOT, 'workspace');
 let currentWorkspaceDir = DEFAULT_WORKSPACE_DIR;
 
+// ── Windows 进程树杀杀（SIGTERM/SIGKILL 在 Windows 上不可靠） ──
+function _killTree(pid, sync = false) {
+  if (!pid) return;
+  if (process.platform !== 'win32') {
+    try { process.kill(pid, 'SIGKILL'); } catch (e) { /* ignore */ }
+    return;
+  }
+  try {
+    const args = ['/PID', String(pid), '/T', '/F'];
+    if (sync) {
+      cp.spawnSync('taskkill', args, { windowsHide: true, stdio: 'ignore' });
+    } else {
+      cp.spawn('taskkill', args, { windowsHide: true, stdio: 'ignore' });
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// ── UTF-8 环境变量注入（治理中文乱码） ──
+// 乱码根因：omp 内部 spawn bash/powershell 执行命令时，Windows 控制台默认
+// codepage 为 CP936（GBK），编码不一致 → 中文文件名/输出变成乱码。
+// 策略：尽可能把所有涉及 I/O 编码的运行时环境变量都切到 UTF-8。
+function _utf8Env() {
+  return {
+    // --- POSIX shell (Git Bash / MSYS2 / WSL) ---
+    LANG: 'C.UTF-8',
+    LC_ALL: 'C.UTF-8',
+    // --- Python ---
+    PYTHONIOENCODING: 'utf-8:replace',   // stdin/stdout/stderr 强制 UTF-8
+    PYTHONUTF8: '1',                       // Python 3.7+ 全局 UTF-8 模式
+    PYTHONLEGACYWINDOWSSTDIO: 'utf-8',     // Windows 上 Python 控制台 UTF-8 兜底
+    // --- General ---
+    NO_COLOR: '1',                         // 子进程输出不需要 ANSI 颜色码
+  };
+}
+
 // ── Global State ──
 let mainWindow = null;
 const OMP_STALL_TIMEOUT = 180000; // 3 分钟无事件视为卡住
@@ -42,6 +79,7 @@ class OmpInstance {
   constructor(cwd) {
     this.cwd = cwd;
     this.process = null;
+    this.rl = null;          // readline.Interface（stdout 逐行解析）
     this.ready = false;
     this.agentRunning = false;
     this.pendingCommands = new Map();
@@ -51,7 +89,6 @@ class OmpInstance {
     this.stallPhase = 0;
     this.watchdogTimer = null;
     this.forceKilled = false;
-    this.buffer = '';
   }
 
   start() {
@@ -59,6 +96,7 @@ class OmpInstance {
 
     const env = {
       ...process.env,
+      ..._utf8Env(),
       PI_CODING_AGENT_DIR: path.join(PORTABLE_ROOT, 'data', 'agent'),
       HOME: path.join(PORTABLE_ROOT, 'home'),
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
@@ -84,22 +122,19 @@ class OmpInstance {
       windowsHide: false,
     });
 
-    this.buffer = '';
-
-    this.process.stdout.on('data', (chunk) => {
-      this.buffer += chunk.toString('utf8');
-      const lines = this.buffer.split('\n');
-      this.buffer = lines.pop();
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const event = JSON.parse(trimmed);
-          this._handleEvent(event);
-        } catch (e) {
-          console.warn(`[OmpInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
-        }
+    // 用 readline 逐行解析 stdout（比手动 buffer + split 更健壮）
+    this.rl = require('readline').createInterface({
+      input: this.process.stdout,
+      crlfDelay: Infinity,  // 自动处理 \r\n 和 \n
+    });
+    this.rl.on('line', (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        const event = JSON.parse(trimmed);
+        this._handleEvent(event);
+      } catch (e) {
+        console.warn(`[OmpInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
       }
     });
 
@@ -110,9 +145,14 @@ class OmpInstance {
 
     this.process.on('exit', (code, signal) => {
       console.log(`[OmpInstance:${this._shortCwd()}] 已退出:`, { code, signal, forceKilled: this.forceKilled });
-      this.process = null;
-      this.ready = false;
-      this.agentRunning = false;
+
+      // 拒绝所有待定命令（避免 Promise 永久挂起）
+      for (const [id, { reject }] of this.pendingCommands) {
+        reject(new Error(`omp process exited (code=${code}, signal=${signal})`));
+      }
+      this.pendingCommands.clear();
+
+      this._cleanup();
       this.stopWatchdog();
 
       // 通知渲染进程
@@ -145,13 +185,11 @@ class OmpInstance {
     this.startWatchdog();
   }
 
-  kill() {
+  kill(sync = false) {
     if (!this.process) return;
     this.forceKilled = false; // 正常关闭不自动重启
-    try { this.process.kill('SIGTERM'); } catch (e) { /* ignore */ }
-    this.process = null;
-    this.ready = false;
-    this.agentRunning = false;
+    _killTree(this.process.pid, sync);
+    this._cleanup();
     this.stopWatchdog();
   }
 
@@ -162,21 +200,9 @@ class OmpInstance {
     }
 
     this.forceKilled = true;
-    console.log(`[OmpInstance:${this._shortCwd()}] forceKill (原因: ${reason}): 发送 SIGTERM`);
+    console.log(`[OmpInstance:${this._shortCwd()}] forceKill (原因: ${reason})`);
 
-    try {
-      this.process.kill('SIGTERM');
-    } catch (e) {
-      console.warn(`[OmpInstance:${this._shortCwd()}] SIGTERM 失败:`, e.message);
-    }
-
-    const pid = this.process.pid;
-    setTimeout(() => {
-      if (this.process && this.process.pid === pid) {
-        console.log(`[OmpInstance:${this._shortCwd()}] SIGTERM 后进程仍在，升级 SIGKILL`);
-        try { this.process.kill('SIGKILL'); } catch (e) { /* ignore */ }
-      }
-    }, 5000);
+    _killTree(this.process.pid);
 
     // 通知渲染进程
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -321,6 +347,16 @@ class OmpInstance {
     }
   }
 
+  _cleanup() {
+    if (this.rl) {
+      this.rl.close();
+      this.rl = null;
+    }
+    this.process = null;
+    this.ready = false;
+    this.agentRunning = false;
+  }
+
   _shortCwd() {
     const parts = this.cwd.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1] || this.cwd;
@@ -334,6 +370,7 @@ class OmpInstance {
 class OmpInstanceManager {
   constructor() {
     this.instances = new Map(); // cwd (normalized) -> OmpInstance
+    this.spawning = new Map(); // cwd (normalized) -> Promise<OmpInstance>（防并发重复 spawn）
     this.activeCwd = null;     // 当前活跃实例的 cwd
   }
 
@@ -350,29 +387,43 @@ class OmpInstanceManager {
       return inst;
     }
 
+    // 正在 spawn 中 → 复用同一个 Promise，避免并发创建重复进程
+    if (this.spawning.has(normalized)) {
+      return this.spawning.get(normalized);
+    }
+
     // 超过上限 → LRU 淘汰最久未活跃的
     if (this.instances.size >= MAX_INSTANCES) {
       this._evictLRU();
     }
 
-    // 创建新实例
-    const inst = new OmpInstance(normalized);
-    this.instances.set(normalized, inst);
-    inst.start();
+    // 创建新实例（用 Promise 包装，支持并发 dedup）
+    const spawnPromise = (async () => {
+      const inst = new OmpInstance(normalized);
+      this.instances.set(normalized, inst);
+      inst.start();
 
-    // 等待就绪（最多 15 秒）
-    await new Promise((resolve) => {
-      let checks = 0;
-      const check = setInterval(() => {
-        checks++;
-        if (inst.ready || checks > 150) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 100);
-    });
+      // 等待就绪（最多 15 秒）
+      await new Promise((resolve) => {
+        let checks = 0;
+        const check = setInterval(() => {
+          checks++;
+          if (inst.ready || checks > 150) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+      });
 
-    return inst;
+      return inst;
+    })();
+
+    this.spawning.set(normalized, spawnPromise);
+    try {
+      return await spawnPromise;
+    } finally {
+      this.spawning.delete(normalized);
+    }
   }
 
   // 获取当前活跃实例
@@ -404,15 +455,22 @@ class OmpInstanceManager {
     this.activeCwd = null;
   }
 
-  // 关闭所有实例（退出时用，暴力清理）
+  // 关闭所有实例（退出时用，同步暴力清理）
   killAll() {
     for (const inst of this.instances.values()) {
       inst.forceKilled = false;
+      // 同步杀进程，确保 app 退出前进程真的死透
       if (inst.process) {
-        try { inst.process.kill('SIGKILL'); } catch (e) { /* ignore */ }
+        _killTree(inst.process.pid, true);
       }
+      // 拒绝所有待定命令
+      for (const [id, { reject }] of inst.pendingCommands) {
+        reject(new Error('app quitting'));
+      }
+      inst.pendingCommands.clear();
     }
     this.instances.clear();
+    this.spawning.clear();
     this.activeCwd = null;
   }
 
@@ -463,7 +521,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: 'omp 桌面版',
+    title: 'tiffa',
     backgroundColor: '#1a1a2e',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -757,6 +815,57 @@ function setupIpc() {
     }
   });
 
+  // ── YAML 注释保留式写入/删除 provider ──
+  // 用 yaml 包的 parseDocument + setIn/deleteIn，只改 providers.<id> 子树
+  // 保留用户手写的注释、其他 provider、顶层字段
+  ipcMain.handle('models:writeProvider', async (event, providerId, cfg) => {
+    try {
+      if (!providerId || !/^[a-zA-Z0-9_-]+$/.test(providerId)) {
+        return { error: `provider id 不合法（只允许字母/数字/-/_）: ${providerId}` };
+      }
+      // 清理 undefined/null/空值
+      const clean = {};
+      for (const [k, v] of Object.entries(cfg)) {
+        if (v !== undefined && v !== null && v !== '') clean[k] = v;
+      }
+      // 加载 YAML Document（保注释）
+      let doc;
+      if (fs.existsSync(MODELS_YML)) {
+        const raw = fs.readFileSync(MODELS_YML, 'utf8');
+        doc = parseDocument(raw);
+        if (doc.errors.length > 0) {
+          return { error: `models.yml 解析失败（${doc.errors[0].message}），为避免破坏原文件已中止写入` };
+        }
+      } else {
+        doc = new Document({});
+      }
+      doc.setIn(['providers', providerId], doc.createNode(clean));
+      fs.mkdirSync(path.dirname(MODELS_YML), { recursive: true });
+      fs.writeFileSync(MODELS_YML, doc.toString(), 'utf8');
+      console.log(`[主进程] 已写入 provider: ${providerId}`);
+      return { success: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  ipcMain.handle('models:deleteProvider', async (event, providerId) => {
+    try {
+      if (!fs.existsSync(MODELS_YML)) return { success: true };
+      const raw = fs.readFileSync(MODELS_YML, 'utf8');
+      const doc = parseDocument(raw);
+      if (doc.errors.length > 0) {
+        return { error: `models.yml 解析失败，已中止` };
+      }
+      doc.deleteIn(['providers', providerId]);
+      fs.writeFileSync(MODELS_YML, doc.toString(), 'utf8');
+      console.log(`[主进程] 已删除 provider: ${providerId}`);
+      return { success: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
   // ── Workspace / Project management ──
 
   // 打开文件夹选择器
@@ -812,6 +921,17 @@ function setupIpc() {
   const SESSIONS_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions');
   const ARCHIVE_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions-archive');
   const PROJECTS_JSON = path.join(PORTABLE_ROOT, 'data', 'agent', 'projects.json');
+  const REMOVED_CWDS_FILE = path.join(PORTABLE_ROOT, 'data', 'agent', 'removed-cwds.json');
+
+  function readRemovedCwds() {
+    try {
+      if (fs.existsSync(REMOVED_CWDS_FILE)) return JSON.parse(fs.readFileSync(REMOVED_CWDS_FILE, 'utf8'));
+    } catch {}
+    return [];
+  }
+  function writeRemovedCwds(list) {
+    fs.writeFileSync(REMOVED_CWDS_FILE, JSON.stringify(list), 'utf8');
+  }
 
   // 递归删除目录
   function rimraf(dirPath) {
@@ -890,6 +1010,12 @@ function setupIpc() {
       }
     }
     if (!existing) {
+      // 检查 removedCwds：如果用户已删除此项目，不再自动注册
+      const removedList = readRemovedCwds();
+      const normalizedLower = normalized.toLowerCase();
+      if (removedList.some(c => c.toLowerCase() === normalizedLower)) {
+        return normalized;
+      }
       deduped.push({
         cwd: normalized,
         displayName: cwdDisplayName(normalized),
@@ -899,16 +1025,13 @@ function setupIpc() {
       });
       writeProjectsJson(deduped);
     } else if (existing.archived) {
-      // 如果之前被归档了，现在又打开，则取消归档
-      existing.archived = false;
-      delete existing.archivedAt;
-      existing.lastOpenedAt = new Date().toISOString();
-      // 如果 cwd 发生了盘符变化，更新为新路径
+      // 已归档项目：不再自动取消归档（需用户手动恢复）
+      // 仅更新 cwd 路径（处理盘符变化）
       if (path.resolve(existing.cwd) !== normalized) {
-        console.log(`[projects] 盘符变化: ${existing.cwd} → ${normalized}`);
+        console.log(`[projects] 盘符变化(已归档): ${existing.cwd} → ${normalized}`);
         existing.cwd = normalized;
+        writeProjectsJson(deduped);
       }
-      writeProjectsJson(deduped);
     } else {
       // 更新最后打开时间
       existing.lastOpenedAt = new Date().toISOString();
@@ -1234,7 +1357,7 @@ function setupIpc() {
   function parseSessionHeader(filePath) {
     try {
       const stat = fs.statSync(filePath);
-      const headSize = Math.min(4096, stat.size);
+      const headSize = Math.min(65536, stat.size); // 64KB（从 4KB 升级）
       const fd = fs.openSync(filePath, 'r');
       const buf = Buffer.alloc(headSize);
       fs.readSync(fd, buf, 0, headSize, 0);
@@ -1325,8 +1448,26 @@ function setupIpc() {
         });
       }
 
-      // 按 lastOpenedAt 降序
-      result.sort((a, b) => (b.lastOpenedAt || '').localeCompare(a.lastOpenedAt || ''));
+      // 按最新会话活动排序（最近活跃的项目排在前面）
+      for (const proj of result) {
+        try {
+          const projectPath = path.join(SESSIONS_DIR, proj.dirName);
+          if (fs.existsSync(projectPath)) {
+            const files = fs.readdirSync(projectPath).filter(f => f.endsWith('.jsonl'));
+            let newestMtime = 0;
+            for (const f of files) {
+              const stat = fs.statSync(path.join(projectPath, f));
+              if (stat.mtimeMs > newestMtime) newestMtime = stat.mtimeMs;
+            }
+            proj.lastSessionMtime = newestMtime;
+          } else { proj.lastSessionMtime = 0; }
+        } catch { proj.lastSessionMtime = 0; }
+      }
+      result.sort((a, b) => {
+        const aTime = b.lastSessionMtime || new Date(b.lastOpenedAt || 0).getTime() || 0;
+        const bTime = a.lastSessionMtime || new Date(a.lastOpenedAt || 0).getTime() || 0;
+        return aTime - bTime;
+      });
 
       return result;
     } catch (err) {
@@ -1388,6 +1529,20 @@ function setupIpc() {
       }
 
       const lines = text.split('\n').filter(l => l.trim());
+
+      // 第一遍：收集 tool_execution_start 的参数（按 toolCallId 索引）
+      const toolMeta = new Map();
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'custom' && obj.customType === 'tool_execution_start' && obj.data) {
+            const tcId = obj.data.toolCallId;
+            if (tcId) toolMeta.set(tcId, { toolName: obj.data.toolName, args: obj.data.args });
+          }
+        } catch {}
+      }
+
+      // 第二遍：解析消息，关联工具参数
       const messages = [];
 
       for (const line of lines) {
@@ -1395,7 +1550,6 @@ function setupIpc() {
           const obj = JSON.parse(line);
           if (obj.type === 'message' && obj.message) {
             const msg = obj.message;
-            // 提取文本内容
             let textContent = '';
             let thinkingContent = '';
             let toolCalls = [];
@@ -1415,6 +1569,32 @@ function setupIpc() {
                     input: part.input || part.arguments || {},
                   });
                 }
+              }
+            }
+
+            // toolResult 补全：从第一遍的 toolMeta 中恢复参数
+            if (msg.role === 'toolResult' && msg.toolCallId) {
+              const meta = toolMeta.get(msg.toolCallId);
+              if (meta) {
+                const resultText = Array.isArray(msg.content)
+                  ? msg.content.filter(c => c.type === 'text').map(c => c.text).join('')
+                  : (typeof msg.content === 'string' ? msg.content : '');
+                messages.push({
+                  role: 'assistant',
+                  text: '',
+                  thinking: '',
+                  toolCalls: [{
+                    id: msg.toolCallId,
+                    name: meta.toolName || msg.toolName || 'tool',
+                    input: meta.args || {},
+                    result: resultText.substring(0, 10000),
+                    isError: msg.isError || false,
+                  }],
+                  timestamp: obj.timestamp || msg.timestamp,
+                  model: msg.model || '',
+                  provider: msg.provider || '',
+                });
+                continue;
               }
             }
 
@@ -1505,6 +1685,20 @@ function setupIpc() {
         if (wsSuffix && fs.existsSync(projectCwd)) {
           rimraf(projectCwd);
           console.log(`[deleteProject] 已删除 workspace 目录: ${projectCwd}`);
+        }
+      }
+
+      // 加入 removedCwds 列表，防止 discoverWorkspaceProjects 再次发现
+      if (project && project.cwd) {
+        const projectCwd = path.resolve(project.cwd);
+        const removedList = (() => {
+          try { return fs.existsSync(REMOVED_CWDS_FILE) ? JSON.parse(fs.readFileSync(REMOVED_CWDS_FILE, 'utf8')) : []; }
+          catch { return []; }
+        })();
+        const normalized = projectCwd.toLowerCase();
+        if (!removedList.includes(normalized)) {
+          removedList.push(normalized);
+          fs.writeFileSync(REMOVED_CWDS_FILE, JSON.stringify(removedList), 'utf8');
         }
       }
 
@@ -1642,6 +1836,98 @@ function setupIpc() {
       return { error: err.message };
     }
   });
+
+  // ── 读取用户消息列表（用于分支功能） ──
+  ipcMain.handle('sessions:getUserEntries', async (event, sessionPath) => {
+    try {
+      const resolved = path.resolve(sessionPath);
+      if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) {
+        return { error: 'Session file not found' };
+      }
+      const text = fs.readFileSync(resolved, 'utf8');
+      const lines = text.split('\n').filter(l => l.trim());
+      const entries = [];
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'message' && obj.message && obj.message.role === 'user') {
+            let text = '';
+            if (typeof obj.message.content === 'string') text = obj.message.content;
+            else if (Array.isArray(obj.message.content)) {
+              text = obj.message.content.filter(c => c.type === 'text').map(c => c.text).join('');
+            }
+            if (text) entries.push({ id: obj.message.id || String(entries.length), text: text.substring(0, 200) });
+          }
+        } catch {}
+      }
+      return { entries };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ── 导出会话为 HTML ──
+  ipcMain.handle('sessions:exportHtml', async (event, sessionPath) => {
+    try {
+      const resolved = path.resolve(sessionPath);
+      if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) {
+        return { error: 'Session file not found' };
+      }
+      const text = fs.readFileSync(resolved, 'utf8');
+      const lines = text.split('\n').filter(l => l.trim());
+      let htmlParts = ['<!DOCTYPE html><html><head><meta charset="UTF-8"><title>对话导出</title>',
+        '<style>body{font-family:sans-serif;max-width:800px;margin:0 auto;padding:20px;}',
+        '.msg{margin:12px 0;padding:12px;border-radius:8px;}',
+        '.user{background:#e8f0fe;} .assistant{background:#f5f5f5;}',
+        '.role{font-weight:bold;font-size:12px;color:#666;margin-bottom:4px;}',
+        '.time{font-size:11px;color:#999;float:right;}',
+        'pre{background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;overflow-x:auto;}',
+        '</style></head><body>'];
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'message' && obj.message) {
+            const msg = obj.message;
+            let content = '';
+            if (typeof msg.content === 'string') content = msg.content;
+            else if (Array.isArray(msg.content)) {
+              content = msg.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+            }
+            if (!content) continue;
+            const role = msg.role === 'user' ? '你' : '助手';
+            const time = obj.timestamp ? new Date(obj.timestamp).toLocaleString() : '';
+            const escaped = content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+            htmlParts.push(`<div class="msg ${msg.role}"><div class="role">${role}<span class="time">${time}</span></div><div>${escaped}</div></div>`);
+          }
+        } catch {}
+      }
+      htmlParts.push('</body></html>');
+      const desktopPath = path.join(require('os').homedir(), 'Desktop');
+      const sessionName = path.basename(resolved, '.jsonl').substring(0, 30);
+      const exportPath = path.join(desktopPath, `对话导出-${sessionName}-${Date.now()}.html`);
+      fs.writeFileSync(exportPath, htmlParts.join('\n'), 'utf8');
+      return { success: true, path: exportPath };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ── removedCwds：防止已删除的项目被自动发现复活 ──
+  // （readRemovedCwds / writeRemovedCwds 已在上方模块级定义）
+
+  ipcMain.handle('sessions:getRemovedCwds', async () => readRemovedCwds());
+  ipcMain.handle('sessions:addRemovedCwd', async (event, cwd) => {
+    const list = readRemovedCwds();
+    const normalized = path.resolve(cwd).toLowerCase();
+    if (!list.includes(normalized)) { list.push(normalized); writeRemovedCwds(list); }
+    return { success: true };
+  });
+  ipcMain.handle('sessions:removeRemovedCwd', async (event, cwd) => {
+    const list = readRemovedCwds();
+    const normalized = path.resolve(cwd).toLowerCase();
+    writeRemovedCwds(list.filter(c => c !== normalized));
+    return { success: true };
+  });
 }
 
 // ── App Lifecycle ──
@@ -1666,13 +1952,13 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  // 对所有实例发 abort 然后优雅关闭
+  // 同步杀所有进程（app 退出路径必须同步等进程死透）
   for (const inst of ompManager.instances.values()) {
     if (inst.process) {
       try {
         inst.process.stdin.write(JSON.stringify({ type: 'abort' }) + '\n');
       } catch (e) { /* ignore */ }
-      try { inst.process.kill('SIGTERM'); } catch (e) { /* ignore */ }
+      _killTree(inst.process.pid, true);
     }
   }
   // 给 2 秒时间优雅退出

@@ -263,7 +263,7 @@ export default async function (pi: any) {
   }
 
   log("init", [
-    "=== claude-mode extension loaded (v2.1) ===",
+    "=== claude-mode extension loaded (v2.3) ===",
     `pid: ${process.pid}`,
     `agentDir: ${AGENT_DIR}`,
     `portableRoot: ${PORTABLE_ROOT}`,
@@ -703,25 +703,15 @@ export default async function (pi: any) {
       auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason })
       log("session_stop", `reason=${reason} stopReason=${lastMsg?.stopReason}`)
 
-      // 仅在真正的异常停止时自动续行：
-      // - error: 模型返回错误，值得让模型重试
-      // - unknown: 无法判断（无 last_assistant_message），保守续行一次
-      // 不续行的情况：
-      // - complete: 任务正常完成
-      // - interrupted: 有待处理的工具调用或达到 max tokens（omp 内部处理）
-      // - aborted: 用户主动中断
-      if (reason === "error") {
-        log("session_stop.auto_continue", `auto-continuing after reason=error`)
+      // 自动续行：error（模型出错，重试可能恢复）和 unknown（无 lastMsg，不明原因停止）
+      // 不续行：complete / interrupted / aborted — 正常结束或用户中断
+      if (reason === "error" || reason === "unknown") {
+        log("session_stop.auto_continue", `auto-continuing after reason=${reason}`)
         return {
           continue: true,
-          additionalContext: "上一轮请求出错，请继续之前的任务。如果无法继续，向用户说明情况。"
-        }
-      }
-      if (reason === "unknown") {
-        log("session_stop.auto_continue", `auto-continuing after reason=unknown (no last_assistant_message)`)
-        return {
-          continue: true,
-          additionalContext: "会话异常终止，请继续之前的任务。如果无法继续，向用户说明情况。"
+          additionalContext: reason === "error"
+            ? "上一轮请求出错，请继续之前的任务。如果无法继续，向用户说明情况。"
+            : "会话异常终止（无停止原因），请继续之前的任务。如果无法继续，向用户说明情况。"
         }
       }
     } catch (err: any) {
