@@ -115,40 +115,40 @@ const MNEMOPI_TOKENIZER_FILES = {
 // 从 data/agent/mnemopi/ 分发目录复制到 omp 运行时缓存路径
 function _ensureEmbeddingCache() {
   // ── Phase 1: II2 tokenizer 缓存 (CWD/local_cache/fast-bge-small-zh-v1.5/) ──
+  // II2 函数在启动时检查此目录是否存在 4 个 tokenizer JSON，有则跳过下载
   try {
     if (!fs.existsSync(MNEMOPI_TOKENIZER_DIR)) {
       fs.mkdirSync(MNEMOPI_TOKENIZER_DIR, { recursive: true });
     }
-    // 写入精简版元数据文件
-    for (const [name, content] of Object.entries(MNEMOPI_TOKENIZER_FILES)) {
-      const fp = path.join(MNEMOPI_TOKENIZER_DIR, name);
-      if (!fs.existsSync(fp)) {
-        fs.writeFileSync(fp, content, 'utf8');
+    // 优先从分发目录复制完整版文件，内嵌精简版作兜底
+    const phase1Files = ['config.json', 'tokenizer_config.json', 'special_tokens_map.json', 'tokenizer.json'];
+    for (const fname of phase1Files) {
+      const dst = path.join(MNEMOPI_TOKENIZER_DIR, fname);
+      if (!fs.existsSync(dst) || fs.statSync(dst).size < 100) {
+        const src = path.join(MNEMOPI_BUNDLED_DIR, fname);
+        if (fs.existsSync(src) && fs.statSync(src).size > 100) {
+          fs.copyFileSync(src, dst);
+        } else if (MNEMOPI_TOKENIZER_FILES[fname]) {
+          fs.writeFileSync(dst, MNEMOPI_TOKENIZER_FILES[fname], 'utf8');
+        }
       }
     }
-    // tokenizer.json (439KB) 从发布包复制
-    const tokenizerJson = path.join(MNEMOPI_TOKENIZER_DIR, 'tokenizer.json');
-    if (!fs.existsSync(tokenizerJson) || fs.statSync(tokenizerJson).size < 1000) {
-      const src = path.join(MNEMOPI_BUNDLED_DIR, 'tokenizer.json');
-      if (fs.existsSync(src) && fs.statSync(src).size > 1000) {
-        fs.copyFileSync(src, tokenizerJson);
-        console.log('[EmbedCache] Phase 1: tokenizer.json 已预置');
-      }
-    }
+    console.log('[EmbedCache] Phase 1: tokenizer 缓存已预置');
   } catch (e) {
     console.warn('[EmbedCache] Phase 1 预置失败:', e.message);
   }
 
   // ── Phase 2: FlagEmbedding ONNX 缓存 ({home}/.omp/cache/fastembed/fast-bge-small-zh-v1.5/) ──
+  // retrieveModel() 检查此目录是否存在 model_optimized.onnx，有则跳过下载
   try {
     const onnxModel = path.join(MNEMOPI_ONNX_DIR, 'model_optimized.onnx');
-    if (!fs.existsSync(onnxModel) || fs.statSync(onnxModel).size < 1000) {
+    if (!fs.existsSync(onnxModel) || fs.statSync(onnxModel).size < 1000000) {
       const srcOnnx = path.join(MNEMOPI_BUNDLED_DIR, 'model_optimized.onnx');
       if (fs.existsSync(srcOnnx) && fs.statSync(srcOnnx).size > 1000000) {
         if (!fs.existsSync(MNEMOPI_ONNX_DIR)) {
           fs.mkdirSync(MNEMOPI_ONNX_DIR, { recursive: true });
         }
-        // 复制 ONNX 模型 (90MB) + 辅助文件
+        // 从分发目录复制所有文件
         const filesToCopy = ['model_optimized.onnx', 'ort_config.json', 'vocab.txt', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'config.json'];
         let copied = 0;
         for (const fname of filesToCopy) {
@@ -159,7 +159,7 @@ function _ensureEmbeddingCache() {
             copied++;
           }
         }
-        // 补充 config.json（内嵌版可能更完整）
+        // 兜底：config.json 内嵌版
         const configDst = path.join(MNEMOPI_ONNX_DIR, 'config.json');
         if (!fs.existsSync(configDst)) {
           fs.writeFileSync(configDst, MNEMOPI_TOKENIZER_FILES['config.json'], 'utf8');
@@ -169,6 +169,22 @@ function _ensureEmbeddingCache() {
       } else {
         console.log('[EmbedCache] Phase 2: 发布包中无 model_optimized.onnx，首次 embed 需网络下载');
       }
+    } else {
+      // ONNX 已存在，但补充可能缺失的辅助文件
+      if (!fs.existsSync(MNEMOPI_ONNX_DIR)) {
+        fs.mkdirSync(MNEMOPI_ONNX_DIR, { recursive: true });
+      }
+      const auxFiles = ['ort_config.json', 'vocab.txt', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'config.json'];
+      let patched = 0;
+      for (const fname of auxFiles) {
+        const src = path.join(MNEMOPI_BUNDLED_DIR, fname);
+        const dst = path.join(MNEMOPI_ONNX_DIR, fname);
+        if (fs.existsSync(src) && !fs.existsSync(dst)) {
+          fs.copyFileSync(src, dst);
+          patched++;
+        }
+      }
+      if (patched > 0) console.log(`[EmbedCache] Phase 2: 补充辅助文件 ${patched} 个`);
     }
   } catch (e) {
     console.warn('[EmbedCache] Phase 2 预置失败:', e.message);
@@ -527,8 +543,6 @@ class OmpInstance {
       this.agentRunning = false;
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
 
-      // warmup 机制已移除：用户首条消息自然触发 mnemopi embed worker 初始化
-      // 无需自动发送 __warmup__，避免 60 秒阻塞 + JSONL 污染 + 事件过滤 bug
 
       // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
       if (this._pendingCrashContinue) {
@@ -653,75 +667,6 @@ class OmpInstance {
       }
     } catch (e) {
       console.warn(`[OmpInstance] 检查 fastembed-runtime 失败: ${e.message}`);
-    }
-  }
-
-  // 预热完成后清理 JSONL 中的 __warmup__ 记录，避免历史污染和文件膨胀
-  _cleanWarmupFromSession() {
-    try {
-      const sessionsDir = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions');
-      if (!fs.existsSync(sessionsDir)) return;
-
-      // 找最近 60 秒内修改的 JSONL 文件（warmup 刚完成，一定是最新写入的）
-      const cutoff = Date.now() - 60000;
-      let latestPath = null;
-      let latestMtime = 0;
-
-      for (const dir of fs.readdirSync(sessionsDir)) {
-        const fullDir = path.join(sessionsDir, dir);
-        try { if (!fs.statSync(fullDir).isDirectory()) continue; } catch { continue; }
-        for (const f of fs.readdirSync(fullDir)) {
-          if (!f.endsWith('.jsonl')) continue;
-          const fp = path.join(fullDir, f);
-          try {
-            const mtime = fs.statSync(fp).mtimeMs;
-            if (mtime > cutoff && mtime > latestMtime) {
-              latestMtime = mtime;
-              latestPath = fp;
-            }
-          } catch {}
-        }
-      }
-
-      if (!latestPath) return;
-
-      // 读取并过滤掉 __warmup__ 相关行
-      const lines = fs.readFileSync(latestPath, 'utf8').split('\n').filter(l => l.trim());
-      let warmupFound = false;
-      const filtered = [];
-      let skipFollowing = false;
-
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          if (obj.type === 'message' && obj.message) {
-            const msg = obj.message;
-            const text = typeof msg.content === 'string' ? msg.content
-              : Array.isArray(msg.content) ? msg.content.filter(p => p.type === 'text').map(p => p.text).join('')
-              : '';
-            if (text.trim() === '__warmup__') {
-              warmupFound = true;
-              skipFollowing = true;
-              continue;
-            }
-            if (skipFollowing && msg.role === 'user') {
-              skipFollowing = false;
-            }
-            if (skipFollowing) continue;
-          }
-          if (skipFollowing && obj.type === 'custom') continue;
-          filtered.push(line);
-        } catch {
-          if (!skipFollowing) filtered.push(line);
-        }
-      }
-
-      if (warmupFound) {
-        fs.writeFileSync(latestPath, filtered.join('\n') + '\n', 'utf8');
-        console.log(`[OmpInstance:${this._shortCwd()}] 已清理 JSONL 中的 __warmup__ 记录`);
-      }
-    } catch (err) {
-      console.error(`[OmpInstance:${this._shortCwd()}] 清理 warmup 记录失败:`, err.message);
     }
   }
 }
@@ -2033,9 +1978,7 @@ function setupIpc() {
       }
 
       // 第二遍：解析消息，关联工具参数
-      // 预热过滤：跳过 __warmup__ 用户消息及紧随其后的 assistant/toolResult 消息
       const messages = [];
-      let skipWarmupFollowers = false;
 
       for (const line of lines) {
         try {
@@ -2061,21 +2004,6 @@ function setupIpc() {
                     input: part.input || part.arguments || {},
                   });
                 }
-              }
-            }
-
-            // 历史遗留 warmup 过滤：旧版 JSONL 中可能包含 __warmup__ 消息
-            if (msg.role === 'user' && textContent.trim() === '__warmup__') {
-              skipWarmupFollowers = true;
-              continue;
-            }
-            if (skipWarmupFollowers) {
-              if (msg.role === 'user') {
-                // 遇到新用户消息，停止跳过
-                skipWarmupFollowers = false;
-              } else {
-                // assistant / toolResult 等跟随消息也跳过
-                continue;
               }
             }
 
