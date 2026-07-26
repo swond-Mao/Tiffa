@@ -295,6 +295,14 @@ class OmpInstance {
     }
     const line = JSON.stringify(frame) + '\n';
     this.process.stdin.write(line, 'utf8');
+    // 调试：记录发送的帧
+    try {
+      const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
+      const summary = frame.type === 'prompt'
+        ? `SEND prompt: ${(frame.message || '').substring(0, 80)}`
+        : `SEND ${frame.type}: ${JSON.stringify(frame).substring(0, 100)}`;
+      fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${summary}\n`);
+    } catch {}
   }
 
   // ── 看门狗 ──
@@ -381,7 +389,7 @@ class OmpInstance {
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
 
       // mnemopi 预热：omp ready 后延迟 2 秒发一条预热消息
-      // 触发 autoRecall -> mnemopi worker 启动 -> ONNX 模型加载
+      // 即使 autoRecall=false，也会触发 mnemopi embed worker 初始化
       // 前端通过 _warmup 标记隐藏这条消息和回复
       if (!this._mnemopiWarmed) {
         this._mnemopiWarmed = true;
@@ -447,6 +455,28 @@ class OmpInstance {
 
     // Forward all events to renderer (带 cwd 标记)
     event._cwd = this.cwd;
+
+    // 调试：记录关键事件到日志文件
+    const _debugLog = (msg) => {
+      try {
+        const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
+        fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${msg}\n`);
+      } catch {}
+    };
+    if (event.type === 'ready' || event.type === 'agent_start' || event.type === 'agent_end'
+      || event.type === 'message_start' || event.type === 'message_end'
+      || event.type === 'prompt_result' || event.type === 'turn_start' || event.type === 'turn_end') {
+      _debugLog(`${event.type} ${event.agentInvoked ? 'agentInvoked' : ''} ${event.role || ''} ${event.model || ''}`);
+    } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+      // 跳过频繁的 delta 事件，只记录第一个
+      if (!this._lastDeltaLogged || Date.now() - this._lastDeltaLogged > 5000) {
+        _debugLog(`${event.type} (delta logged, skipping rest for 5s)`);
+        this._lastDeltaLogged = Date.now();
+      }
+    } else if (event.type === 'error') {
+      _debugLog(`ERROR: ${JSON.stringify(event).substring(0, 200)}`);
+    }
+
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('omp:event', event);
     }

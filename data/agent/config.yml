@@ -10,15 +10,19 @@ modelRoles:
   commit: "qwen/localmodel"
   tiny: "xiaomi/mimo-v2.5"
 
-# Mnemopi 记忆系统（v4.0 启用）
+# Mnemopi 记忆系统 — 三重记忆 + RAG 方案
+# L1: USER.md（用户身份/偏好，零延迟注入）
+# L2: MEMORY.md（全局事实索引，零延迟注入）
+# L3: PROJECT.md（项目级记忆，零延迟注入）
+# mnemopi: 全局 RAG，跨项目语义检索 + 压缩断片恢复
 memory:
   backend: mnemopi
   mnemopi:
     embeddingModel: "fast-bge-small-zh-v1.5"
-    scoping: "per-project-plus-global"
-    autoRecall: true
+    scoping: "global"
+    autoRecall: false
     autoRetain: true
-    retainEveryNTurns: 5
+    retainEveryNTurns: 2
     recallLimit: 10
     injectionTokenLimit: 2000
 tools:
