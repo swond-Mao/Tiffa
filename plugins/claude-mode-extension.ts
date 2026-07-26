@@ -188,7 +188,10 @@ export default async function (pi: any) {
     }
   })
 
-  // ── 3. session_stop ── error 续行（最小化，用 omp 原生机制）
+  let errorContinueCount = 0
+  const MAX_ERROR_CONTINUES = 2  // 连续 error 最多续行 2 次，防止死循环
+
+  // ── 3. session_stop ── error 续行（限次，防止死循环）
   pi.on("session_stop", async (event: any) => {
     try {
       const lastMsg = event.last_assistant_message
@@ -207,15 +210,22 @@ export default async function (pi: any) {
         reason = "unknown"
       }
 
-      auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason })
-      log("session_stop", `reason=${reason}`)
+      // 正常完成时重置计数
+      if (reason === "complete") {
+        errorContinueCount = 0
+      }
 
-      // 仅 error 和 unknown 续行，其他不干预
-      if (reason === "error") {
+      auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason, errorContinueCount })
+      log("session_stop", `reason=${reason} errorContinueCount=${errorContinueCount}`)
+
+      // 仅 error 续行，限次防止死循环
+      if (reason === "error" && errorContinueCount < MAX_ERROR_CONTINUES) {
+        errorContinueCount++
+        log("session_stop", `continuing after error (${errorContinueCount}/${MAX_ERROR_CONTINUES})`)
         return { continue: true, additionalContext: "上一轮请求出错，请继续之前的任务。如果无法继续，向用户说明情况。" }
       }
-      if (reason === "unknown") {
-        return { continue: true, additionalContext: "会话异常终止，请继续之前的任务。" }
+      if (reason === "error") {
+        log("session_stop", `error continue limit reached (${MAX_ERROR_CONTINUES}), stopping`)
       }
     } catch (err: any) {
       log("session_stop.error", err?.message || String(err))
