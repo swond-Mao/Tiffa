@@ -422,6 +422,8 @@ class OmpInstance {
       if (this._warmupActive) {
         console.log(`[OmpInstance:${this._shortCwd()}] mnemopi 预热完成`);
         this._warmupActive = false;
+        // 预热完成后清理 JSONL 中的 warmup 记录，避免历史污染
+        this._cleanWarmupFromSession();
         return;
       }
     }
@@ -467,6 +469,75 @@ class OmpInstance {
   _shortCwd() {
     const parts = this.cwd.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1] || this.cwd;
+  }
+
+  // 预热完成后清理 JSONL 中的 __warmup__ 记录，避免历史污染和文件膨胀
+  _cleanWarmupFromSession() {
+    try {
+      const sessionsDir = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions');
+      if (!fs.existsSync(sessionsDir)) return;
+
+      // 找最近 60 秒内修改的 JSONL 文件（warmup 刚完成，一定是最新写入的）
+      const cutoff = Date.now() - 60000;
+      let latestPath = null;
+      let latestMtime = 0;
+
+      for (const dir of fs.readdirSync(sessionsDir)) {
+        const fullDir = path.join(sessionsDir, dir);
+        try { if (!fs.statSync(fullDir).isDirectory()) continue; } catch { continue; }
+        for (const f of fs.readdirSync(fullDir)) {
+          if (!f.endsWith('.jsonl')) continue;
+          const fp = path.join(fullDir, f);
+          try {
+            const mtime = fs.statSync(fp).mtimeMs;
+            if (mtime > cutoff && mtime > latestMtime) {
+              latestMtime = mtime;
+              latestPath = fp;
+            }
+          } catch {}
+        }
+      }
+
+      if (!latestPath) return;
+
+      // 读取并过滤掉 __warmup__ 相关行
+      const lines = fs.readFileSync(latestPath, 'utf8').split('\n').filter(l => l.trim());
+      let warmupFound = false;
+      const filtered = [];
+      let skipFollowing = false;
+
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'message' && obj.message) {
+            const msg = obj.message;
+            const text = typeof msg.content === 'string' ? msg.content
+              : Array.isArray(msg.content) ? msg.content.filter(p => p.type === 'text').map(p => p.text).join('')
+              : '';
+            if (text.trim() === '__warmup__') {
+              warmupFound = true;
+              skipFollowing = true;
+              continue;
+            }
+            if (skipFollowing && msg.role === 'user') {
+              skipFollowing = false;
+            }
+            if (skipFollowing) continue;
+          }
+          if (skipFollowing && obj.type === 'custom') continue;
+          filtered.push(line);
+        } catch {
+          if (!skipFollowing) filtered.push(line);
+        }
+      }
+
+      if (warmupFound) {
+        fs.writeFileSync(latestPath, filtered.join('\n') + '\n', 'utf8');
+        console.log(`[OmpInstance:${this._shortCwd()}] 已清理 JSONL 中的 __warmup__ 记录`);
+      }
+    } catch (err) {
+      console.error(`[OmpInstance:${this._shortCwd()}] 清理 warmup 记录失败:`, err.message);
+    }
   }
 }
 
@@ -1757,7 +1828,9 @@ function setupIpc() {
       }
 
       // 第二遍：解析消息，关联工具参数
+      // 预热过滤：跳过 __warmup__ 用户消息及紧随其后的 assistant/toolResult 消息
       const messages = [];
+      let skipWarmupFollowers = false;
 
       for (const line of lines) {
         try {
@@ -1783,6 +1856,21 @@ function setupIpc() {
                     input: part.input || part.arguments || {},
                   });
                 }
+              }
+            }
+
+            // 预热消息过滤：用户消息含 __warmup__ → 跳过，并标记跳过后续非用户消息
+            if (msg.role === 'user' && textContent.trim() === '__warmup__') {
+              skipWarmupFollowers = true;
+              continue;
+            }
+            if (skipWarmupFollowers) {
+              if (msg.role === 'user') {
+                // 遇到新用户消息，停止跳过
+                skipWarmupFollowers = false;
+              } else {
+                // assistant / toolResult 等跟随消息也跳过
+                continue;
               }
             }
 
