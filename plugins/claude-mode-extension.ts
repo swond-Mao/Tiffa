@@ -188,10 +188,9 @@ export default async function (pi: any) {
     }
   })
 
-  let errorContinueCount = 0
-  const MAX_ERROR_CONTINUES = 2  // 连续 error 最多续行 2 次，防止死循环
+  let hasContinuedAfterError = false  // 本轮是否已续行过一次
 
-  // ── 3. session_stop ── error 续行（限次，防止死循环）
+  // ── 3. session_stop ── error 续行一次，5 秒后执行
   pi.on("session_stop", async (event: any) => {
     try {
       const lastMsg = event.last_assistant_message
@@ -210,22 +209,23 @@ export default async function (pi: any) {
         reason = "unknown"
       }
 
-      // 正常完成时重置计数
+      // 正常完成时重置标记
       if (reason === "complete") {
-        errorContinueCount = 0
+        hasContinuedAfterError = false
       }
 
-      auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason, errorContinueCount })
-      log("session_stop", `reason=${reason} errorContinueCount=${errorContinueCount}`)
+      auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason, hasContinuedAfterError })
+      log("session_stop", `reason=${reason} hasContinuedAfterError=${hasContinuedAfterError}`)
 
-      // 仅 error 续行，限次防止死循环
-      if (reason === "error" && errorContinueCount < MAX_ERROR_CONTINUES) {
-        errorContinueCount++
-        log("session_stop", `continuing after error (${errorContinueCount}/${MAX_ERROR_CONTINUES})`)
+      // error 且本轮未续行过：5 秒后续行一次
+      if (reason === "error" && !hasContinuedAfterError) {
+        hasContinuedAfterError = true
+        log("session_stop", "continuing after error in 5s (one-time)")
+        await new Promise(r => setTimeout(r, 5000))
         return { continue: true, additionalContext: "上一轮请求出错，请继续之前的任务。如果无法继续，向用户说明情况。" }
       }
       if (reason === "error") {
-        log("session_stop", `error continue limit reached (${MAX_ERROR_CONTINUES}), stopping`)
+        log("session_stop", "already continued once after error, stopping")
       }
     } catch (err: any) {
       log("session_stop.error", err?.message || String(err))
