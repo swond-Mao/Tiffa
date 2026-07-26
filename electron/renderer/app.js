@@ -680,13 +680,13 @@ async function loadProjects() {
         state.activeSessionPaths.add(latest.path);
         renderSessionTabs();
         const doRestore = async () => {
+          // 先渲染历史（文件系统读取，不依赖 omp），再通知 omp 切换
           try {
-            await ompDesktop.switchSession(latest.path);
             dom.messages.innerHTML = '';
             await loadAndRenderHistory(latest.path);
-          } catch (err) {
-            // 恢复失败不影响使用
-          }
+          } catch {}
+          // switchSession 异步通知 omp，不阻塞 UI
+          ompDesktop.switchSession(latest.path).catch(() => {});
         };
         if (state.welcomePhase === 'showing') {
           setTimeout(doRestore, 5500);
@@ -982,7 +982,13 @@ async function selectProject(dirName) {
         return;
       }
       state.workspacePath = result.cwd || project.cwd;
-      state.ompReady = true;
+      if (result.ready === false) {
+        state.ompReady = false;
+        updateStatus('正在启动 omp 实例，请稍候...');
+        addNotice('info', '新项目 omp 实例正在启动，就绪后可发送消息');
+      } else {
+        state.ompReady = true;
+      }
     } catch (err) {
       addNotice('error', `切换项目失败: ${err.message}`);
       updateStatus('就绪');
@@ -1044,23 +1050,24 @@ async function selectProject(dirName) {
           state.currentTextBuffer = '';
           scrollToBottom();
         } else {
+          // 先渲染历史（从文件系统读取，不依赖 omp），再通知 omp 切换会话
           try {
-            await ompDesktop.switchSession(latest.path);
+            dom.messages.innerHTML = '';
+            await loadAndRenderHistory(latest.path);
+          } catch {}
+          // switchSession 通知 omp 内部切换（可能失败，不影响 UI 显示）
+          ompDesktop.switchSession(latest.path).then(() => {
             // 切换会话后恢复该对话之前使用的模型
             const saved = state.sessionModelMap[latest.path];
             if (saved && saved.provider && saved.modelId) {
               try {
-                await ompDesktop.setModel(saved.provider, saved.modelId);
+                ompDesktop.setModel(saved.provider, saved.modelId);
                 state.currentModel = saved.modelId;
                 state.currentProvider = saved.provider;
                 dom.currentModel.textContent = saved.modelId;
               } catch {}
             }
-            dom.messages.innerHTML = '';
-            await loadAndRenderHistory(latest.path);
-          } catch (err) {
-            showWelcome();
-          }
+          }).catch(() => {});
         }
       };
 
@@ -1421,22 +1428,7 @@ async function switchToSession(sessionPath) {
       return;
     }
 
-    // 先通知 omp 切换会话上下文
-    await ompDesktop.switchSession(sessionPath);
-    // 切换会话后 omp 会重置模型到默认值，需要恢复该对话之前使用的模型
-    const saved = state.sessionModelMap[sessionPath];
-    if (saved && saved.provider && saved.modelId) {
-      try {
-        await ompDesktop.setModel(saved.provider, saved.modelId);
-        state.currentModel = saved.modelId;
-        state.currentProvider = saved.provider;
-        dom.currentModel.textContent = saved.modelId;
-      } catch (e) {
-        console.warn('[渲染] 切换会话后恢复模型失败:', e);
-      }
-    }
-
-    // 优先从缓存恢复，否则从磁盘加载
+    // 先渲染历史（从文件系统读取，不依赖 omp ready）
     const cached = state.sessionMessageCache.get(sessionPath);
     if (cached) {
       // 启动阶段：先保持欢迎页，延迟后恢复对话内容
@@ -1471,6 +1463,18 @@ async function switchToSession(sessionPath) {
   } catch (err) {
     addNotice('error', `切换对话失败: ${err.message}`);
   }
+
+  // 异步通知 omp 切换会话上下文（不阻塞 UI，失败也不影响已渲染的历史）
+  ompDesktop.switchSession(sessionPath).then(() => {
+    const saved = state.sessionModelMap[sessionPath];
+    if (saved && saved.provider && saved.modelId) {
+      ompDesktop.setModel(saved.provider, saved.modelId).then(() => {
+        state.currentModel = saved.modelId;
+        state.currentProvider = saved.provider;
+        dom.currentModel.textContent = saved.modelId;
+      }).catch(() => {});
+    }
+  }).catch(() => {});
 }
 
 async function loadAndRenderHistory(sessionPath) {
@@ -2536,7 +2540,16 @@ async function sendMessage() {
   updateInputState();
   updateStatus('思考中...');
   try { await ompDesktop.send(message, images); }
-  catch (err) { addNotice('error', `发送失败: ${err.message}`); }
+  catch (err) {
+    addNotice('error', `发送失败: ${err.message}`);
+    // 发送失败时重置状态，避免 UI 卡在"思考中..."
+    state.agentRunning = false;
+    state.instanceAgentRunning.set(state.workspacePath, false);
+    stopStallCheck();
+    finalizeAssistantMessage();
+    updateInputState();
+    updateStatus('就绪');
+  }
 }
 
 async function abortMessage() {

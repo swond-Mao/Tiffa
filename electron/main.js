@@ -110,7 +110,7 @@ class OmpInstance {
     };
 
     // 调试开关
-    if (process.argv.includes('--debug')) {
+    if (process.argv.includes('--verbose')) {
       env.PI_PYTHON_IPC_TRACE = '1';
     }
 
@@ -484,19 +484,19 @@ class OmpInstanceManager {
       this.instances.set(normalized, inst);
       inst.start();
 
-      // 等待就绪（最多 15 秒）
+      // 等待就绪（最多 30 秒，比 15 秒更宽容，避免慢机器上误超时）
       await new Promise((resolve) => {
         let checks = 0;
         const check = setInterval(() => {
           checks++;
-          if (inst.ready || checks > 150) {
+          if (inst.ready || checks > 300) {
             clearInterval(check);
             resolve();
           }
         }, 100);
       });
 
-      return inst;
+      return { inst, ready: inst.ready };
     })();
 
     this.spawning.set(normalized, spawnPromise);
@@ -628,7 +628,7 @@ function createWindow() {
   });
 
   // Open dev tools in dev mode
-  if (process.argv.includes('--dev') || process.argv.includes('--debug')) {
+  if (process.argv.includes('--dev') || process.argv.includes('--verbose')) {
     mainWindow.webContents.openDevTools();
   }
 }
@@ -793,8 +793,8 @@ function setupIpc() {
       const normalized = path.resolve(cwd);
       // 确保项目注册到 projects.json
       ensureProjectInJson(normalized);
-      await ompManager.activate(normalized);
-      return { success: true, cwd: ompManager.activeCwd };
+      const result = await ompManager.activate(normalized);
+      return { success: true, cwd: ompManager.activeCwd, ready: result.ready };
     } catch (err) {
       return { error: err.message };
     }
