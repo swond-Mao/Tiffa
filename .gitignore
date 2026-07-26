@@ -36,10 +36,12 @@ data/agent/models.yml.bak*
 data/agent/models.yml.example
 data/cache/
 data/memory/
+local_cache/
 
 # Mnemopi runtime (databases + embedding cache)
 data/agent/memories/
 data/agent/mnemopi/
+!data/agent/mnemopi/tokenizer.json
 data/agent/removed-cwds.json
 
 # Log files

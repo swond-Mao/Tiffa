@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   getModels: () => ipcRenderer.invoke('omp:getModels'),
   getState: () => ipcRenderer.invoke('omp:getState'),
   isReady: () => ipcRenderer.invoke('omp:isReady'),
+  diagnostics: () => ipcRenderer.invoke('omp:diagnostics'),
   steer: (message) => ipcRenderer.invoke('omp:steer', message),
   extensionResponse: (id, value) => ipcRenderer.invoke('omp:extensionResponse', id, value),
   compact: () => ipcRenderer.invoke('omp:compact'),

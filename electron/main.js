@@ -24,6 +24,7 @@ if (argRootIdx >= 0 && process.argv[argRootIdx + 1]) {
   global.PORTABLE_ROOT = path.resolve(__dirname, '..');
 }
 const PORTABLE_ROOT = global.PORTABLE_ROOT;
+const IS_VERBOSE = process.argv.includes('--verbose');
 const BUN_EXE = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin', 'bun.exe');
 const OMP_CLI = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
 const EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'claude-mode-extension.ts');
@@ -65,6 +66,77 @@ function _utf8Env() {
   };
 }
 
+// ── 代理智能探测 ──
+// TUN 模式代理对 Bun fetch() 不生效，需显式设置 HTTPS_PROXY
+// 扫描常用代理端口，找到可用的设置到环境变量
+const PROXY_PORTS = [21882, 7890, 7891, 10809, 10808, 20171, 8080];
+let _detectedProxy = null;
+
+function _detectProxy() {
+  if (_detectedProxy) return _detectedProxy;
+  // 优先用环境变量中已有的代理
+  if (process.env.HTTPS_PROXY || process.env.HTTP_PROXY) {
+    _detectedProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+    return _detectedProxy;
+  }
+  // 同步 TCP 探测：对每个常用代理端口尝试连接
+  for (const port of PROXY_PORTS) {
+    try {
+      const result = cp.spawnSync('powershell', [
+        '-NoProfile', '-Command',
+        `(New-Object System.Net.Sockets.TcpClient).Connect('127.0.0.1',${port})`
+      ], { timeout: 2000, windowsHide: true, stdio: 'ignore' });
+      if (result.status === 0) {
+        _detectedProxy = `http://127.0.0.1:${port}`;
+        console.log(`[代理探测] 发现本地代理: ${_detectedProxy}`);
+        return _detectedProxy;
+      }
+    } catch (e) { /* ignore */ }
+  }
+  console.log('[代理探测] 未发现本地代理');
+  return null;
+}
+
+// ── Tokenizer 预置 ──
+// mnemopi Phase 1 (II2 函数) 从硬编码 hf.co URL 下载 tokenizer 文件
+// 缓存路径: CWD/local_cache/{fastembed-model-name}/ (不是 BAAI/ 路径)
+// 模型名 "fast-bge-small-zh-v1.5" → 缓存目录 "local_cache/fast-bge-small-zh-v1.5/"
+const MNEMOPI_TOKENIZER_DIR = path.join(PORTABLE_ROOT, 'local_cache', 'fast-bge-small-zh-v1.5');
+const MNEMOPI_TOKENIZER_FILES = {
+  'config.json': '{"architectures":["BertModel"],"model_type":"bert","hidden_size":312,"num_hidden_layers":6,"num_attention_heads":12,"intermediate_size":768,"max_position_embeddings":512,"vocab_size":21128,"type_vocab_size":2,"pad_token_id":0,"layer_norm_eps":1e-12}',
+  'tokenizer_config.json': '{"do_lower_case":true,"model_type":"bert"}',
+  'special_tokens_map.json': '{"unk_token":"[UNK]","sep_token":"[SEP]","pad_token":"[PAD]","cls_token":"[CLS]","mask_token":"[MASK]"}',
+};
+
+function _ensureTokenizerCache() {
+  try {
+    if (!fs.existsSync(MNEMOPI_TOKENIZER_DIR)) {
+      fs.mkdirSync(MNEMOPI_TOKENIZER_DIR, { recursive: true });
+    }
+    // 写入精简版元数据文件（config.json 等）
+    for (const [name, content] of Object.entries(MNEMOPI_TOKENIZER_FILES)) {
+      const fp = path.join(MNEMOPI_TOKENIZER_DIR, name);
+      if (!fs.existsSync(fp)) {
+        fs.writeFileSync(fp, content, 'utf8');
+      }
+    }
+    // tokenizer.json (439KB) 太大不能内嵌在代码中
+    // 从 data/agent/mnemopi/tokenizer.json 预置副本（随发布包分发）
+    const tokenizerJson = path.join(MNEMOPI_TOKENIZER_DIR, 'tokenizer.json');
+    if (!fs.existsSync(tokenizerJson) || fs.statSync(tokenizerJson).size < 1000) {
+      const bundledTokenizer = path.join(PORTABLE_ROOT, 'data', 'agent', 'mnemopi', 'tokenizer.json');
+      if (fs.existsSync(bundledTokenizer) && fs.statSync(bundledTokenizer).size > 1000) {
+        fs.copyFileSync(bundledTokenizer, tokenizerJson);
+        console.log('[Tokenizer] 从发布包预置 tokenizer.json');
+      } else {
+        console.log('[Tokenizer] tokenizer.json 缺失，mnemopi 首次启动需要网络下载');
+      }
+    }
+  } catch (e) {
+    console.warn('[Tokenizer] 预置失败:', e.message);
+  }
+}
+
 // ── Global State ──
 let mainWindow = null;
 const OMP_STALL_TIMEOUT = 180000; // 3 分钟无事件视为卡住
@@ -100,6 +172,12 @@ class OmpInstance {
     if (this.process) return;
     this._userKilled = false;  // 新启动时重置用户主动关闭标记
 
+    // 确保 mnemopi embed worker 的 fastembed-runtime 依赖已安装
+    this._ensureFastembedRuntime();
+    _ensureTokenizerCache();
+
+    // 代理探测：TUN 模式代理对 Bun fetch() 不生效，需显式设置
+    const proxy = _detectProxy();
     const env = {
       ...process.env,
       ..._utf8Env(),
@@ -107,7 +185,14 @@ class OmpInstance {
       HOME: path.join(PORTABLE_ROOT, 'home'),
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
       BUN_INSTALL: PORTABLE_ROOT,
+      // mnemopi embed worker: HuggingFace 下载用国内镜像
+      HF_ENDPOINT: 'https://hf-mirror.com',
     };
+    // 有代理时显式注入（Bun 不走系统 TUN）
+    if (proxy) {
+      env.HTTPS_PROXY = proxy;
+      env.HTTP_PROXY = proxy;
+    }
 
     // 调试开关
     if (process.argv.includes('--verbose')) {
@@ -279,6 +364,17 @@ class OmpInstance {
       const line = JSON.stringify(frame) + '\n';
       this.process.stdin.write(line, 'utf8');
 
+      // 调试：记录 sendCommand 发送的关键帧（仅 --verbose 模式）
+      if (IS_VERBOSE && (frame.type === 'prompt' || frame.type === 'set_model' || frame.type === 'get_state')) {
+        try {
+          const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
+          const summary = frame.type === 'prompt'
+            ? `CMD prompt: ${(frame.message || '').substring(0, 80)}`
+            : `CMD ${frame.type}: ${JSON.stringify(frame).substring(0, 100)}`;
+          fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${summary}\n`);
+        } catch {}
+      }
+
       setTimeout(() => {
         if (this.pendingCommands.has(id)) {
           this.pendingCommands.delete(id);
@@ -295,14 +391,16 @@ class OmpInstance {
     }
     const line = JSON.stringify(frame) + '\n';
     this.process.stdin.write(line, 'utf8');
-    // 调试：记录发送的帧
-    try {
-      const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
-      const summary = frame.type === 'prompt'
-        ? `SEND prompt: ${(frame.message || '').substring(0, 80)}`
-        : `SEND ${frame.type}: ${JSON.stringify(frame).substring(0, 100)}`;
-      fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${summary}\n`);
-    } catch {}
+    // 调试：记录发送的帧（仅 --verbose 模式）
+    if (IS_VERBOSE) {
+      try {
+        const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
+        const summary = frame.type === 'prompt'
+          ? `SEND prompt: ${(frame.message || '').substring(0, 80)}`
+          : `SEND ${frame.type}: ${JSON.stringify(frame).substring(0, 100)}`;
+        fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${summary}\n`);
+      } catch {}
+    }
   }
 
   // ── 看门狗 ──
@@ -388,19 +486,8 @@ class OmpInstance {
       this.agentRunning = false;
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
 
-      // mnemopi 预热：omp ready 后延迟 2 秒发一条预热消息
-      // 即使 autoRecall=false，也会触发 mnemopi embed worker 初始化
-      // 前端通过 _warmup 标记隐藏这条消息和回复
-      if (!this._mnemopiWarmed) {
-        this._mnemopiWarmed = true;
-        setTimeout(() => {
-          if (this.process && this.ready && !this.agentRunning) {
-            console.log(`[OmpInstance:${this._shortCwd()}] mnemopi 预热：发送预热消息`);
-            this._warmupActive = true;
-            this.sendRaw({ type: 'prompt', message: '__warmup__' });
-          }
-        }, 2000);
-      }
+      // warmup 机制已移除：用户首条消息自然触发 mnemopi embed worker 初始化
+      // 无需自动发送 __warmup__，避免 60 秒阻塞 + JSONL 污染 + 事件过滤 bug
 
       // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
       if (this._pendingCrashContinue) {
@@ -420,25 +507,10 @@ class OmpInstance {
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
       this.agentRunning = true;
-      // 预热消息触发的事件不转发到前端
-      if (this._warmupActive) return;
     } else if (event.type === 'agent_start') {
       this.agentRunning = true;
-      if (this._warmupActive) return;
     } else if (event.type === 'agent_end') {
       this.agentRunning = false;
-      if (this._warmupActive) {
-        console.log(`[OmpInstance:${this._shortCwd()}] mnemopi 预热完成`);
-        this._warmupActive = false;
-        // 预热完成后清理 JSONL 中的 warmup 记录，避免历史污染
-        this._cleanWarmupFromSession();
-        return;
-      }
-    }
-
-    // 预热模式下过滤所有 message_* 事件
-    if (this._warmupActive && event.type.startsWith('message_')) {
-      return;
     }
 
     // Handle command responses
@@ -456,25 +528,26 @@ class OmpInstance {
     // Forward all events to renderer (带 cwd 标记)
     event._cwd = this.cwd;
 
-    // 调试：记录关键事件到日志文件
-    const _debugLog = (msg) => {
-      try {
-        const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
-        fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${msg}\n`);
-      } catch {}
-    };
-    if (event.type === 'ready' || event.type === 'agent_start' || event.type === 'agent_end'
-      || event.type === 'message_start' || event.type === 'message_end'
-      || event.type === 'prompt_result' || event.type === 'turn_start' || event.type === 'turn_end') {
-      _debugLog(`${event.type} ${event.agentInvoked ? 'agentInvoked' : ''} ${event.role || ''} ${event.model || ''}`);
-    } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
-      // 跳过频繁的 delta 事件，只记录第一个
-      if (!this._lastDeltaLogged || Date.now() - this._lastDeltaLogged > 5000) {
-        _debugLog(`${event.type} (delta logged, skipping rest for 5s)`);
-        this._lastDeltaLogged = Date.now();
+    // 调试：记录关键事件到日志文件（仅 --verbose 模式）
+    if (IS_VERBOSE) {
+      const _debugLog = (msg) => {
+        try {
+          const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
+          fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${msg}\n`);
+        } catch {}
+      };
+      if (event.type === 'ready' || event.type === 'agent_start' || event.type === 'agent_end'
+        || event.type === 'message_start' || event.type === 'message_end'
+        || event.type === 'prompt_result' || event.type === 'turn_start' || event.type === 'turn_end') {
+        _debugLog(`${event.type} ${event.agentInvoked ? 'agentInvoked' : ''} ${event.role || ''} ${event.model || ''}`);
+      } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+        if (!this._lastDeltaLogged || Date.now() - this._lastDeltaLogged > 5000) {
+          _debugLog(`${event.type} (delta logged, skipping rest for 5s)`);
+          this._lastDeltaLogged = Date.now();
+        }
+      } else if (event.type === 'error') {
+        _debugLog(`ERROR: ${JSON.stringify(event).substring(0, 200)}`);
       }
-    } else if (event.type === 'error') {
-      _debugLog(`ERROR: ${JSON.stringify(event).substring(0, 200)}`);
     }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -499,6 +572,47 @@ class OmpInstance {
   _shortCwd() {
     const parts = this.cwd.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1] || this.cwd;
+  }
+
+  // 确保 mnemopi embed worker 的 fastembed-runtime 依赖已安装
+  // 如果 node_modules 缺失，omp 首次 prompt 会花 60+ 秒做 bun install
+  // 预装后首次 prompt 仅需 ~1.2s
+  _ensureFastembedRuntime() {
+    try {
+      const runtimeDir = path.join(PORTABLE_ROOT, 'home', '.omp', 'cache', 'fastembed-runtime');
+      // 找到实际的版本目录（如 fastembed-2.1.0_transitive-ort）
+      if (!fs.existsSync(runtimeDir)) return;
+      const versionDirs = fs.readdirSync(runtimeDir).filter(d => d.startsWith('fastembed-'));
+      if (versionDirs.length === 0) return;
+
+      for (const vDir of versionDirs) {
+        const fullDir = path.join(runtimeDir, vDir);
+        const nodeModules = path.join(fullDir, 'node_modules');
+        const pkgJson = path.join(fullDir, 'package.json');
+
+        // 如果 package.json 存在但 node_modules 缺失或为空，执行 bun install
+        if (fs.existsSync(pkgJson) && (!fs.existsSync(nodeModules) || fs.readdirSync(nodeModules).length === 0)) {
+          console.log(`[OmpInstance] 正在预装 fastembed-runtime 依赖: ${vDir}`);
+          try {
+            const result = cp.spawnSync(BUN_EXE, ['install'], {
+              cwd: fullDir,
+              windowsHide: true,
+              timeout: 60000,
+              stdio: 'pipe',
+            });
+            if (result.status === 0) {
+              console.log(`[OmpInstance] fastembed-runtime 依赖预装完成`);
+            } else {
+              console.warn(`[OmpInstance] fastembed-runtime 预装失败 (exit=${result.status}), 首次消息可能延迟`);
+            }
+          } catch (e) {
+            console.warn(`[OmpInstance] fastembed-runtime 预装异常: ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[OmpInstance] 检查 fastembed-runtime 失败: ${e.message}`);
+    }
   }
 
   // 预热完成后清理 JSONL 中的 __warmup__ 记录，避免历史污染和文件膨胀
@@ -774,6 +888,13 @@ function setupIpc() {
 
   // omp commands
   ipcMain.handle('omp:send', async (event, message, images) => {
+    // 调试：记录用户消息到达主进程（仅 --verbose 模式）
+    if (IS_VERBOSE) {
+      try {
+        const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
+        fs.appendFileSync(p, `[${new Date().toISOString()}] [主进程] omp:send 被调用: ${(message || '').substring(0, 80)}\n`);
+      } catch {}
+    }
     // /omfg 命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
     const omfgMatch = typeof message === 'string' && message.match(/^\/omfg\s*(.+)/);
     if (omfgMatch) {
@@ -882,6 +1003,19 @@ function setupIpc() {
   ipcMain.handle('omp:isReady', async () => {
     const inst = ompManager.getActive();
     return inst ? inst.ready : false;
+  });
+
+  ipcMain.handle('omp:diagnostics', async () => {
+    const inst = _active();
+    if (!inst) return { error: 'no active instance' };
+    return {
+      ready: inst.ready,
+      agentRunning: inst.agentRunning,
+      cwd: inst.cwd,
+      pid: inst.process?.pid || null,
+      stdinWritable: inst.process?.stdin?.writable || false,
+      pendingCommands: inst.pendingCommands.size,
+    };
   });
 
   ipcMain.handle('omp:getState', async () => {
@@ -1889,7 +2023,7 @@ function setupIpc() {
               }
             }
 
-            // 预热消息过滤：用户消息含 __warmup__ → 跳过，并标记跳过后续非用户消息
+            // 历史遗留 warmup 过滤：旧版 JSONL 中可能包含 __warmup__ 消息
             if (msg.role === 'user' && textContent.trim() === '__warmup__') {
               skipWarmupFollowers = true;
               continue;
