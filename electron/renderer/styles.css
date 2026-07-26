@@ -1288,6 +1288,83 @@ body {
 
 .hidden { display: none !important; }
 
+/* ── 输入区图片预览（缩略图） ── */
+#inputArea .image-preview {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0 4px;
+  flex-wrap: wrap;
+}
+
+#inputArea .image-preview-item {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid hsl(var(--border-200));
+  flex-shrink: 0;
+}
+
+#inputArea .image-preview-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#inputArea .image-preview-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: hsl(var(--bg-400) / 0.85);
+  color: hsl(var(--text-200));
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+#inputArea .image-preview-item:hover .image-preview-remove {
+  opacity: 1;
+}
+
+#inputArea .image-preview-remove:hover {
+  background: hsl(var(--danger-000));
+  color: white;
+}
+
+/* 附件按钮样式 */
+.input-btn.attach {
+  background: transparent;
+  color: hsl(var(--text-300));
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.input-btn.attach:hover {
+  color: hsl(var(--text-100));
+  background: hsl(var(--bg-300));
+}
+
+/* 拖放高亮 */
+#inputArea.drag-over {
+  background: hsl(var(--accent-main-000) / 0.08);
+  border-top-color: hsl(var(--accent-main-000));
+}
+
 /* ── 代码预览 ── */
 .code-preview {
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;

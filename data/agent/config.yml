@@ -2,12 +2,12 @@
 # 与 opencode 便携包一致：家用模型为 default，Kimi 为 slow/reasoning
 
 modelRoles:
-  default: "home-models/Qwen3.6-27B"
-  smol: "home-models/Qwen3.6-27B"
+  default: "qwen/localmodel"
+  smol: "qwen/localmodel"
   slow: "kimi/kimi-k3"
   plan: "kimi/kimi-k3"
   vision: "kimi/kimi-k3"
-  commit: "home-models/Qwen3.6-27B"
+  commit: "qwen/localmodel"
   tiny: "xiaomi/mimo-v2-flash"
 
 # Mnemopi 记忆系统（v4.0 启用）
@@ -21,3 +21,5 @@ memory:
     retainEveryNTurns: 5
     recallLimit: 10
     injectionTokenLimit: 2000
+tools:
+  approvalMode: yolo

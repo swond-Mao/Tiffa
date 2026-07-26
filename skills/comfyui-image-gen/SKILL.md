@@ -10,11 +10,7 @@ description_cn: "调用远程 ComfyUI（RTX5090）文生图与图编辑，免费
 Unified CLI `comfy.py` drives a remote ComfyUI server. Three subcommands, routed by intent.
 
 ## Server
-- Base URL: `http://127.0.0.1:9876/comfyui` (override `COMFY_URL`)
-  - Goes through the local LLM reverse proxy on port 9876, which auto-downgrades
-    the LLM to a 4B quant while a generation is in flight, then restores the
-    default model 5 s after the ComfyUI queue drains. Direct `8188` access no
-    longer benefits from this and may starve the LLM of VRAM.
+- Base URL: `http://47.108.197.247:8188` (override `COMFY_URL`)
 - Output dir: `E:\workspace\comfyui_out` (override `COMFY_OUT`)
 
 ## Routing rules (pick BEFORE calling)

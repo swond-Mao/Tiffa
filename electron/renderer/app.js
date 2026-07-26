@@ -130,7 +130,7 @@ const state = {
   archiveCollapsed: true,
   // Per-workspace approval mode: 'auto' | 'yolo' | 'normal'
   // 'auto' = 自动批准读，确认写; 'yolo' = 全自动; 'normal' = 逐条确认
-  approvalMode: 'normal',
+  approvalMode: 'yolo',
   // Todo 阶段数据
   todoPhases: [],
   // 启动欢迎页阶段：'showing' | 'done'
@@ -138,6 +138,8 @@ const state = {
   // 新建对话标志：新建后到收到 session_switch 之前，忽略 message_* 事件
   pendingNewSession: false,
   _newSessionSwitched: false,  // session_switch 是否已到达
+  // 待发送图片列表：{ data: base64string, mimeType: string, name: string }
+  pendingImages: [],
 };
 
 // ── sessionModelMap 持久化 ──
@@ -178,6 +180,9 @@ const dom = {
   input: document.getElementById('messageInput'),
   btnSend: document.getElementById('btnSend'),
   btnAbort: document.getElementById('btnAbort'),
+  btnAttach: document.getElementById('btnAttach'),
+  imagePreview: document.getElementById('imagePreview'),
+  fileInput: document.getElementById('fileInput'),
   sidebar: document.getElementById('sidebar'),
   sidebarResizeHandle: document.getElementById('sidebarResizeHandle'),
   previewDivider: document.getElementById('previewDivider'),
@@ -515,8 +520,14 @@ function handleExited(data) {
   }
   state.ompReady = false;
   state.agentRunning = false;
+  finalizeAssistantMessage();
   updateInputState();
-  updateStatus(`已断开 (code: ${data.code})`);
+  if (data.crashLoop) {
+    updateStatus(`连续崩溃 ${data.crashCount} 次，已停止自动重启`);
+    addNotice('error', `omp 连续崩溃 ${data.crashCount} 次，已停止自动续行。请检查模型服务是否正常，然后手动发消息继续。`);
+  } else {
+    updateStatus(`已断开 (code: ${data.code})`);
+  }
 }
 
 // ── Welcome Screen ──
@@ -2312,6 +2323,125 @@ function setupInput() {
   });
   dom.btnSend.addEventListener('click', sendMessage);
   dom.btnAbort.addEventListener('click', abortMessage);
+
+  // ── 图片上传 ──
+  // 1. 文件选择按钮
+  dom.btnAttach.addEventListener('click', () => dom.fileInput.click());
+  dom.fileInput.addEventListener('change', (e) => {
+    handleImageFiles(Array.from(e.target.files));
+    e.target.value = ''; // 重置，允许重复选择同文件
+  });
+
+  // 2. 拖放到输入区域 → 插入文件路径（编码助手场景：agent 自己去读文件）
+  const inputArea = document.getElementById('inputArea');
+  inputArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    inputArea.classList.add('drag-over');
+  });
+  inputArea.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    inputArea.classList.remove('drag-over');
+  });
+  inputArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    inputArea.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) insertFilePaths(files);
+  });
+
+  // 3. 粘贴图片 (Ctrl+V)
+  dom.input.addEventListener('paste', (e) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItems = items.filter(item => item.type.startsWith('image/'));
+    if (imageItems.length === 0) return; // 纯文本粘贴，不拦截
+    e.preventDefault();
+    imageItems.forEach(item => {
+      const blob = item.getAsFile();
+      if (blob) readImageFile(blob);
+    });
+  });
+}
+
+// ── 拖放文件路径插入 ──
+function insertFilePaths(files) {
+  const paths = Array.from(files).map(f => f.path).filter(Boolean);
+  if (paths.length === 0) return;
+  const current = dom.input.value;
+  const separator = current && !current.endsWith('\n') ? '\n' : '';
+  dom.input.value = current + separator + paths.join('\n') + '\n';
+  // 触发自动增长
+  dom.input.dispatchEvent(new Event('input'));
+  dom.input.focus();
+}
+
+// ── 视觉图片预览管理（附件按钮/粘贴用） ──
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
+
+function handleImageFiles(files) {
+  files.forEach(file => readImageFile(file));
+}
+
+function readImageFile(file) {
+  if (!file.type.startsWith('image/')) {
+    addNotice('warning', `不支持的文件类型: ${file.type}`);
+    return;
+  }
+  if (file.size > MAX_IMAGE_SIZE) {
+    addNotice('warning', `图片过大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大支持 20MB`);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    // e.target.result = "data:image/png;base64,..."
+    const dataUrl = e.target.result;
+    const base64 = dataUrl.split(',')[1];
+    state.pendingImages.push({
+      data: base64,
+      mimeType: file.type,
+      name: file.name || 'clipboard.png',
+    });
+    renderImagePreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removePendingImage(index) {
+  state.pendingImages.splice(index, 1);
+  renderImagePreview();
+}
+
+function clearPendingImages() {
+  state.pendingImages = [];
+  renderImagePreview();
+}
+
+function renderImagePreview() {
+  const container = dom.imagePreview;
+  if (state.pendingImages.length === 0) {
+    container.classList.add('hidden');
+    container.innerHTML = '';
+    return;
+  }
+  container.classList.remove('hidden');
+  container.innerHTML = state.pendingImages.map((img, i) => {
+    const thumbSrc = `data:${img.mimeType};base64,${img.data}`;
+    return `<div class="image-preview-item">
+      <img src="${thumbSrc}" alt="${img.name}" title="${img.name}">
+      <button class="image-preview-remove" data-index="${i}" title="移除">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>`;
+  }).join('');
+  // 绑定移除按钮事件
+  container.querySelectorAll('.image-preview-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const idx = parseInt(e.currentTarget.dataset.index, 10);
+      removePendingImage(idx);
+    });
+  });
 }
 
 // ── Slash 命令自动补全 ──
@@ -2381,14 +2511,19 @@ function moveSlashSelection(delta) {
 
 async function sendMessage() {
   const message = dom.input.value.trim();
-  if (!message) return;
+  if (!message && state.pendingImages.length === 0) return;
   if (!state.ompReady) { addNotice('warning', 'omp 尚未就绪'); return; }
   // Clear welcome screen on first message
   const welcome = dom.messages.querySelector('.welcome-screen');
   if (welcome) welcome.remove();
   dom.input.value = '';
   dom.input.style.height = 'auto';
-  try { await ompDesktop.send(message); }
+  // 携带待发送图片
+  const images = state.pendingImages.length > 0
+    ? state.pendingImages.map(img => ({ data: img.data, mimeType: img.mimeType }))
+    : undefined;
+  clearPendingImages();
+  try { await ompDesktop.send(message, images); }
   catch (err) { addNotice('error', `发送失败: ${err.message}`); }
 }
 
@@ -3064,7 +3199,7 @@ async function setupXmlTranslation() {
 // ── Approval Mode（per-workspace 工具审批模式） ──
 // 'normal' = 逐条确认, 'auto' = 自动批准读、确认写, 'yolo' = 全自动
 const APPROVAL_MODES = ['normal', 'auto', 'yolo'];
-const APPROVAL_MODE_LABELS = { normal: '确认', auto: '半自动', yolo: '全自动' };
+const APPROVAL_MODE_LABELS = { normal: '审批：确认', auto: '审批：半自动', yolo: '审批：全自动' };
 
 function setupApprovalMode() {
   // 恢复全局默认值
@@ -3101,7 +3236,11 @@ function cycleApprovalMode() {
   try { localStorage.setItem('tiffa-approvalMode-default', state.approvalMode); } catch {}
   renderApprovalModeIndicator();
   addNotice('info', `审批模式: ${APPROVAL_MODE_LABELS[state.approvalMode]}`);
-  // 通知 omp（通过 steer 告知模型审批模式变更，omp 无运行时 approval-mode RPC）
+  // 写入 config.yml（下次会话生效）
+  ompDesktop.writeApprovalMode(state.approvalMode).then(result => {
+    if (!result?.success) console.warn('[审批] 写入 config.yml 失败:', result?.error);
+  }).catch(() => {});
+  // 通知 omp（当前会话通过 steer 告知）
   if (state.agentRunning) {
     try { ompDesktop.command('steer', { message: `[system] 用户切换审批模式为: ${state.approvalMode}（${APPROVAL_MODE_LABELS[state.approvalMode]}）` }); } catch {}
   }
@@ -3114,13 +3253,11 @@ function restoreApprovalMode(cwd) {
     state.approvalMode = saved;
   } else {
     const def = localStorage.getItem('tiffa-approvalMode-default');
-    state.approvalMode = (def && APPROVAL_MODES.includes(def)) ? def : 'normal';
+    state.approvalMode = (def && APPROVAL_MODES.includes(def)) ? def : 'yolo';
   }
   renderApprovalModeIndicator();
-  // 通知 omp（通过 steer 告知模型审批模式恢复，omp 无运行时 approval-mode RPC）
-  if (state.agentRunning) {
-    try { ompDesktop.command('steer', { message: `[system] 审批模式恢复为: ${state.approvalMode}（${APPROVAL_MODE_LABELS[state.approvalMode]}）` }); } catch {}
-  }
+  // 写入 config.yml 同步
+  ompDesktop.writeApprovalMode(state.approvalMode).catch(() => {});
 }
 
 // ── Settings ──

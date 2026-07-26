@@ -1,3 +1,9 @@
+# Python runtime (site-packages, Playwright, etc.)
+Lib/
+include/
+install/
+scripts/
+
 # Dependencies & runtime
 npm-global/
 node/
@@ -24,6 +30,7 @@ data/agent/hidden-models.json
 data/agent/session-model-map.json
 data/agent/projects.json
 data/agent/xml-translation-enabled
+data/agent/blobs/
 data/agent/models.yml
 data/agent/models.yml.bak*
 data/agent/models.yml.example
