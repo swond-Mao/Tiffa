@@ -1,0 +1,186 @@
+{
+  "title": "刘诗诗推介",
+  "goal": "面向时尚/影视/商业伙伴的明星个人推介，展示演技、时尚影响力、商业价值",
+  "themePack": "theme09",
+  "pageCount": 20,
+  "imageGen": true,
+  "slides": [
+    {
+      "layout": "theme09_page003",
+      "props": {
+        "classification": "明星档案",
+        "docNo": "LS-2026-001",
+        "year": "2024 年度版",
+        "titleLines": ["刘诗诗", "个人推介"],
+        "fields": [
+          {"k": "姓名", "v": "刘诗诗"},
+          {"k": "英文名", "v": "Cecilia Chiu"},
+          {"k": "出生日期", "v": "1987-07-08"},
+          {"k": "星座", "v": "巨蟹座"},
+          {"k": "血型", "v": "AB 型"},
+          {"k": "身高", "v": "169cm"}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page110",
+      "props": {
+        "kicker": "演艺生涯",
+        "title": "从古装女神到现代时尚 icon",
+        "caption": "见证刘诗诗 15 年演艺之路的蜕变与成长",
+        "tags": ["古装经典", "现代转型", "时尚影响力", "商业价值"]
+      }
+    },
+    {
+      "layout": "theme09_page034",
+      "props": {
+        "badge": "代表作",
+        "primaryMeta": {"label": "经典古装剧", "unit": "5"},
+        "secondaryMeta": {"label": "古装剧", "unit": "经典"},
+        "items": [
+          {"cn": "步步惊心", "en": "Scarlet Heart", "primary": 1, "secondary": 1},
+          {"cn": "琉璃", "en": "Love Between Fairy and Devil", "primary": 2, "secondary": 2},
+          {"cn": "醉玲珑", "en": "The Longest Promise", "primary": 3, "secondary": 3},
+          {"cn": "轩辕剑之天之痕", "en": "Sword of the Heavens", "primary": 4, "secondary": 4},
+          {"cn": "金枝玉叶", "en": "Royal Child", "primary": 5, "secondary": 5}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page100",
+      "props": {
+        "kicker": "时尚成就",
+        "name": "刘诗诗",
+        "role": "国际超模",
+        "org": "Vogue 封面人物",
+        "badge": "年度影响力",
+        "creds": ["Vogue 封面", "Harper's Bazaar", "Dazed"]
+      }
+    },
+    {
+      "layout": "theme09_page038",
+      "props": {
+        "value": "持续增长",
+        "unit": "亿元",
+        "label": "商业代言价值",
+        "statement": "国际一线品牌青睐",
+        "badge": "奢侈品合作",
+        "supports": [
+          {"value": "奢侈品合作", "unit": "品牌", "label": "3+"},
+          {"value": "美妆联名", "unit": "系列", "label": "2"},
+          {"value": "时尚周", "unit": "活动", "label": "5+"}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page084",
+      "props": {
+        "head": {"no": "01", "en": "Multi-faceted Acting", "cn": "多面演绎"},
+        "items": [
+          {"label": "古装剧", "a": 1, "b": 1, "sub": "文武双全"},
+          {"label": "现代剧", "a": 2, "b": 2, "sub": "真实动人"},
+          {"label": "悬疑剧", "a": 3, "b": 3, "sub": "深度解读"}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page035",
+      "props": {
+        "unit": "优雅",
+        "badge": "明星风范",
+        "items": [
+          {"name": "优雅气质", "en": "Elegant Charm", "value": 1, "meta": "知性美", "tag": "优雅派"},
+          {"name": "知性美", "en": "Intellectual Beauty", "value": 2, "meta": "内涵修养", "tag": "文艺范"},
+          {"name": "低调生活", "en": "Low-key Life", "value": 3, "meta": "幸福人生", "tag": "生活家"}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page057",
+      "props": {
+        "hub": {"label": "行业认可", "sub": "新生代标杆"},
+        "head": {"no": "01", "en": "Industry Recognition", "cn": "业内认可"},
+        "nodes": [
+          {"label": "同辈标杆", "sub": "新生代代表", "value": 1},
+          {"label": "实力派", "sub": "演技派", "value": 2},
+          {"label": "商业价值", "sub": "品牌青睐", "value": 3},
+          {"label": "奖项肯定", "sub": "业内认可", "value": 4}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page024",
+      "props": {
+        "head": {"no": "01", "en": "Awards & Recognition", "cn": "荣誉奖项"},
+        "shots": [
+          {"shot": "金鹰奖", "desc": "观众认可"},
+          {"shot": "白玉兰奖", "desc": "业内肯定"},
+          {"shot": "风尚大赏", "desc": "时尚 Icon"},
+          {"shot": "杰出贡献", "desc": "长期贡献"}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page108",
+      "props": {
+        "head": {"no": "01", "en": "Future Vision", "cn": "未来展望"},
+        "items": [
+          {"label": "新作计划", "sub": "持续创作"},
+          {"label": "国际合作", "sub": "全球视野"},
+          {"label": "角色挑战", "sub": "突破自我"},
+          {"label": "艺术追求", "sub": "深耕演技"}
+        ]
+      }
+    },
+    {
+      "layout": "theme09_page013",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page098",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page074",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page039",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page029",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page053",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page010",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page014",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page041",
+      "props": {},
+      "imageGen": true
+    },
+    {
+      "layout": "theme09_page101",
+      "props": {},
+      "imageGen": true
+    }
+  ]
+}

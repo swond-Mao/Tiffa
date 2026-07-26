@@ -1,0 +1,28 @@
+{
+  "title": "刘诗诗推介 PPT - 深蓝杂志风",
+  "theme": "theme09",
+  "slides": 20,
+  "format": "PPTX",
+  "previewUrl": "http://127.0.0.1:4178/",
+  "pptxPath": "G:\\Agent\\portable-opencode\\data\\config\\opencode\\skills\\dashiai-ppt\\output\\liu-shishi-20260717\\output.pptx",
+  "pptxSizeKB": 21668.5,
+  "contentOverview": [
+    "Page 1: 封面卷宗 - 明星档案基本信息",
+    "Page 2: 封面主标题 - 演艺生涯主题",
+    "Page 3: 代表作 - 5 部经典古装剧",
+    "Page 4: 时尚成就 - 国际时尚影响力",
+    "Page 5: 商业价值 - 品牌合作伙伴",
+    "Page 6: 演技突破 - 多面演绎能力",
+    "Page 7: 个人形象 - 优雅知性风范",
+    "Page 8: 行业地位 - 新生代标杆",
+    "Page 9: 荣誉奖项 - 奖项认可",
+    "Page 10: 未来展望 - 持续发展"
+  ],
+  "features": [
+    "深蓝杂志风格 (theme09) - 适合品牌故事/人物访谈",
+    "20 页完整内容规划",
+    "专业 Markdown 排版",
+    "485 个可编辑文本对象",
+    "支持 HTML 预览 + PPTX 导出"
+  ]
+}

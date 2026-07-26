@@ -1,0 +1,34 @@
+{
+  "title": "刘诗诗推介",
+  "goal": "面向时尚/影视/商业伙伴的明星个人推介，展示演技、时尚影响力、商业价值",
+  "themePack": "theme09",
+  "pageCount": 20,
+  "part": {
+    "index": 4,
+    "total": 4,
+    "startSlide": 16,
+    "endSlide": 20
+  },
+  "slides": [
+    {
+      "layout": "theme09_page053",
+      "props": {}
+    },
+    {
+      "layout": "theme09_page010",
+      "props": {}
+    },
+    {
+      "layout": "theme09_page014",
+      "props": {}
+    },
+    {
+      "layout": "theme09_page041",
+      "props": {}
+    },
+    {
+      "layout": "theme09_page101",
+      "props": {}
+    }
+  ]
+}

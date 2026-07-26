@@ -1,5 +1,5 @@
 /**
- * claude-mode-extension.ts — omp 扩展 v5.0
+ * claude-mode-extension.ts — omp 扩展 v6.0
  *
  * 精简理念：搭 omp 的车，不造 omp 的轮
  *
@@ -17,16 +17,17 @@
  * - gap-fill 断片补救 → 改用原生记忆管理
  * - constraints.md 注入 → 改用原生记忆管理
  *
+ * - skill 工具 → omp 原生 manage_skill + managed-skills 目录
+ *
  * 保留（omp 不覆盖）：
  * - 危险路径/配置文件拦截
  * - 静默工具调用检测
- * - skill 工具
  * - 审计日志
  * - error 续行（最小化）
  * - hub 工具移除
  */
 
-import { appendFileSync, readFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 // ── 路径常量 ──
@@ -81,12 +82,12 @@ export default async function (pi: any) {
   const SILENT_TOOL_CALL_THRESHOLD = 3
 
   log("init", [
-    "=== claude-mode extension loaded (v5.0) ===",
+    "=== claude-mode extension loaded (v6.0) ===",
     `pid: ${process.pid}`,
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
 
-  // ── 0. session_start ── 移除无用工具 + 注册自定义工具
+  // ── 0. session_start ── 移除无用工具
   pi.on("session_start", async () => {
     try {
       const all = pi.getActiveTools()
@@ -99,64 +100,6 @@ export default async function (pi: any) {
       }
     } catch (err: any) {
       log("session_start.error", err?.message || String(err))
-    }
-
-    // 注册 skill 工具
-    try {
-      if (pi.registerTool && typeof pi.registerTool === "function") {
-        const SKILLS_DIR = join(PORTABLE_ROOT, "skills")
-
-        pi.registerTool({
-          name: "skill",
-          description: "加载专业技能执行专业任务。调用时传入 skill 名称获取完整执行指令。",
-          parameters: {
-            type: "object",
-            properties: {
-              name: { type: "string", description: "Skill 名称" },
-              action: { type: "string", enum: ["load", "list"], description: "load=加载, list=列出所有" },
-            },
-            required: ["name"],
-          },
-          execute: async (toolCallId: string, args: { name: string; action?: string }, signal: any, onUpdate: any, ctx: any) => {
-            try {
-              const { name: skillName, action = "load" } = args
-
-              if (action === "list" || skillName === "list") {
-                if (!existsSync(SKILLS_DIR)) return { content: [{ type: "text", text: "No skills directory" }], details: {} }
-                const dirs = readdirSync(SKILLS_DIR).filter((n) => {
-                  try { return statSync(join(SKILLS_DIR, n)).isDirectory() && existsSync(join(SKILLS_DIR, n, "SKILL.md")) } catch { return false }
-                })
-                return { content: [{ type: "text", text: JSON.stringify({ count: dirs.length, skills: dirs }) }], details: {} }
-              }
-
-              const safeName = skillName.replace(/[/\\:.]/g, "")
-              const skillMdPath = join(SKILLS_DIR, safeName, "SKILL.md")
-              if (!existsSync(skillMdPath)) {
-                return { content: [{ type: "text", text: `Skill "${skillName}" 不存在` }], details: {}, isError: true }
-              }
-
-              let content = readFileSync(skillMdPath, "utf8")
-              // 路径替换
-              const replacements: Array<[RegExp, string]> = [
-                [/E:\\Opencode\\data\\config\\opencode\\skills/g, SKILLS_DIR.replace(/\\/g, "\\")],
-                [/E:\\Opencode/g, PORTABLE_ROOT.replace(/\\/g, "\\")],
-                [/D:\\AI\\Opencode/g, PORTABLE_ROOT.replace(/\\/g, "\\")],
-              ]
-              for (const [pattern, replacement] of replacements) {
-                content = content.replace(pattern, replacement)
-              }
-
-              log("skill.load", `loaded: ${skillName}`)
-              return { content: [{ type: "text", text: content }], details: { skill: skillName } }
-            } catch (err: any) {
-              return { content: [{ type: "text", text: `Skill 加载出错: ${err.message}` }], details: { error: err.message }, isError: true }
-            }
-          },
-        })
-        log("registerTool", "skill registered")
-      }
-    } catch (err: any) {
-      log("registerTool.error", err?.message || String(err))
     }
   })
 
@@ -290,5 +233,5 @@ export default async function (pi: any) {
     }
   })
 
-  log("init", "=== claude-mode extension v5.0 ready ===")
+  log("init", "=== claude-mode extension v6.0 ready ===")
 }

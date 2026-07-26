@@ -1,0 +1,21 @@
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+
+[dn]
+CN = ROG-5090D.local
+
+[v3_req]
+subjectAltName = @alt_names
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = ROG-5090D.local
+IP.1 = 172.16.202.2
+IP.2 = 192.168.1.5
+IP.3 = 172.29.224.1
+IP.4 = 172.20.240.1

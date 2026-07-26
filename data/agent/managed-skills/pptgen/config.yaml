@@ -1,0 +1,12 @@
+# pptgen 配置文件
+llm:
+  endpoint: ""
+  model: ""
+  api_key: "not-needed"
+
+comfyui:
+  script: "D:/AI/Opencode/data/config/opencode/skills/comfyui-image-gen/comfy.py"
+  output_dir: "E:/workspace/comfyui_out"
+
+output:
+  dir: "output"
