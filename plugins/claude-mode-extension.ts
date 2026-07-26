@@ -1,9 +1,9 @@
 /**
- * claude-mode-extension.ts — omp 扩展 v4.0
+ * claude-mode-extension.ts — omp 扩展 v5.0
  *
- * 重构理念：从"补完 omp"变成"搭 omp 的车"
+ * 精简理念：搭 omp 的车，不造 omp 的轮
  *
- * 删除（omp 原生已覆盖）：
+ * 已删除（omp 原生已覆盖 / 不再需要）：
  * - AGENTS.md 注入 → omp 自动从 CWD 查找注入
  * - MEMORY.md 注入 → Mnemopi autoRecall
  * - PROJECT.md 注入 → Mnemopi per-project 隔离
@@ -14,9 +14,10 @@
  * - /omfg 命令 → Electron 主进程已拦截
  * - memory_write 工具 → Mnemopi 原生 retain
  * - memory_search 工具 → Mnemopi 原生 recall
+ * - gap-fill 断片补救 → 改用原生记忆管理
+ * - constraints.md 注入 → 改用原生记忆管理
  *
  * 保留（omp 不覆盖）：
- * - gap-fill 断片补救
  * - 危险路径/配置文件拦截
  * - 静默工具调用检测
  * - skill 工具
@@ -25,7 +26,7 @@
  * - hub 工具移除
  */
 
-import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs"
+import { appendFileSync, readFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 // ── 路径常量 ──
@@ -33,9 +34,6 @@ const PLUGIN_DIR = import.meta.dir
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || join(process.env.HOME || process.env.USERPROFILE || "~", ".omp", "agent")
 const PORTABLE_ROOT = resolve(AGENT_DIR, "..", "..")
 const DATA_DIR = resolve(AGENT_DIR, "..")
-const MEMORY_DIR = join(DATA_DIR, "memory")
-const INBOX_DIR = join(MEMORY_DIR, "inbox")
-const CONSTRAINTS_PATH = join(MEMORY_DIR, "constraints.md")
 const LOG_DIR_PATH = join(DATA_DIR, "log")
 const PLUGIN_LOG = join(PLUGIN_DIR, "claude-mode.log")
 
@@ -72,46 +70,10 @@ function isDangerousPath(fp: string): boolean {
   return DANGER_PATH_PATTERNS.some(p => p.test(fp))
 }
 
-// ── gap-fill 清理 ──
-const GAPFILL_MAX_AGE_MS = 30 * 60 * 1000
-const COMPACT_DUMP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-
-function cleanupGapFills(currentSessionID: string) {
-  try {
-    if (!existsSync(INBOX_DIR)) return
-    const files = readdirSync(INBOX_DIR).filter(
-      (n) => (n.startsWith("gap-fill-") && n.endsWith(".md")) || (n.startsWith("compact-") && n.endsWith(".txt"))
-    )
-    const now = Date.now()
-    for (const f of files) {
-      const full = join(INBOX_DIR, f)
-      let remove = false
-      let reason = ""
-      const isCompactDump = f.startsWith("compact-")
-      if (!isCompactDump && currentSessionID && f !== `gap-fill-${currentSessionID}.md`) {
-        remove = true; reason = "old-session"
-      }
-      if (!remove) {
-        try {
-          const stat = statSync(full)
-          const maxAge = isCompactDump ? COMPACT_DUMP_MAX_AGE_MS : GAPFILL_MAX_AGE_MS
-          if (now - stat.mtimeMs > maxAge) { remove = true; reason = "age" }
-        } catch {}
-      }
-      if (remove) {
-        try { unlinkSync(full); log("gapfill.cleanup", `removed ${f} (${reason})`) }
-        catch (e: any) { log("gapfill.cleanup.error", `${f}: ${e?.message}`) }
-      }
-    }
-  } catch (e: any) { log("gapfill.cleanup.error", e?.message) }
-}
-
 // ═══════════════════════════════════════════════════════════
 // 扩展入口
 // ═══════════════════════════════════════════════════════════
 export default async function (pi: any) {
-  ensureDir(MEMORY_DIR)
-  ensureDir(INBOX_DIR)
   ensureDir(LOG_DIR_PATH)
 
   let agentTurnCount = 0
@@ -119,7 +81,7 @@ export default async function (pi: any) {
   const SILENT_TOOL_CALL_THRESHOLD = 3
 
   log("init", [
-    "=== claude-mode extension loaded (v4.0) ===",
+    "=== claude-mode extension loaded (v5.0) ===",
     `pid: ${process.pid}`,
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
@@ -198,52 +160,11 @@ export default async function (pi: any) {
     }
   })
 
-  // ── 1. before_agent_start ── gap-fill 断片补救 + constraints 最小化注入
+  // ── 1. before_agent_start ── 静默工具调用计数重置
   pi.on("before_agent_start", async (event: any) => {
     try {
       agentTurnCount++
       silentToolCallCount = 0
-      const injections: string[] = []
-
-      // gap-fill 断片补救
-      const gapFillFiles = existsSync(INBOX_DIR)
-        ? readdirSync(INBOX_DIR).filter((n) => n.startsWith("gap-fill-") && n.endsWith(".md"))
-        : []
-      if (gapFillFiles.length > 0) {
-        const latest = gapFillFiles[gapFillFiles.length - 1]
-        const content = readFileSync(join(INBOX_DIR, latest), "utf8").trim()
-        if (content) {
-          injections.push([
-            "# 断片补救（gap-fill，压缩前自动提取）",
-            "",
-            content,
-          ].join("\n"))
-        }
-      }
-
-      // constraints.md 最小化注入（仅保留无法 TTSR 化的语义/行为约束）
-      if (existsSync(CONSTRAINTS_PATH)) {
-        try {
-          const constraints = readFileSync(CONSTRAINTS_PATH, "utf8").trim()
-          if (constraints) {
-            injections.push([
-              "# 核心约束（constraints.md，严格遵守）",
-              "",
-              constraints,
-            ].join("\n"))
-          }
-        } catch {}
-      }
-
-      if (injections.length > 0 && event.systemPrompt) {
-        const injectionText = injections.join("\n\n")
-        if (Array.isArray(event.systemPrompt)) {
-          event.systemPrompt.push(injectionText)
-        } else {
-          event.systemPrompt = [event.systemPrompt, injectionText]
-        }
-        log("before_agent_start", `injected ${injectionText.length} chars`)
-      }
     } catch (err: any) {
       log("before_agent_start.error", err?.message || String(err))
     }
@@ -358,116 +279,7 @@ export default async function (pi: any) {
     }
   })
 
-  // ── 4. session.compacting ── gap-fill 断片提取 + constraints 重注入
-  pi.on("session.compacting", async (event: any) => {
-    try {
-      const sessionID = event.sessionId || ""
-      log("session.compacting", `=== fired === sessionID: ${sessionID}`)
-
-      cleanupGapFills(sessionID)
-
-      const messages = event.messages || []
-      if (messages.length === 0) return
-
-      // compact dump
-      try {
-        ensureDir(INBOX_DIR)
-        const inboxPath = join(INBOX_DIR, `compact-${Date.now()}.txt`)
-        const formatted = messages.slice(-50).map((m: any) => {
-          const role = m.role || "unknown"
-          const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")
-          const truncated = content.length > 2000 ? content.slice(0, 2000) + "..." : content
-          return `[${role}] ${truncated}`
-        }).join("\n\n")
-        writeFileSync(inboxPath, formatted, "utf8")
-      } catch (err: any) {
-        log("session.compacting.inbox.error", err?.message || String(err))
-      }
-
-      // gap-fill 提取
-      try {
-        const gapFillPath = join(INBOX_DIR, `gap-fill-${sessionID || ""}.md`)
-        try { if (existsSync(gapFillPath)) unlinkSync(gapFillPath) } catch {}
-
-        const entries: string[] = []
-        const fileSet = new Set<string>()
-        const readFileSet = new Set<string>()
-        const cmdSet = new Set<string>()
-        const decisionLines = new Set<string>()
-        const kw = /(决定|配置|记住|改了|选了|用.{0,6}方案|路径|踩坑|原因|因为|应该|必须|不要|放弃|采用|修复|修)/
-
-        for (const m of messages) {
-          const content = typeof m.content === "string" ? m.content : ""
-          const toolCalls = m.tool_calls || m.toolCalls || []
-          for (const tc of toolCalls) {
-            const fn = tc.function?.name || tc.toolName || ""
-            const args = tc.function?.arguments || tc.input || {}
-            if ((fn === "edit" || fn === "write") && args.filePath) {
-              fileSet.add(args.filePath)
-            } else if (fn === "read" && (args.filePath || args.path)) {
-              readFileSet.add(args.filePath || args.path)
-            } else if (fn === "bash" && args.command) {
-              const c = String(args.command).trim()
-              if (c && !/^\s*(ls|dir|cd|echo|Get-ChildItem|Set-Location|pwd|cls|clear)\b/i.test(c)) {
-                cmdSet.add(c)
-              }
-            }
-          }
-          if (content) {
-            for (const line of content.split("\n")) {
-              const s = line.trim()
-              const noisePrefix = /^(#|\||-|\*|>|"|⚠️|📁|📌|\d+[.、]|\s*[-*]\s)/u
-              if (s.length > 12 && s.length < 160 && kw.test(s) && !noisePrefix.test(s) && !decisionLines.has(s)) {
-                decisionLines.add(s)
-              }
-            }
-          }
-          if (fileSet.size + cmdSet.size + decisionLines.size > 60) break
-        }
-
-        const ellipsis = (s: string, head: number, tail: number) =>
-          s.length <= head + tail + 3 ? s : s.slice(0, head) + " … " + s.slice(-tail)
-
-        if (readFileSet.size > 0) {
-          entries.push(`## 已读过的文件（无需重读）`)
-          for (const f of [...readFileSet].sort()) entries.push(`- 已读取：${f}`)
-          entries.push("")
-        }
-
-        fileSet.forEach((f) => entries.push(`- 改动文件：${f}`))
-        cmdSet.forEach((c) => entries.push(`- 关键命令：${ellipsis(c, 140, 50)}`))
-        decisionLines.forEach((s) => entries.push(`- 决策/要点：${ellipsis(s, 90, 40)}`))
-
-        if (entries.length) {
-          const uniq = [...new Set(entries)].slice(0, 60)
-          const body = `# Gap-fill (断片补救) — ${sessionID}\n\n> 由 compacting hook 自动提取。\n\n${uniq.join("\n")}\n`
-          writeFileSync(gapFillPath, body, "utf8")
-          log("session.compacting.gapfill", `wrote ${uniq.length} entries`)
-        }
-      } catch (err: any) {
-        log("session.compacting.gapfill.error", err?.message || String(err))
-      }
-
-      // constraints 重注入
-      const contextLines = [
-        "保留：已读过的文件列表、改动文件路径、关键命令、重要决策。舍弃：工具输出详情、中间步骤。",
-      ]
-      if (existsSync(CONSTRAINTS_PATH)) {
-        try {
-          const raw = readFileSync(CONSTRAINTS_PATH, "utf8").trim()
-          if (raw) {
-            const keyLines = raw.split("\n").filter((l: string) => l.includes("**")).slice(0, 5)
-            if (keyLines.length > 0) contextLines.push("【约束重申】" + keyLines.join("\n"))
-          }
-        } catch {}
-      }
-      return { context: contextLines }
-    } catch (err: any) {
-      log("session.compacting.error", err?.message || String(err))
-    }
-  })
-
-  // ── 5. tool_result ── 审计日志
+  // ── 4. tool_result ── 审计日志
   pi.on("tool_result", async (event: any) => {
     try {
       const tool = event.toolName || "unknown"
@@ -478,5 +290,5 @@ export default async function (pi: any) {
     }
   })
 
-  log("init", "=== claude-mode extension v4.0 ready ===")
+  log("init", "=== claude-mode extension v5.0 ready ===")
 }
