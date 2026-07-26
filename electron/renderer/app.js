@@ -3400,6 +3400,8 @@ async function loadModelList() {
       } catch {}
     }
     const result = await ompDesktop.getModels();
+    console.log('[模型列表] omp 返回:', result?.models?.length, '个模型', result?.models?.map(m => `${m.provider}/${m.id}`));
+    console.log('[模型列表] modelsConfigData providers:', modelsConfigData?.providers ? Object.keys(modelsConfigData.providers) : 'none');
     if (result && result.models) renderModelList(result.models);
     else dom.modelList.innerHTML = '<div class="model-item empty">暂无可用模型</div>';
   } catch { dom.modelList.innerHTML = '<div class="model-item empty">无法获取模型列表</div>'; }
@@ -4011,7 +4013,8 @@ async function loadEnabledModels() {
     const result = await ompDesktop.readFile(root + '\\data\\agent\\' + ENABLED_MODELS_FILE);
     if (result && result.content) {
       const arr = JSON.parse(result.content);
-      if (Array.isArray(arr)) enabledModels = arr;
+      // 空数组等同于未配置白名单，避免误操作导致看不到任何模型
+      if (Array.isArray(arr) && arr.length > 0) enabledModels = arr;
     }
   } catch { enabledModels = undefined; }
 }
