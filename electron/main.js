@@ -2123,9 +2123,8 @@ function setupIpc() {
 app.whenReady().then(() => {
   setupIpc();
   createWindow();
-  // 懒启动：不在此处启动 omp，等前端切换项目时再 activate
-  // 但仍需激活默认工作区以保持向后兼容
-  ompManager.activate(DEFAULT_WORKSPACE_DIR);
+  // 懒启动：不在此处启动 omp，等前端 loadProjects 切换项目时再 activate
+  //（此处不再 activate 默认工作区，避免启动时创建两个 omp 实例）
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
