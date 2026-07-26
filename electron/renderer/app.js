@@ -184,6 +184,7 @@ const dom = {
   btnAbort: document.getElementById('btnAbort'),
   btnAttach: document.getElementById('btnAttach'),
   imagePreview: document.getElementById('imagePreview'),
+  dragOverlay:   document.getElementById('dragOverlay'),
   fileInput: document.getElementById('fileInput'),
   sidebar: document.getElementById('sidebar'),
   sidebarResizeHandle: document.getElementById('sidebarResizeHandle'),
@@ -205,10 +206,130 @@ const dom = {
   modelSwitcherList: document.getElementById('modelSwitcherList'),
 };
 
+// ── Minimap：Codex 风格消息密度滚动条 ──
+// 右侧窄条按消息位置/高度绘制色块（user=accent，assistant=中性灰），
+// 视口框跟随滚动，点击/拖拽跳转。canvas 绘制，千条消息一次画完。
+const minimap = {
+  canvas: null,
+  ctx: null,
+  dragging: false,
+  redrawPending: false,
+
+  init() {
+    const panel = document.getElementById('chatPanel');
+    if (!panel || !dom.messages) return;
+    const canvas = document.createElement('canvas');
+    canvas.id = 'minimap';
+    panel.appendChild(canvas);
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+
+    // 尺寸跟随 messages 区域（inputArea 高度变化时同步）
+    new ResizeObserver(() => this.syncSize()).observe(dom.messages);
+    // 内容增删 → 重绘（流式追加、历史加载、欢迎屏移除）
+    new MutationObserver(() => this.scheduleRedraw()).observe(dom.messages, { childList: true });
+    // 滚动 → 重绘视口框
+    dom.messages.addEventListener('scroll', () => this.scheduleRedraw(), { passive: true });
+    // 点击/拖拽跳转
+    canvas.addEventListener('mousedown', (e) => {
+      this.dragging = true;
+      this.jump(e);
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => { if (this.dragging) this.jump(e); });
+    window.addEventListener('mouseup', () => { this.dragging = false; });
+
+    this.syncSize();
+
+  },
+
+  syncSize() {
+    if (!this.canvas || !dom.messages) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = 14;
+    const h = dom.messages.clientHeight;
+    this.cssW = w;
+    this.cssH = h;
+    this.canvas.style.top = dom.messages.offsetTop + 'px';
+    this.canvas.style.height = h + 'px';
+    this.canvas.style.width = w + 'px';
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.scheduleRedraw();
+  },
+
+  scheduleRedraw() {
+    if (this.redrawPending) return;
+    this.redrawPending = true;
+    const run = () => { this.redrawPending = false; this.draw(); };
+    requestAnimationFrame(run);
+    setTimeout(run, 100); // 兜底：rAF 在后台/隐藏页面可能不触发
+  },
+
+  jump(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    const msgs = dom.messages;
+    // .messages 有 scroll-behavior: smooth，拖拽时会被动画抢，临时切 instant
+    const prev = msgs.style.scrollBehavior;
+    msgs.style.scrollBehavior = 'auto';
+    msgs.scrollTop = ratio * (msgs.scrollHeight - msgs.clientHeight);
+    msgs.style.scrollBehavior = prev;
+  },
+
+  draw() {
+    const { ctx, canvas } = this;
+    const msgs = dom.messages;
+    if (!ctx || !msgs) return;
+
+    // 先判定可滚动性（不依赖 canvas 尺寸，避免 display:none 后死锁）
+    const scrollable = msgs.scrollHeight > msgs.clientHeight + 40;
+    canvas.style.display = scrollable ? 'block' : 'none';
+    msgs.classList.toggle('minimap-active', scrollable);
+    // 用 syncSize 保存的 CSS 尺寸（不依赖 clientWidth，避免 display:none 时为 0）
+    const w = this.cssW || 14;
+    const h = this.cssH || dom.messages.clientHeight;
+    if (h <= 0) return;
+
+    ctx.clearRect(0, 0, w, h);
+    const scale = h / msgs.scrollHeight;
+    const styles = getComputedStyle(document.documentElement);
+    const accent = styles.getPropertyValue('--accent-main-000').trim();
+    const neutral = styles.getPropertyValue('--text-400').trim();
+    const userColor = accent ? `hsl(${accent})` : 'rgba(100,150,250,0.9)';
+    const assistantColor = neutral ? `hsl(${neutral} / 0.45)` : 'rgba(140,140,140,0.45)';
+
+    // 消息色块：位置/高度按 scrollContent 坐标等比映射
+    // offsetTop 相对 offsetParent（#chatPanel 已 position:relative），msgs.offsetTop 为其内偏移
+    const base = msgs.offsetTop;
+    for (const el of msgs.children) {
+      if (!el.classList || !el.classList.contains('message')) continue;
+      const y = (el.offsetTop - base) * scale;
+      const bh = Math.max(el.offsetHeight * scale, 2); // 最小 2px 保证可见
+      const isUser = el.classList.contains('user');
+      ctx.fillStyle = isUser ? userColor : assistantColor;
+      const bw = isUser ? 8 : 6; // user 稍宽，快速区分
+      ctx.fillRect((w - bw) / 2, y, bw, bh);
+    }
+
+    // 视口指示框
+    const vy = msgs.scrollTop * scale;
+    const vh = Math.max(msgs.clientHeight * scale, 6);
+    ctx.fillStyle = accent ? `hsl(${accent} / 0.10)` : 'rgba(100,150,250,0.10)';
+    ctx.fillRect(0, vy, w, vh);
+    ctx.strokeStyle = accent ? `hsl(${accent} / 0.35)` : 'rgba(100,150,250,0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, vy + 0.5, w - 1, vh - 1);
+  },
+};
+
 // ── Initialize ──
 async function init() {
   state.workspacePath = await ompDesktop.getWorkspacePath();
   dom.sidebarTreeSection = dom.sidebar.querySelector('.sidebar-tree-section');
+  minimap.init();
 
   // 拦截本地文件路径链接点击，用 shell.openPath 打开
   dom.messages.addEventListener('click', (e) => {
@@ -963,7 +1084,8 @@ async function selectProject(dirName) {
       html: dom.messages.innerHTML,
       scrollPos: dom.messages.scrollTop,
     });
-    if (state.sessionMessageCache.size > 10) {
+    // 上限 3：长会话 innerHTML 可达 5-20MB，10 份缓存 = 50-200MB 堆内存
+    if (state.sessionMessageCache.size > 3) {
       const oldest = state.sessionMessageCache.keys().next().value;
       state.sessionMessageCache.delete(oldest);
     }
@@ -1055,7 +1177,7 @@ async function selectProject(dirName) {
           dom.messages.appendChild(el);
           state.currentAssistantEl = el;
           state.currentTextBuffer = '';
-          scrollToBottom();
+          scrollToBottom(true);
         } else {
           // 先渲染历史（从文件系统读取，不依赖 omp），再通知 omp 切换会话
           try {
@@ -1422,8 +1544,8 @@ async function switchToSession(sessionPath) {
         html: dom.messages.innerHTML,
         scrollPos: dom.messages.scrollTop,
       });
-      // 限制缓存大小（最多 10 个会话）
-      if (state.sessionMessageCache.size > 10) {
+      // 限制缓存大小（最多 3 个会话，防止长会话 innerHTML 撑爆内存）
+      if (state.sessionMessageCache.size > 3) {
         const oldest = state.sessionMessageCache.keys().next().value;
         state.sessionMessageCache.delete(oldest);
       }
@@ -1448,6 +1570,7 @@ async function switchToSession(sessionPath) {
             pre.dataset.enhanced = '';
           });
           enhanceCodeBlocks(dom.messages);
+          lazyHighlightCodeBlocks(dom.messages);
         }, 5500);
       } else {
         dom.messages.innerHTML = cached.html;
@@ -1456,6 +1579,7 @@ async function switchToSession(sessionPath) {
           pre.dataset.enhanced = '';
         });
         enhanceCodeBlocks(dom.messages);
+        lazyHighlightCodeBlocks(dom.messages);
       }
     } else {
       if (state.welcomePhase === 'showing') {
@@ -1506,22 +1630,24 @@ async function loadAndRenderHistory(sessionPath) {
     const welcome = dom.messages.querySelector('.welcome-screen');
     if (welcome) welcome.remove();
 
-    // 渲染每条历史消息
+    // 渲染每条历史消息（DocumentFragment 批量插入，避免 N 次 DOM 操作）
+    const fragment = document.createDocumentFragment();
     for (const msg of result.messages) {
       if (epoch !== state.loadEpoch) return; // 双重检查
       if (msg.role === 'user') {
         const text = msg.text || '';
         if (!text) continue;
-        dom.messages.appendChild(createHistoryUserMessage(text, msg.timestamp));
+        fragment.appendChild(createHistoryUserMessage(text, msg.timestamp));
       } else if (msg.role === 'assistant') {
         const text = msg.text || '';
         const thinking = msg.thinking || '';
         const toolCalls = msg.toolCalls || [];
         if (!text && !thinking && toolCalls.length === 0) continue;
-        dom.messages.appendChild(createHistoryAssistantMessage(text, thinking, toolCalls, msg.timestamp, msg.model));
+        fragment.appendChild(createHistoryAssistantMessage(text, thinking, toolCalls, msg.timestamp, msg.model));
       }
     }
-    scrollToBottom();
+    dom.messages.appendChild(fragment);
+    scrollToBottom(true);
   } catch (err) {
     if (epoch === state.loadEpoch) addNotice('warning', `加载历史失败: ${err.message}`);
   }
@@ -1607,11 +1733,11 @@ function createHistoryAssistantMessage(text, thinking, toolCalls, timestamp, mod
     }
   }
 
-  // 正文
+  // 正文（历史消息不高亮，代码块进入视口后再做 hljs）
   if (text) {
     const fixed = applyOutputFixes(text);
     const rendered = document.createElement('div');
-    rendered.innerHTML = ompDesktop.marked(fixed);
+    rendered.innerHTML = ompDesktop.markedNoHighlight(fixed);
     body.appendChild(rendered);
   }
 
@@ -1620,6 +1746,8 @@ function createHistoryAssistantMessage(text, thinking, toolCalls, timestamp, mod
 
   // 代码块增强（复制按钮 + 可折叠）
   enhanceCodeBlocks(body);
+  // 代码块懒高亮（进入视口才执行 hljs）
+  lazyHighlightCodeBlocks(body);
 
   div.appendChild(header);
   div.appendChild(body);
@@ -1771,54 +1899,95 @@ function updateAssistantContent(rawText) {
 }
 
 // ── 代码块增强：统一复制按钮 + 可折叠 ──
+// ── 代码块懒处理：进入视口才执行 hljs 高亮 / 测高折叠 ──
+// 统一观察器：CODE 元素 → 高亮；PRE 元素 → 折叠。提前 300px 触发，滚动到之前已完成
+const codeBlockObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue;
+    const el = entry.target;
+    codeBlockObserver.unobserve(el);
+    if (el.tagName === 'CODE') {
+      // 已高亮的代码含 hljs span 子元素；未高亮的是纯文本（该判断在缓存恢复后依然正确）
+      if (el.children.length > 0) continue;
+      const langMatch = (el.className || '').match(/language-(\S+)/);
+      const lang = langMatch ? langMatch[1] : '';
+      const raw = el.textContent || '';
+      try {
+        el.innerHTML = lang && ompDesktop.hljs.getLanguage(lang)
+          ? ompDesktop.hljs.highlight(raw, { language: lang }).value
+          : ompDesktop.hljs.highlightAuto(raw).value;
+      } catch { /* 高亮失败保持原文 */ }
+    } else {
+      collapsePreIfTall(el);
+    }
+  }
+}, { root: null, rootMargin: '300px' });
+
+// 高度超过 150px 的 pre 包裹折叠层（仅在元素近视口时测量，不与 content-visibility 冲突）
+function collapsePreIfTall(pre) {
+  if (pre.dataset.collapseDone) return;
+  pre.dataset.collapseDone = '1';
+  if (!pre.isConnected || pre.scrollHeight <= 150) return;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'collapsible-pre-wrap';
+  pre.parentNode.insertBefore(wrapper, pre);
+  wrapper.appendChild(pre);
+  pre.classList.add('collapsed');
+
+  const toggle = document.createElement('button');
+  toggle.className = 'code-toggle-btn';
+  toggle.textContent = '展开代码';
+  toggle.onclick = (e) => {
+    e.stopPropagation();
+    const expanded = pre.classList.toggle('collapsed');
+    toggle.textContent = expanded ? '展开代码' : '收起代码';
+  };
+  wrapper.appendChild(toggle);
+}
+
+function lazyHighlightCodeBlocks(container) {
+  container.querySelectorAll('pre code').forEach(code => {
+    if (code.children.length > 0) return; // 已高亮
+    codeBlockObserver.observe(code); // 重复 observe 同一元素是 no-op，安全
+  });
+}
+
 function enhanceCodeBlocks(container) {
   container.querySelectorAll('pre').forEach(pre => {
-    if (pre.dataset.enhanced) return;
-    pre.dataset.enhanced = '1';
-    pre.style.position = 'relative';
-
-    // 复制按钮
-    const btn = document.createElement('button');
-    btn.className = 'copy-btn';
-    btn.textContent = '复制';
-    btn.style.cssText = 'position:absolute;top:4px;right:4px;padding:2px 8px;font-size:11px;background:var(--bg-hover);border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);cursor:pointer;z-index:2;';
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      const code = pre.querySelector('code');
-      const text = code ? code.textContent : pre.textContent;
-      try {
-        ompDesktop.clipboardWriteText(text);
-        btn.textContent = '已复制!';
-        setTimeout(() => btn.textContent = '复制', 2000);
-      } catch {
-        navigator.clipboard.writeText(text).then(() => {
-          btn.textContent = '已复制!';
-          setTimeout(() => btn.textContent = '复制', 2000);
-        });
-      }
-    };
-    pre.appendChild(btn);
-
-    // 可折叠：如果代码块高度超过 150px，包裹一层并添加展开按钮
-    requestAnimationFrame(() => {
-      if (pre.scrollHeight > 150) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'collapsible-pre-wrap';
-        pre.parentNode.insertBefore(wrapper, pre);
-        wrapper.appendChild(pre);
-        pre.classList.add('collapsed');
-
-        const toggle = document.createElement('button');
-        toggle.className = 'code-toggle-btn';
-        toggle.textContent = '展开代码';
-        toggle.onclick = (e) => {
+    // 复制按钮：未增强且不存在残留按钮时才添加（缓存恢复的 HTML 已序列化按钮，防重复）
+    if (!pre.dataset.enhanced) {
+      pre.dataset.enhanced = '1';
+      pre.style.position = 'relative';
+      if (!pre.querySelector(':scope > .copy-btn')) {
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.textContent = '复制';
+        btn.style.cssText = 'position:absolute;top:4px;right:4px;padding:2px 8px;font-size:11px;background:var(--bg-hover);border:1px solid var(--border);border-radius:4px;color:var(--text-secondary);cursor:pointer;z-index:2;';
+        btn.onclick = (e) => {
           e.stopPropagation();
-          const expanded = pre.classList.toggle('collapsed');
-          toggle.textContent = expanded ? '展开代码' : '收起代码';
+          const code = pre.querySelector('code');
+          const text = code ? code.textContent : pre.textContent;
+          try {
+            ompDesktop.clipboardWriteText(text);
+            btn.textContent = '已复制!';
+            setTimeout(() => btn.textContent = '复制', 2000);
+          } catch {
+            navigator.clipboard.writeText(text).then(() => {
+              btn.textContent = '已复制!';
+              setTimeout(() => btn.textContent = '复制', 2000);
+            });
+          }
         };
-        wrapper.appendChild(toggle);
+        pre.appendChild(btn);
       }
-    });
+    }
+    // 懒折叠：已包裹的跳过；已在观察中的 observe 是 no-op
+    if (!pre.dataset.collapseDone && !(pre.parentElement && pre.parentElement.classList.contains('collapsible-pre-wrap'))) {
+      codeBlockObserver.observe(pre);
+    }
+    // 懒高亮
+    const code = pre.querySelector('code');
+    if (code && code.children.length === 0) codeBlockObserver.observe(code);
   });
 }
 
@@ -2284,7 +2453,12 @@ function setupInput() {
     e.stopPropagation();
     inputArea.classList.remove('drag-over');
     const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) insertFilePaths(files);
+    if (files.length === 0) return;
+    // 图片文件 → 加入预览待发送；非图片文件 → 插入路径文本
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    const otherFiles  = files.filter(f => !f.type.startsWith('image/'));
+    if (imageFiles.length > 0) handleImageFiles(imageFiles);
+    if (otherFiles.length  > 0) insertFilePaths(otherFiles);
   });
 
   // 3. 粘贴图片 (Ctrl+V)
@@ -2302,7 +2476,15 @@ function setupInput() {
 
 // ── 拖放文件路径插入 ──
 function insertFilePaths(files) {
-  const paths = Array.from(files).map(f => f.path).filter(Boolean);
+  const paths = Array.from(files)
+    .map(f => {
+      // Electron 32+ 移除了 File.path，需走 webUtils.getPathForFile（preload 桥接）
+      if (window.ompDesktop && typeof window.ompDesktop.getPathForFile === 'function') {
+        try { return window.ompDesktop.getPathForFile(f); } catch { return f.path; }
+      }
+      return f.path;
+    })
+    .filter(Boolean);
   if (paths.length === 0) return;
   const current = dom.input.value;
   const separator = current && !current.endsWith('\n') ? '\n' : '';
@@ -2972,7 +3154,6 @@ function showBranchPicker(session, entries) {
       <span class="branch-entry-text">${escapeHtml(text)}${text.length >= 80 ? '...' : ''}</span>
     </div>`;
   }
-
   modal.innerHTML = `
     <div class="branch-header">
       <span class="branch-title">分支对话</span>
@@ -3064,12 +3245,12 @@ function relTime(dateStr) {
   return `${Math.floor(month / 12)} 年前`;
 }
 
-function scrollToBottom() {
+function scrollToBottom(force = false) {
   requestAnimationFrame(() => {
-    // 粘底滚动：仅在用户已接近底部时自动滚动，不抢用户翻页
+    // 粘底滚动：仅在用户已接近底部时自动滚动，不抢用户翻页；force 用于历史加载等必须到底的场景
     const el = dom.messages;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
+    if (force || nearBottom) el.scrollTop = el.scrollHeight;
   });
 }
 const path = {

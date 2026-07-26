@@ -1,33 +1,32 @@
 /**
- * claude-mode-extension.ts — omp 扩展 v6.0
+ * claude-mode-extension.ts - omp 扩展 v6.0
  *
  * 精简理念：搭 omp 的车，不造 omp 的轮
  *
  * 已删除（omp 原生已覆盖 / 不再需要）：
- * - AGENTS.md 注入 → omp 自动从 CWD 查找注入
- * - MEMORY.md 注入 → Mnemopi autoRecall
- * - PROJECT.md 注入 → Mnemopi per-project 隔离
- * - 违反检测（4 个检测器） → TTSR 实时拦截
- * - 权限契约审批 → omp 内置审批
- * - XML 工具调用纠正 → TTSR no-xml-toolcall.md
- * - 敏感信息检测 → 不再需要
- * - /omfg 命令 → Electron 主进程已拦截
- * - memory_write 工具 → Mnemopi 原生 retain
- * - memory_search 工具 → Mnemopi 原生 recall
- * - gap-fill 断片补救 → 改用原生记忆管理
- * - constraints.md 注入 → 改用原生记忆管理
- *
- * - skill 工具 → omp 原生 manage_skill + managed-skills 目录
+ * - AGENTS.md 注入 -> omp 自动从 CWD 查找注入
+ * - MEMORY.md 注入 -> Mnemopi autoRecall
+ * - PROJECT.md 注入 -> Mnemopi per-project 隔离
+ * - 违反检测（4 个检测器） -> TTSR 实时拦截
+ * - 权限契约审批 -> omp 内置审批
+ * - XML 工具调用纠正 -> TTSR no-xml-toolcall.md
+ * - /omfg 命令 -> Electron 主进程已拦截
+ * - memory_write 工具 -> Mnemopi 原生 retain
+ * - memory_search 工具 -> Mnemopi 原生 recall
+ * - skill 工具 -> omp 原生 manage_skill + managed-skills 目录
+ * - gap-fill 断片补救 -> Mnemopi autoRecall 覆盖
+ * - constraints.md 注入 -> TTSR 规则 + AGENTS.md 覆盖
  *
  * 保留（omp 不覆盖）：
- * - 危险路径/配置文件拦截
+ * - 危险路径/配置文件/扩展自身 拦截
+ * - .env / 密钥文件读取拦截
+ * - 堆栈/路径泄露拦截
  * - 静默工具调用检测
  * - 审计日志
- * - error 续行（最小化）
+ * - error 续行（一次制 + 5 秒延迟）
  * - hub 工具移除
  */
-
-import { appendFileSync, existsSync, mkdirSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 // ── 路径常量 ──
@@ -35,8 +34,11 @@ const PLUGIN_DIR = import.meta.dir
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || join(process.env.HOME || process.env.USERPROFILE || "~", ".omp", "agent")
 const PORTABLE_ROOT = resolve(AGENT_DIR, "..", "..")
 const DATA_DIR = resolve(AGENT_DIR, "..")
+const MEMORY_DIR = join(DATA_DIR, "memory")
+const INBOX_DIR = join(MEMORY_DIR, "inbox")
 const LOG_DIR_PATH = join(DATA_DIR, "log")
 const PLUGIN_LOG = join(PLUGIN_DIR, "claude-mode.log")
+const GAPFILL_MAX_AGE_MS = 60 * 60 * 1000
 
 // ── 日志 ──
 function log(category: string, payload: string | string[] | unknown) {
@@ -71,18 +73,74 @@ function isDangerousPath(fp: string): boolean {
   return DANGER_PATH_PATTERNS.some(p => p.test(fp))
 }
 
+// ── 密钥/配置文件路径检测 ──
+function isSecretFilePath(fp: string): boolean {
+  const norm = String(fp).replace(/\//g, "\\").toLowerCase()
+  // .env 系列文件（支持绝对路径和相对路径）
+  // 匹配：\.env 或 .env 开头（相对路径）
+  if (/(?:^|[\\/])\.env(\.|$|[\\/])/i.test(norm)) return true
+  if (/^\.env$/i.test(norm)) return true
+  // 证书/密钥文件
+  if (/\.(pem|key|crt|p12|pfx|ovpn)$/i.test(norm)) return true
+  // 含敏感词的文件名（password.txt / secret.json / token.dat 等）
+  if (/(?:^|[\\/])(password|secret|token|api[_-]?key|credentials|passwd|pwd)\.[a-zA-Z0-9]{1,10}$/i.test(norm)) return true
+  return false
+}
+
+// ── 堆栈/路径泄露检测 ──
+// 只匹配真正的堆栈跟踪（多个 at 行），不匹配单个错误类型名
+const STACK_TRACE_AT_LINE = /^\s+at\s+[A-Za-z_$][\w$]*\s+\(.+?:\d+:\d+\)/m
+
+function hasStackLeak(text: string): boolean {
+  if (!text || text.length < 20) return false
+  // 需要至少 2 行 "at foo (file:line:col)" 才判定为堆栈泄露
+  const atLines = text.match(/^\s+at\s+[A-Za-z_$][\w$]*\s+\(.+?:\d+:\d+\)/gm)
+  if (atLines && atLines.length >= 2) return true
+  return false
+}
+
+// ── gap-fill 清理（60 分钟） ──
+function cleanupGapFills(sessionID: string) {
+  try {
+    if (!existsSync(INBOX_DIR)) return
+    const files = readdirSync(INBOX_DIR).filter(
+      (n) => (n.startsWith("gap-fill-") && n.endsWith(".md")) || (n.startsWith("compact-") && n.endsWith(".txt"))
+    )
+    const now = Date.now()
+    for (const f of files) {
+      const full = join(INBOX_DIR, f)
+      let remove = false
+      let reason = ""
+      const isCompactDump = f.startsWith("compact-")
+      if (!isCompactDump && sessionID && f !== `gap-fill-${sessionID}.md`) {
+        remove = true; reason = "old-session"
+      }
+      if (!remove) {
+        try {
+          const stat = statSync(full)
+          if (now - stat.mtimeMs > GAPFILL_MAX_AGE_MS) { remove = true; reason = "age" }
+        } catch {}
+      }
+      if (remove) {
+        try { unlinkSync(full); log("gapfill.cleanup", `removed ${f} (${reason})`) }
+        catch (e: any) { log("gapfill.cleanup.error", `${f}: ${e?.message}`) }
+      }
+    }
+  } catch (e: any) { log("gapfill.cleanup.error", e?.message) }
+}
+
 // ═══════════════════════════════════════════════════════════
 // 扩展入口
 // ═══════════════════════════════════════════════════════════
 export default async function (pi: any) {
-  ensureDir(LOG_DIR_PATH)
+  ensureDir(INBOX_DIR)
 
   let agentTurnCount = 0
   let silentToolCallCount = 0
   const SILENT_TOOL_CALL_THRESHOLD = 3
 
   log("init", [
-    "=== claude-mode extension loaded (v6.0) ===",
+    "=== claude-mode extension loaded (v6.1.1) ===",
     `pid: ${process.pid}`,
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
@@ -96,24 +154,38 @@ export default async function (pi: any) {
       if (filtered.length < all.length) {
         await pi.setActiveTools(filtered)
         const gone = all.filter(t => !filtered.includes(t))
-        log("session_start", `removed [${gone.join(", ")}] (${all.length} → ${filtered.length})`)
+        log("session_start", `removed [${gone.join(", ")}] (${all.length} -> ${filtered.length})`)
       }
     } catch (err: any) {
       log("session_start.error", err?.message || String(err))
     }
   })
 
-  // ── 1. before_agent_start ── 静默工具调用计数重置
+  // ── 1. before_agent_start ── 注入行为约束 + 重置计数
   pi.on("before_agent_start", async (event: any) => {
     try {
       agentTurnCount++
       silentToolCallCount = 0
+
+      // 注入行为约束：返回 systemPrompt 数组（OMP 会链式合并多个扩展的返回值）
+      const injectPath = join(MEMORY_DIR, "constraints-inject.md")
+      if (existsSync(injectPath)) {
+        try {
+          const injectContent = readFileSync(injectPath, "utf8").trim()
+          if (injectContent) {
+            log("before_agent_start.inject", `injecting ${injectContent.split("\n").length} lines from constraints-inject.md`)
+            return { systemPrompt: [injectContent] }
+          }
+        } catch (err: any) {
+          log("before_agent_start.inject.error", err?.message || String(err))
+        }
+      }
     } catch (err: any) {
       log("before_agent_start.error", err?.message || String(err))
     }
   })
 
-  // ── 2. tool_call ── 危险路径拦截 + 配置文件自改拦截 + 静默工具调用检测
+  // ── 2. tool_call ── 危险路径/配置文件/.env 拦截 + 静默工具调用检测
   pi.on("tool_call", async (event: any) => {
     try {
       const tool = event.toolName || ""
@@ -163,6 +235,23 @@ export default async function (pi: any) {
         }
       }
 
+      // read / bash 工具：拦截读取 .env / 密钥文件
+      if (tool === "read" || tool === "bash" || tool === "shell") {
+        let readPath = ""
+        if (tool === "read") {
+          readPath = String(input.filePath || input.path || "")
+        } else {
+          // bash/shell: 提取 cat/type/Get-Content 等读取命令的目标文件
+          const cmd = String(input.command || input.content || "")
+          const readCmdMatch = cmd.match(/(?:cat|type|Get-Content|less|more|head|tail)\s+["']?([^\s"']+)["']?/i)
+          if (readCmdMatch) readPath = readCmdMatch[1]
+        }
+        if (readPath && isSecretFilePath(readPath)) {
+          log("tool_call.blocked", `${tool} -> ${readPath} (secret file read attempt)`)
+          return { block: true, reason: `[claude-mode] 禁止读取密钥/配置文件 ${readPath}。如确需访问，请向用户说明原因并请求授权。` }
+        }
+      }
+
       // bash 工具：拦截在 workspace 根目录下 mkdir
       if (tool === "bash" || tool === "shell") {
         const cmd = String(input.command || input.content || "")
@@ -188,9 +277,111 @@ export default async function (pi: any) {
     }
   })
 
+  // ── 3. session.compacting ── gap-fill 断片提取 + compact dump + 立即注入
+  pi.on("session.compacting", async (event: any) => {
+    try {
+      const sessionID = event.sessionId || ""
+      log("session.compacting", `=== fired === sessionID: ${sessionID}`)
+
+      cleanupGapFills(sessionID)
+
+      const messages: any[] = event.messages || []
+      if (messages.length === 0) return
+
+      // compact dump：落盘最近 50 条消息原文
+      try {
+        ensureDir(INBOX_DIR)
+        const inboxPath = join(INBOX_DIR, `compact-${sessionID}-${Date.now()}.txt`)
+        const formatted = messages.slice(-50).map((m) => {
+          const role = m.role || "unknown"
+          const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")
+          const truncated = content.length > 2000 ? content.slice(0, 2000) + "..." : content
+          return `[${role}] ${truncated}`
+        }).join("\n\n")
+        writeFileSync(inboxPath, formatted, "utf8")
+        log("session.compacting.dump", `wrote ${inboxPath}`)
+      } catch (err: any) {
+        log("session.compacting.dump.error", err?.message || String(err))
+      }
+
+      // gap-fill 提取：改动文件 / 关键命令 / 决策要点 / 已读文件
+      try {
+        const gapFillPath = join(INBOX_DIR, `gap-fill-${sessionID}.md`)
+        try { if (existsSync(gapFillPath)) unlinkSync(gapFillPath) } catch {}
+
+        const entries: string[] = []
+        const fileSet = new Set<string>()
+        const readFileSet = new Set<string>()
+        const cmdSet = new Set<string>()
+        const decisionLines = new Set<string>()
+        const kw = /(决定|配置|记住|改了|选了|用.{0,6}方案|路径|踩坑|原因|因为|应该|必须|不要|放弃|采用|修复)/
+
+        for (const m of messages) {
+          const content = typeof m.content === "string" ? m.content : ""
+          const toolCalls = m.tool_calls || m.toolCalls || []
+          for (const tc of toolCalls) {
+            const fn = tc.function?.name || tc.toolName || ""
+            const args = tc.function?.arguments || tc.input || {}
+            if ((fn === "edit" || fn === "write") && args.filePath) {
+              fileSet.add(args.filePath)
+            } else if (fn === "read" && (args.filePath || args.path)) {
+              readFileSet.add(args.filePath || args.path)
+            } else if (fn === "bash" && args.command) {
+              const c = String(args.command).trim()
+              if (c && !/^\s*(ls|dir|cd|echo|Get-ChildItem|Set-Location|pwd|cls|clear)\b/i.test(c)) {
+                cmdSet.add(c)
+              }
+            }
+          }
+          if (content) {
+            for (const line of content.split("\n")) {
+              const s = line.trim()
+              const noisePrefix = /^(-|\||-|\*|>|"|⚠️|📁|📌|\d+[.、]|\s*[-*]\s)/u
+              if (s.length > 12 && s.length < 160 && kw.test(s) && !noisePrefix.test(s) && !decisionLines.has(s)) {
+                decisionLines.add(s)
+              }
+            }
+          }
+          if (fileSet.size + cmdSet.size + decisionLines.size > 60) break
+        }
+
+        const ellipsis = (s: string, head: number, tail: number) =>
+          s.length <= head + tail + 3 ? s : s.slice(0, head) + " … " + s.slice(-tail)
+
+        if (readFileSet.size > 0) {
+          entries.push("## 已读过的文件（无需重读）")
+          for (const f of [...readFileSet].sort()) entries.push(`- 已读取：${f}`)
+          entries.push("")
+        }
+        if (fileSet.size > 0) fileSet.forEach((f) => entries.push(`- 改动文件：${f}`))
+        if (cmdSet.size > 0) cmdSet.forEach((c) => entries.push(`- 关键命令：${ellipsis(c, 140, 50)}`))
+        if (decisionLines.size > 0) decisionLines.forEach((s) => entries.push(`- 决策/要点：${ellipsis(s, 90, 40)}`))
+
+        if (entries.length > 0) {
+          const uniq = [...new Set(entries)].slice(0, 60)
+          const body = `# Gap-fill (断片补救) - ${sessionID}\n\n> 由 compacting hook 自动提取，60 分钟后清理。\n\n${uniq.join("\n")}\n`
+          writeFileSync(gapFillPath, body, "utf8")
+          log("session.compacting.gapfill", `wrote ${uniq.length} entries to ${gapFillPath}`)
+
+          // 立即注入压缩后上下文（不等下轮）
+          const contextText = [
+            "# 断片补救（gap-fill，压缩时自动提取）",
+            "",
+            body,
+          ].join("\n")
+          return { context: [contextText] }
+        }
+      } catch (err: any) {
+        log("session.compacting.gapfill.error", err?.message || String(err))
+      }
+    } catch (err: any) {
+      log("session.compacting.error", err?.message || String(err))
+    }
+  })
+
   let hasContinuedAfterError = false  // 本轮是否已续行过一次
 
-  // ── 3. session_stop ── error 续行一次，5 秒后执行
+  // ── 4. session_stop ── error 续行一次，5 秒后执行
   pi.on("session_stop", async (event: any) => {
     try {
       const lastMsg = event.last_assistant_message
@@ -232,16 +423,39 @@ export default async function (pi: any) {
     }
   })
 
-  // ── 4. tool_result ── 审计日志
+  // ── 5. tool_result ── 审计日志 + 堆栈/路径泄露拦截
   pi.on("tool_result", async (event: any) => {
     try {
       const tool = event.toolName || "unknown"
       auditLog({ event: "tool_result", tool, isError: event.isError || false })
       log("tool_result", `tool=${tool}`)
+
+      // 检查错误结果是否泄露堆栈/路径
+      if (event.isError) {
+        // 提取文本内容
+        const resultText = Array.isArray(event.content)
+          ? event.content
+              .filter((c: any) => c?.type === "text" && typeof c?.text === "string")
+              .map((c: any) => c.text)
+              .join("\n")
+          : typeof event.content === "string" ? event.content : ""
+
+        if (hasStackLeak(resultText)) {
+          log("tool_result.sanitized", `${tool} result contained stack trace, sanitizing`)
+          // 返回修改后的内容（ToolResultEventResult 只支持 content/details/isError）
+          return {
+            content: [{
+              type: "text",
+              text: `[错误] 工具执行失败，详细信息已被安全过滤。请检查输入参数后重试，或向用户描述错误现象。`,
+            }],
+            isError: true,
+          }
+        }
+      }
     } catch (err: any) {
       log("tool_result.error", err?.message || String(err))
     }
   })
 
-  log("init", "=== claude-mode extension v6.0 ready ===")
+  log("init", "=== claude-mode extension v6.1.1 ready ===")
 }

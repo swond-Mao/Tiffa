@@ -5,7 +5,7 @@
  * 通过 contextBridge 暴露受控 API。
  */
 
-const { contextBridge, ipcRenderer, clipboard } = require('electron');
+const { contextBridge, ipcRenderer, clipboard, webUtils } = require('electron');
 const hljs = require('highlight.js/lib/common');
 const { marked } = require('marked');
 
@@ -101,6 +101,8 @@ contextBridge.exposeInMainWorld('ompDesktop', {
 
   // ── 渲染库 ──
   marked: (src) => marked.parse(src),
+  // 历史加载专用：不做 hljs 高亮（由渲染进程可见时再高亮），避免长会话全量同步高亮卡死
+  markedNoHighlight: (src) => marked.parse(src, { highlight: null }),
   hljs: {
     highlight: (code, opts) => {
       try {
@@ -121,4 +123,6 @@ contextBridge.exposeInMainWorld('ompDesktop', {
 
   // ── 剪贴板 ──
   clipboardWriteText: (text) => clipboard.writeText(text),
+  // ── 文件路径解析（Electron 32+ File.path 已移除）──
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 });

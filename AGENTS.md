@@ -1,4 +1,4 @@
-# AGENTS.md — Tiffa v4.0 项目规范
+# AGENTS.md — Tiffa 项目规范（v6.1）
 
 ## 项目概述
 
@@ -58,51 +58,22 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 
 ---
 
-## 记忆系统：Mnemopi（v4.0 启用）
+## 记忆系统：Mnemopi（v6.1）
 
-v4.0 起弃用手动 MEMORY.md/PROJECT.md 注入，改用 omp 内置 Mnemopi 语义记忆系统。
+v6.1 配置值通过 `settings` 数据库直接写入，不依赖 config.yml 嵌套格式（已验证 config.yml 嵌套写法不生效）。
 
-### 配置 (config.yml)
+### 当前生效配置（settings 数据库）
 
-```yaml
-memory:
-  backend: mnemopi
-  mnemopi:
-    embeddingModel: "fast-bge-small-zh-v1.5"    # BAAI/bge-small-zh-v1.5 的缩写
-    scoping: "per-project-plus-global"           # 项目库 + 全局库，项目优先
-    autoRecall: true                             # 每轮自动召回相关记忆
-    autoRetain: true                             # 自动保存重要内容
-    retainEveryNTurns: 5                         # 每 5 轮自动 retain
-    recallLimit: 10                              # 最多召回 10 条
-    injectionTokenLimit: 2000                    # 注入上限 2000 token
-```
+| 参数 | 值 | 说明 |
+|------|---|---|
+| `mnemopi.scoping` | `global` | 所有项目共享同一库，每条带 metadata.cwd 标记来源 |
+| `mnemopi.autoRecall` | `false` | 关闭自动召回，由 PROJECT.md 做确定性注入 |
+| `mnemopi.autoRetain` | `true` | 每次 agent_end 自动 retain 到 global 库 |
+| `mnemopi.retainEveryNTurns` | `2` | 每 2 轮 retain 一次 |
+| `mnemopi.recallLimit` | `10` | 最多召回 10 条 |
+| `mnemopi.injectionTokenLimit` | `2000` | 注入上限 2000 token |
 
-### 作用域模式
-
-| 模式 | 说明 |
-|------|------|
-| `global` | 全局共享，无项目隔离 |
-| `per-project` | 按 CWD 隔离，项目间互不可见 |
-| **`per-project-plus-global`** | 项目库 + 全局库，项目优先（当前使用） |
-
-### 嵌入模型
-
-- 缩写 `fast-bge-small-zh-v1.5` → `BAAI/bge-small-zh-v1.5`
-- Tokenizer 文件缓存于 `local_cache/fast-bge-small-zh-v1.5/`
-- 推理在 Bun 子进程 worker 中运行（CPU，非 GPU）
-- 加载失败时 Mnemopi 优雅降级（不崩溃，但不记忆）
-
-### 与旧方案对比
-
-| 特性 | 旧方案 (v2.9) | Mnemopi (v4.0) |
-|------|--------------|----------------|
-| 搜索方式 | 正则 grep MEMORY.md | 语义向量搜索 |
-| 项目隔离 | 手动 PROJECT.md | per-project scoping |
-| 写入 | memory_write 工具 | autoRetain 自动 |
-| 读取 | memory_search 工具 | autoRecall 自动 |
-| 跨项目共享 | 无 | per-project-plus-global |
-| 压缩恢复 | gap-fill 手动提取 | autoRecall + gap-fill |
-
+> **注意**：config.yml 嵌套写法（`memory.mnemopi.scoping: global`）不生效，必须用 `settings` 数据库写入。
 ---
 
 ## 三层约束体系（v4.0）
@@ -124,13 +95,12 @@ memory:
 | `chinese-punctuation.md` | 中文标点 | text | never |
 | `tool-call-commentary.md` | 禁止工具调用废话 | text | never |
 
-### 第 2 层：constraints.md（语义/行为约束，最小化）
+### 第 2 层：行为约束（before_agent_start 注入）
 
-路径：`data/memory/constraints.md`，仅保留无法用正则匹配的约束，通过 `before_agent_start` hook 注入。
+路径：`data/memory/constraints-inject.md`，TTSR 覆盖不了的语义/行为约束，
+通过扩展 `before_agent_start` hook 注入 systemPrompt 前缀。
 
-涵盖：工具调用约束、推理约束、角色/风格约束、安全约束(P0)、Git 约束、代码约束、ComfyUI 生图速查。
-
-### 第 3 层：扩展 Hooks（拦截层）
+涵盖：读文件规范、3 次失败换方法、任务计划、skill 工具铁律、沟通风格、安全铁律。
 
 通过 `tool_call` hook 实现运行时拦截：
 - 危险路径拦截（System32、Windows、Program Files）
@@ -142,59 +112,34 @@ memory:
 
 ## Claude 化扩展 (v4.0)
 
-扩展文件：`plugins/claude-mode-extension.ts`（482 行），通过 `-e` 参数加载。
+扩展文件：`plugins/claude-mode-extension.ts`（461 行，v6.1.1），通过 `-e` 参数加载。
 
-### v4.0 设计原则
+### v4.0 设计原则（精简为 v6.1）
 
-**删除（omp 原生已覆盖）**：
-- AGENTS.md 注入 → omp 自动从 CWD 查找注入
-- MEMORY.md / PROJECT.md 注入 → Mnemopi autoRecall
-- 违反检测（4 个检测器） → TTSR 实时拦截
-- 权限契约审批 → omp 内置审批系统
-- XML 工具调用自动纠正 → TTSR no-xml-toolcall.md
-- 敏感信息检测 → 不再需要
-- memory_search / memory_write 工具 → Mnemopi 原生 recall/retain
-- /omfg 命令处理 → Electron 主进程已拦截
+- **已删除**：AGENTS.md 注入、MEMORY.md/PROJECT.md 注入、违反检测、权限契约审批、XML 工具调用纠正、敏感信息检测、memory_search/memory_write 工具、/omfg 命令、constraints.md 注入
+- **保留**：gap-fill 断片补救、危险路径/配置文件拦截、静默工具调用检测、审计日志、error 续行（最多一次，5秒延迟）
 
-**保留（omp 不覆盖）**：
-- gap-fill 断片补救（压缩前提取关键事实，压缩后注入恢复）
-- 危险路径/配置文件拦截
-- 静默工具调用检测
-- skill 工具注册
-- 审计日志
-- error/unknown 续行（最小化，使用 omp 原生 `{continue: true}`）
 
-### 6 个 Hooks
+### 6 个 Hooks（v6.1）
 
 | # | 事件 | 功能 |
 |---|------|------|
-| 0 | `session_start` | 移除 eval/hub 工具；注册 skill 工具 |
-| 1 | `before_agent_start` | gap-fill 断片补救注入 + constraints.md 注入 |
-| 2 | `tool_call` | 危险路径拦截、配置文件自改拦截、workspace mkdir 拦截、静默工具调用检测 |
-| 3 | `session_stop` | error/unknown 续行（用 omp 原生 `{continue: true, additionalContext}`），其他不干预 |
-| 4 | `session.compacting` | gap-fill 确定性提取（文件/命令/决策）+ compact dump（最近 50 条消息）+ constraints 关键条目重注入 |
-| 5 | `tool_result` | 审计日志 |
+| 0 | `session_start` | 移除 eval/hub 工具 |
+| 1 | `before_agent_start` | 静默工具调用计数重置 |
+| 2 | `tool_call` | 危险路径/配置文件自改/workspace mkdir 拦截 + 静默工具调用检测（≥3次 → steer） |
+| 3 | `session_stop` | error 续行一次（最多一次，5秒延迟），其他不干预 |
+| 4 | `session.compacting` | gap-fill 提取（改动文件/命令/决策）+ compact dump + 立即返回 context 注入 |
+| 5 | `tool_result` | 审计日志（JSONL） |
 
-### session_stop 续行逻辑（v4.0 简化）
+### gap-fill 断片补救（v6.1）
 
-| stopReason | hasText | reason | 续行？ |
-|---|---|---|---|
-| `error` | - | error | 是（`{continue: true}`） |
-| (无 lastMsg) | - | unknown | 是 |
-| `length` | - | interrupted | **否**（交给 omp 原生处理） |
-| `stop` | 有 | complete | 否 |
-| `stop` | 无 | interrupted | **否**（交给 omp 原生处理） |
-| `aborted` | - | aborted | 否 |
+1. **触发**：`session.compacting` hook
+2. **compact dump**：`data/memory/inbox/compact-{sessionId}-{ts}.txt`（最近50条消息原文）
+3. **gap-fill 提取**：改动文件、关键命令（排除ls/cd/echo等）、决策要点（正则去噪，上限60条）
+4. **gap-fill 落盘**：`data/memory/inbox/gap-fill-{sessionId}.md`
+5. **立即注入**：返回 `{context: [gapFill内容]}`，不等下轮
+6. **清理**：60分钟后自动删除（跨 session）
 
-v4.0 不再自己实现续行机制，仅对 error/unknown 返回 `{continue: true}`，其余全部信任 omp 原生判断。
-
-### gap-fill 断片补救
-
-1. **提取时机**：`session.compacting` hook 触发时
-2. **提取内容**：已读文件、改动文件、关键命令、决策/要点（去噪、去重、上限 60 条）
-3. **存储位置**：`data/memory/inbox/gap-fill-{sessionId}.md`
-4. **注入时机**：`before_agent_start` hook 读取并注入 systemPrompt
-5. **清理**：跨 session 的 gap-fill 文件 30 分钟后自动删除
 
 ### 1 个自定义工具
 
@@ -285,10 +230,27 @@ Skills 目录：`G:\oh-my-pi\skills\`
 | pptgen | HTML 网页演示生成器 |
 | pptx-from-layouts | 模板排版 PPT 生成 |
 | xlsx | Excel 助手 |
+### ComfyUI 生图速查（操作指令，非行为约束）
 
-**注意**：用户明确说"用 XX skill"才加载对应 skill。不要主动建议或预判用户要哪个 skill。
+**服务**：ComfyUI 通过 9876 端口反向代理，输出目录 `E:\workspace\comfyui_out`。未运行时生图会失败，应提醒用户先启动。
+
+| 意图 | 管线 | 命令 |
+|------|------|------|
+| 人物写真/名人/角色肖像 | `zimage` | `python comfy.py zimage "<提示词>" --steps 9 --size 1080x1920 --name zimage` |
+| 海报带文字/排版文字 | `ernie` | `python comfy.py ernie "<提示词>" --size 768x1280 --name ernie` |
+| 艺术感/动画质感/电影海报 | `krea2` | `python comfy.py krea2 "<提示词>" --steps 8 --size 1080x1920 --name krea2` |
+| 写实/场景/静物/自由尺寸 | `klein` | `python comfy.py klein "<提示词>" --size 832x1216 --seed 0 --steps 8 --name klein` |
+| 改图/P图/编辑/换背景 | `edit` | `python comfy.py edit "<本地图片路径>" "<编辑指令>" --name edit` |
+
+- **路径**：`G:\oh-my-pi\skills\comfyui-image-gen\comfy.py`
+- **提示词扩写**：用户给简短需求后，先扩写成详细中文提示词再传给管线
+- **长宽比**：竖图默认 portrait，横图用 landscape
+- **输出**：命令最后打印 `RESULT:[路径]`，报告纯路径
+- **铁律**：用户没明确选管线时必须问——列出 5 个管线让用户选
 
 ---
+
+**注意**：用户明确说"用 XX skill"才加载对应 skill。不要主动建议或预判用户要哪个 skill。
 
 ## 环境变量
 
@@ -300,17 +262,47 @@ Skills 目录：`G:\oh-my-pi\skills\`
 | `PORTABLE_ROOT` | 便携包根目录 |
 
 ---
+## Windows 开发注意事项
 
-## 禁忌
+- **行尾符**：Windows 用 `\r\n`，PowerShell 脚本先归一化为 `\n` 再 regex
+- **换行符 in regex**：`.` 不匹配 `\n`，需加 `(?s)` 单行模式使 `.` 匹配换行符
+- **UTF-8 无 BOM**：PowerShell 5.1 读取无 BOM 的 UTF-8 中文文件会出错，输出重定向亦然
+- **PowerShell 脚本**：shebang 在 Windows 不可用，所有脚本用 `.ps1` 后缀，必要时用 `powershell -File`
 
-- 不要修改 `data/agent/config.yml` 和 `models.yml`（除非用户明确要求）
-- 不要修改 `plugins/claude-mode-extension.ts`（除非用户明确要求）
-- 不要删除 Docker 镜像
+---
 
-## 运行时路径强制
+## 记忆系统更新（v6.1）
 
-执行 Python 或 Node 代码时，必须使用便携包内的运行时，禁止使用系统路径：
+### 当前配置（settings 数据库写入生效）
 
-- **Python** → `G:\oh-my-pi\python\python.exe`
-- **Node** → `G:\oh-my-pi\node\node.exe`
-- **Bun** → `G:\oh-my-pi\npm-global\node_modules\bun\bin\bun.exe`（omp 必须）
+| 参数 | 值 | 说明 |
+|------|---|------|
+| `mnemopi.scoping` | `global` | 所有项目共享同一库，metadata.cwd 标记来源 |
+| `mnemopi.autoRecall` | `false` | 关闭自动召回，由 PROJECT.md 做确定性注入 |
+| `mnemopi.autoRetain` | `true` | 每次 agent_end 自动 retain 到 global 库 |
+| `mnemopi.retainEveryNTurns` | `2` | 每 2 轮 retain 一次 |
+| `mnemopi.recallLimit` | `10` | 最多召回 10 条 |
+
+### 记忆分层（v6.1）
+
+| 层 | 机制 | 用途 |
+|---|------|------|
+| 确定性注入 | PROJECT.md → before_agent_start hook | 项目级规范/决策，每会话开头 |
+| 断片恢复 | gap-fill → compacting hook 立即注入 | 压缩时提取要点，直接返回 context |
+| 全量积累 | mnemopi global 库 autoRetain | 所有对话语义存储，manual recall 时可跨项目查询 |
+| 全局铁律 | MEMORY.md（omp 原生加载） | 跨项目通用事实，控制在 30 条以内 |
+| 项目规范 | AGENTS.md（omp 原生加载） | 当前项目架构/约束 |
+
+### gap-fill（session.compacting hook）
+
+- 提取：改动文件、关键命令（排除 ls/cd/echo 等）、决策要点
+- 落盘：`data/memory/inbox/gap-fill-{sessionId}.md` + `compact-{sessionId}-{ts}.txt`
+- 注入：压缩后立即返回 `{context: [gapFill内容]}`，不等下轮
+- 清理：60 分钟后自动删除（跨 session）
+
+### PROJECT.md 与 mnemopi 同步问题
+
+- PROJECT.md（hook 按规则写）和 mnemopi（autoRetain 全量写）是互补层，无需同步
+- PROJECT.md 是精选要点，服务当前项目；mnemopi 是全量积累，服务跨项目 RAG
+- 两者天然分工，不强制同步
+
