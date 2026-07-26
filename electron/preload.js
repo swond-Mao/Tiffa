@@ -42,22 +42,6 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   onExited: (callback) => {
     ipcRenderer.on('omp:exited', (event, data) => callback(data));
   },
-  onStallKilled: (callback) => {
-    ipcRenderer.on('omp:stall-killed', (event, data) => callback(data));
-  },
-  onStallWarning: (callback) => {
-    ipcRenderer.on('omp:stall-warning', (event, data) => callback(data));
-  },
-  onStallRecovered: (callback) => {
-    ipcRenderer.on('omp:stall-recovered', (event, data) => callback(data));
-  },
-  onRestarting: (callback) => {
-    ipcRenderer.on('omp:restarting', (event, data) => callback(data));
-  },
-  onCrashRecovered: (callback) => {
-    ipcRenderer.on('omp:crash-recovered', (event, data) => callback(data));
-  },
-
   // ── 文件系统 ──
   listDir: (dirPath) => ipcRenderer.invoke('fs:listDir', dirPath),
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),

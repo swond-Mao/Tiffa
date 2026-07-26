@@ -259,42 +259,6 @@ async function init() {
   });
   ompDesktop.onExited(handleExited);
 
-  // 监听主进程看门狗事件
-  ompDesktop.onStallWarning((data) => {
-    // 第一级：agent 被通知卡住了，等待它自己处理
-    updateStatus(`工具执行超时 (${data.elapsed}秒无响应)，已通知 agent 处理...`);
-    addNotice('warning', `工具执行 ${data.elapsed} 秒无响应。已通知 agent，等待它自行恢复或重试。如果 30 秒后仍无响应将强制终止。`);
-  });
-
-  ompDesktop.onStallRecovered(() => {
-    // Agent 恢复了
-    updateStatus('agent 已恢复');
-    addNotice('info', 'Agent 已从超时状态恢复，继续执行。');
-  });
-
-  ompDesktop.onStallKilled((data) => {
-    // 终极升级：agent 也没恢复，强制终止
-    state.agentRunning = false;
-    stopStallCheck();
-    finalizeAssistantMessage();
-    updateInputState();
-    const reason = data.reason === 'agent-unresponsive' ? '通知 agent 后 30 秒仍未恢复' : data.reason;
-    updateStatus('重启中...');
-    addNotice('warning', `代理被强制终止（${reason}），正在自动重启...`);
-  });
-
-  ompDesktop.onRestarting(() => {
-    state.ompReady = false;
-    updateStatus('重启中...');
-    addNotice('info', 'omp 正在自动重启，请稍候...');
-  });
-
-  ompDesktop.onCrashRecovered(() => {
-    state.ompReady = true;
-    updateInputState();
-    addNotice('info', 'omp 崩溃后已自动重启，正在自动续行（断片补救已注入）...');
-  });
-
   setupInput();
   setupProjectPanel();
   setupSessionTabs();
