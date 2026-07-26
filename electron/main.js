@@ -97,100 +97,6 @@ function _detectProxy() {
   return null;
 }
 
-// ── Mnemopi Embedding 缓存预置 ──
-// mnemopi embed worker 有两阶段缓存：
-//   Phase 1 (II2): CWD/local_cache/fast-bge-small-zh-v1.5/ — tokenizer JSON 文件
-//   Phase 2 (FlagEmbedding): {home}/.omp/cache/fastembed/fast-bge-small-zh-v1.5/ — ONNX 模型
-// 随发布包分发: data/agent/mnemopi/ 下预置 tokenizer.json + model_optimized.onnx 等
-const MNEMOPI_TOKENIZER_DIR = path.join(PORTABLE_ROOT, 'local_cache', 'fast-bge-small-zh-v1.5');
-const MNEMOPI_ONNX_DIR = path.join(PORTABLE_ROOT, 'home', '.omp', 'cache', 'fastembed', 'fast-bge-small-zh-v1.5');
-const MNEMOPI_BUNDLED_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'mnemopi');
-const MNEMOPI_TOKENIZER_FILES = {
-  'config.json': '{"architectures":["BertModel"],"model_type":"bert","hidden_size":512,"num_hidden_layers":4,"num_attention_heads":8,"intermediate_size":2048,"max_position_embeddings":512,"vocab_size":21128,"type_vocab_size":2,"pad_token_id":0,"layer_norm_eps":1e-12}',
-  'tokenizer_config.json': '{"do_lower_case":true,"model_type":"bert"}',
-  'special_tokens_map.json': '{"unk_token":"[UNK]","sep_token":"[SEP]","pad_token":"[PAD]","cls_token":"[CLS]","mask_token":"[MASK]"}',
-};
-
-// 预置 mnemopi embedding 缓存（II2 Phase 1 + FlagEmbedding Phase 2）
-// 从 data/agent/mnemopi/ 分发目录复制到 omp 运行时缓存路径
-function _ensureEmbeddingCache() {
-  // ── Phase 1: II2 tokenizer 缓存 (CWD/local_cache/fast-bge-small-zh-v1.5/) ──
-  // II2 函数在启动时检查此目录是否存在 4 个 tokenizer JSON，有则跳过下载
-  try {
-    if (!fs.existsSync(MNEMOPI_TOKENIZER_DIR)) {
-      fs.mkdirSync(MNEMOPI_TOKENIZER_DIR, { recursive: true });
-    }
-    // 优先从分发目录复制完整版文件，内嵌精简版作兜底
-    const phase1Files = ['config.json', 'tokenizer_config.json', 'special_tokens_map.json', 'tokenizer.json'];
-    for (const fname of phase1Files) {
-      const dst = path.join(MNEMOPI_TOKENIZER_DIR, fname);
-      if (!fs.existsSync(dst) || fs.statSync(dst).size < 100) {
-        const src = path.join(MNEMOPI_BUNDLED_DIR, fname);
-        if (fs.existsSync(src) && fs.statSync(src).size > 100) {
-          fs.copyFileSync(src, dst);
-        } else if (MNEMOPI_TOKENIZER_FILES[fname]) {
-          fs.writeFileSync(dst, MNEMOPI_TOKENIZER_FILES[fname], 'utf8');
-        }
-      }
-    }
-    console.log('[EmbedCache] Phase 1: tokenizer 缓存已预置');
-  } catch (e) {
-    console.warn('[EmbedCache] Phase 1 预置失败:', e.message);
-  }
-
-  // ── Phase 2: FlagEmbedding ONNX 缓存 ({home}/.omp/cache/fastembed/fast-bge-small-zh-v1.5/) ──
-  // retrieveModel() 检查此目录是否存在 model_optimized.onnx，有则跳过下载
-  try {
-    const onnxModel = path.join(MNEMOPI_ONNX_DIR, 'model_optimized.onnx');
-    if (!fs.existsSync(onnxModel) || fs.statSync(onnxModel).size < 1000000) {
-      const srcOnnx = path.join(MNEMOPI_BUNDLED_DIR, 'model_optimized.onnx');
-      if (fs.existsSync(srcOnnx) && fs.statSync(srcOnnx).size > 1000000) {
-        if (!fs.existsSync(MNEMOPI_ONNX_DIR)) {
-          fs.mkdirSync(MNEMOPI_ONNX_DIR, { recursive: true });
-        }
-        // 从分发目录复制所有文件
-        const filesToCopy = ['model_optimized.onnx', 'ort_config.json', 'vocab.txt', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'config.json'];
-        let copied = 0;
-        for (const fname of filesToCopy) {
-          const src = path.join(MNEMOPI_BUNDLED_DIR, fname);
-          const dst = path.join(MNEMOPI_ONNX_DIR, fname);
-          if (fs.existsSync(src) && !fs.existsSync(dst)) {
-            fs.copyFileSync(src, dst);
-            copied++;
-          }
-        }
-        // 兜底：config.json 内嵌版
-        const configDst = path.join(MNEMOPI_ONNX_DIR, 'config.json');
-        if (!fs.existsSync(configDst)) {
-          fs.writeFileSync(configDst, MNEMOPI_TOKENIZER_FILES['config.json'], 'utf8');
-          copied++;
-        }
-        console.log(`[EmbedCache] Phase 2: ONNX 模型已预置 (${copied} files)`);
-      } else {
-        console.log('[EmbedCache] Phase 2: 发布包中无 model_optimized.onnx，首次 embed 需网络下载');
-      }
-    } else {
-      // ONNX 已存在，但补充可能缺失的辅助文件
-      if (!fs.existsSync(MNEMOPI_ONNX_DIR)) {
-        fs.mkdirSync(MNEMOPI_ONNX_DIR, { recursive: true });
-      }
-      const auxFiles = ['ort_config.json', 'vocab.txt', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'config.json'];
-      let patched = 0;
-      for (const fname of auxFiles) {
-        const src = path.join(MNEMOPI_BUNDLED_DIR, fname);
-        const dst = path.join(MNEMOPI_ONNX_DIR, fname);
-        if (fs.existsSync(src) && !fs.existsSync(dst)) {
-          fs.copyFileSync(src, dst);
-          patched++;
-        }
-      }
-      if (patched > 0) console.log(`[EmbedCache] Phase 2: 补充辅助文件 ${patched} 个`);
-    }
-  } catch (e) {
-    console.warn('[EmbedCache] Phase 2 预置失败:', e.message);
-  }
-}
-
 // ── Global State ──
 let mainWindow = null;
 const OMP_STALL_TIMEOUT = 180000; // 3 分钟无事件视为卡住
@@ -226,10 +132,6 @@ class OmpInstance {
     if (this.process) return;
     this._userKilled = false;  // 新启动时重置用户主动关闭标记
 
-    // 确保 mnemopi embed worker 的 fastembed-runtime 依赖已安装
-    this._ensureFastembedRuntime();
-    _ensureEmbeddingCache();
-
     // 代理探测：TUN 模式代理对 Bun fetch() 不生效，需显式设置
     const proxy = _detectProxy();
     const env = {
@@ -239,11 +141,6 @@ class OmpInstance {
       HOME: path.join(PORTABLE_ROOT, 'home'),
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
       BUN_INSTALL: PORTABLE_ROOT,
-      // mnemopi embed worker: HuggingFace 下载用国内镜像
-      HF_ENDPOINT: 'https://hf-mirror.com',
-      // mnemopi embedding 模型：config.yml 中 mnemopi.* 无法作为顶级键（会破坏 memory.backend 读取），
-      // 通过环境变量覆盖默认的 fast-bge-base-en-v1.5
-      MNEMOPI_EMBEDDING_MODEL: 'fast-bge-small-zh-v1.5',
     };
     // 有代理时显式注入（Bun 不走系统 TUN）
     if (proxy) {
@@ -627,47 +524,6 @@ class OmpInstance {
   _shortCwd() {
     const parts = this.cwd.replace(/\\/g, '/').split('/');
     return parts[parts.length - 1] || this.cwd;
-  }
-
-  // 确保 mnemopi embed worker 的 fastembed-runtime 依赖已安装
-  // 如果 node_modules 缺失，omp 首次 prompt 会花 60+ 秒做 bun install
-  // 预装后首次 prompt 仅需 ~1.2s
-  _ensureFastembedRuntime() {
-    try {
-      const runtimeDir = path.join(PORTABLE_ROOT, 'home', '.omp', 'cache', 'fastembed-runtime');
-      // 找到实际的版本目录（如 fastembed-2.1.0_transitive-ort）
-      if (!fs.existsSync(runtimeDir)) return;
-      const versionDirs = fs.readdirSync(runtimeDir).filter(d => d.startsWith('fastembed-'));
-      if (versionDirs.length === 0) return;
-
-      for (const vDir of versionDirs) {
-        const fullDir = path.join(runtimeDir, vDir);
-        const nodeModules = path.join(fullDir, 'node_modules');
-        const pkgJson = path.join(fullDir, 'package.json');
-
-        // 如果 package.json 存在但 node_modules 缺失或为空，执行 bun install
-        if (fs.existsSync(pkgJson) && (!fs.existsSync(nodeModules) || fs.readdirSync(nodeModules).length === 0)) {
-          console.log(`[OmpInstance] 正在预装 fastembed-runtime 依赖: ${vDir}`);
-          try {
-            const result = cp.spawnSync(BUN_EXE, ['install'], {
-              cwd: fullDir,
-              windowsHide: true,
-              timeout: 60000,
-              stdio: 'pipe',
-            });
-            if (result.status === 0) {
-              console.log(`[OmpInstance] fastembed-runtime 依赖预装完成`);
-            } else {
-              console.warn(`[OmpInstance] fastembed-runtime 预装失败 (exit=${result.status}), 首次消息可能延迟`);
-            }
-          } catch (e) {
-            console.warn(`[OmpInstance] fastembed-runtime 预装异常: ${e.message}`);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[OmpInstance] 检查 fastembed-runtime 失败: ${e.message}`);
-    }
   }
 }
 
