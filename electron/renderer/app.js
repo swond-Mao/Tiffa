@@ -375,6 +375,10 @@ function handleEvent(event) {
       finalizeAssistantMessage();
       break;
     case 'message_start':
+      // 如果用户消息已在 sendMessage 中提前渲染，跳过重复显示
+      if (event.message.role === 'user' && state.agentRunning) {
+        break;
+      }
       handleMessageStart(event.message);
       break;
     case 'message_update':
@@ -2523,6 +2527,14 @@ async function sendMessage() {
     ? state.pendingImages.map(img => ({ data: img.data, mimeType: img.mimeType }))
     : undefined;
   clearPendingImages();
+  // 立即显示用户消息 + "思考中"状态（本地模型 prefill 可能 60-90 秒，不等 omp 事件）
+  dom.messages.appendChild(createMessageElement('user', message));
+  scrollToBottom();
+  state.agentRunning = true;
+  state.instanceAgentRunning.set(state.workspacePath, true);
+  startStallCheck();
+  updateInputState();
+  updateStatus('思考中...');
   try { await ompDesktop.send(message, images); }
   catch (err) { addNotice('error', `发送失败: ${err.message}`); }
 }
