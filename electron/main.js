@@ -628,7 +628,7 @@ function createWindow() {
   });
 
   // Open dev tools in dev mode
-  if (process.argv.includes('--dev')) {
+  if (process.argv.includes('--dev') || process.argv.includes('--debug')) {
     mainWindow.webContents.openDevTools();
   }
 }
