@@ -380,6 +380,20 @@ class OmpInstance {
       this.agentRunning = false;
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
 
+      // mnemopi 预热：omp ready 后延迟 2 秒发一条预热消息
+      // 触发 autoRecall -> mnemopi worker 启动 -> ONNX 模型加载
+      // 前端通过 _warmup 标记隐藏这条消息和回复
+      if (!this._mnemopiWarmed) {
+        this._mnemopiWarmed = true;
+        setTimeout(() => {
+          if (this.process && this.ready && !this.agentRunning) {
+            console.log(`[OmpInstance:${this._shortCwd()}] mnemopi 预热：发送预热消息`);
+            this._warmupActive = true;
+            this.sendRaw({ type: 'prompt', message: '__warmup__' });
+          }
+        }, 2000);
+      }
+
       // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
       if (this._pendingCrashContinue) {
         this._pendingCrashContinue = false;
@@ -398,10 +412,23 @@ class OmpInstance {
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
       this.agentRunning = true;
+      // 预热消息触发的事件不转发到前端
+      if (this._warmupActive) return;
     } else if (event.type === 'agent_start') {
       this.agentRunning = true;
+      if (this._warmupActive) return;
     } else if (event.type === 'agent_end') {
       this.agentRunning = false;
+      if (this._warmupActive) {
+        console.log(`[OmpInstance:${this._shortCwd()}] mnemopi 预热完成`);
+        this._warmupActive = false;
+        return;
+      }
+    }
+
+    // 预热模式下过滤所有 message_* 事件
+    if (this._warmupActive && event.type.startsWith('message_')) {
+      return;
     }
 
     // Handle command responses
