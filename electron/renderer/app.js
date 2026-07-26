@@ -993,6 +993,18 @@ async function selectProject(dirName) {
   // 允许重复选择同一项目（切走再切回来需要刷新状态）
   const isReselect = state.activeProjectDirName === dirName;
 
+  // 缓存当前会话的 DOM（切回来时能快速恢复，不用重新加载历史）
+  if (state.activeSessionPath && !isReselect) {
+    state.sessionMessageCache.set(state.activeSessionPath, {
+      html: dom.messages.innerHTML,
+      scrollPos: dom.messages.scrollTop,
+    });
+    if (state.sessionMessageCache.size > 10) {
+      const oldest = state.sessionMessageCache.keys().next().value;
+      state.sessionMessageCache.delete(oldest);
+    }
+  }
+
   // 保存旧实例的 agentRunning 状态
   const oldCwd = state.workspacePath;
   if (oldCwd) state.instanceAgentRunning.set(oldCwd, state.agentRunning);
@@ -1033,8 +1045,6 @@ async function selectProject(dirName) {
     state.activeSessionPath = null;
     state.activeSessionPaths.clear();  // 切换项目时重置活跃tab
   }
-
-  // 恢复该项目的 approval mode
   restoreApprovalMode(state.workspacePath);
 
   // 恢复新实例的 agentRunning 状态
@@ -1061,9 +1071,10 @@ async function selectProject(dirName) {
   }
   renderProjects();
   await loadSessions(dirName);
-  // 自动选中并加载该项目的最新会话
-  if (state.sessions.length > 0) {
-    const latest = state.sessions[state.sessions.length - 1]; // 最新在最后
+  // 自动选中并加载该项目的最新会话（排除 __new__ 临时 tab，它们还没有真实文件路径）
+  const realSessions = state.sessions.filter(s => !s.path.startsWith('__new__'));
+  if (realSessions.length > 0) {
+    const latest = realSessions[realSessions.length - 1]; // 最新在最后
     if (latest && latest.path) {
       state.activeSessionPath = latest.path;
       state.activeSessionPaths.add(latest.path);
@@ -1124,8 +1135,9 @@ async function loadSessions(dirName) {
   if (result.error) {
     state.sessions = [];
   } else {
-    // 保留 __new__ 临时 tab（新建对话后磁盘刷新可能还没写入）
-    const newTabs = state.sessions.filter(s => s.path.startsWith('__new__'));
+    // 保留 __new__ 临时 tab，但只在仍然属于当前项目时保留
+    // （切换项目时旧项目的 __new__ tab 应丢弃，否则会导致加载历史时 Session file not found）
+    const newTabs = state.sessions.filter(s => s.path.startsWith('__new__') && state.activeSessionPaths.has(s.path));
     state.sessions = [...result, ...newTabs];
   }
   // 初始时只激活 activeSessionPath 对应的 tab
