@@ -1,1 +1,2 @@
+data/agent/mnemopi/model_optimized.onnx filter=lfs diff=lfs merge=lfs -text
 data/agent/mnemopi/model_optimized.onnx !text !filter !merge !diff

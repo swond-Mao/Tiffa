@@ -97,43 +97,81 @@ function _detectProxy() {
   return null;
 }
 
-// ── Tokenizer 预置 ──
-// mnemopi Phase 1 (II2 函数) 从硬编码 hf.co URL 下载 tokenizer 文件
-// 缓存路径: CWD/local_cache/{fastembed-model-name}/ (不是 BAAI/ 路径)
-// 模型名 "fast-bge-small-zh-v1.5" → 缓存目录 "local_cache/fast-bge-small-zh-v1.5/"
+// ── Mnemopi Embedding 缓存预置 ──
+// mnemopi embed worker 有两阶段缓存：
+//   Phase 1 (II2): CWD/local_cache/fast-bge-small-zh-v1.5/ — tokenizer JSON 文件
+//   Phase 2 (FlagEmbedding): {home}/.omp/cache/fastembed/fast-bge-small-zh-v1.5/ — ONNX 模型
+// 随发布包分发: data/agent/mnemopi/ 下预置 tokenizer.json + model_optimized.onnx 等
 const MNEMOPI_TOKENIZER_DIR = path.join(PORTABLE_ROOT, 'local_cache', 'fast-bge-small-zh-v1.5');
+const MNEMOPI_ONNX_DIR = path.join(PORTABLE_ROOT, 'home', '.omp', 'cache', 'fastembed', 'fast-bge-small-zh-v1.5');
+const MNEMOPI_BUNDLED_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'mnemopi');
 const MNEMOPI_TOKENIZER_FILES = {
-  'config.json': '{"architectures":["BertModel"],"model_type":"bert","hidden_size":312,"num_hidden_layers":6,"num_attention_heads":12,"intermediate_size":768,"max_position_embeddings":512,"vocab_size":21128,"type_vocab_size":2,"pad_token_id":0,"layer_norm_eps":1e-12}',
+  'config.json': '{"architectures":["BertModel"],"model_type":"bert","hidden_size":512,"num_hidden_layers":4,"num_attention_heads":8,"intermediate_size":2048,"max_position_embeddings":512,"vocab_size":21128,"type_vocab_size":2,"pad_token_id":0,"layer_norm_eps":1e-12}',
   'tokenizer_config.json': '{"do_lower_case":true,"model_type":"bert"}',
   'special_tokens_map.json': '{"unk_token":"[UNK]","sep_token":"[SEP]","pad_token":"[PAD]","cls_token":"[CLS]","mask_token":"[MASK]"}',
 };
 
-function _ensureTokenizerCache() {
+// 预置 mnemopi embedding 缓存（II2 Phase 1 + FlagEmbedding Phase 2）
+// 从 data/agent/mnemopi/ 分发目录复制到 omp 运行时缓存路径
+function _ensureEmbeddingCache() {
+  // ── Phase 1: II2 tokenizer 缓存 (CWD/local_cache/fast-bge-small-zh-v1.5/) ──
   try {
     if (!fs.existsSync(MNEMOPI_TOKENIZER_DIR)) {
       fs.mkdirSync(MNEMOPI_TOKENIZER_DIR, { recursive: true });
     }
-    // 写入精简版元数据文件（config.json 等）
+    // 写入精简版元数据文件
     for (const [name, content] of Object.entries(MNEMOPI_TOKENIZER_FILES)) {
       const fp = path.join(MNEMOPI_TOKENIZER_DIR, name);
       if (!fs.existsSync(fp)) {
         fs.writeFileSync(fp, content, 'utf8');
       }
     }
-    // tokenizer.json (439KB) 太大不能内嵌在代码中
-    // 从 data/agent/mnemopi/tokenizer.json 预置副本（随发布包分发）
+    // tokenizer.json (439KB) 从发布包复制
     const tokenizerJson = path.join(MNEMOPI_TOKENIZER_DIR, 'tokenizer.json');
     if (!fs.existsSync(tokenizerJson) || fs.statSync(tokenizerJson).size < 1000) {
-      const bundledTokenizer = path.join(PORTABLE_ROOT, 'data', 'agent', 'mnemopi', 'tokenizer.json');
-      if (fs.existsSync(bundledTokenizer) && fs.statSync(bundledTokenizer).size > 1000) {
-        fs.copyFileSync(bundledTokenizer, tokenizerJson);
-        console.log('[Tokenizer] 从发布包预置 tokenizer.json');
-      } else {
-        console.log('[Tokenizer] tokenizer.json 缺失，mnemopi 首次启动需要网络下载');
+      const src = path.join(MNEMOPI_BUNDLED_DIR, 'tokenizer.json');
+      if (fs.existsSync(src) && fs.statSync(src).size > 1000) {
+        fs.copyFileSync(src, tokenizerJson);
+        console.log('[EmbedCache] Phase 1: tokenizer.json 已预置');
       }
     }
   } catch (e) {
-    console.warn('[Tokenizer] 预置失败:', e.message);
+    console.warn('[EmbedCache] Phase 1 预置失败:', e.message);
+  }
+
+  // ── Phase 2: FlagEmbedding ONNX 缓存 ({home}/.omp/cache/fastembed/fast-bge-small-zh-v1.5/) ──
+  try {
+    const onnxModel = path.join(MNEMOPI_ONNX_DIR, 'model_optimized.onnx');
+    if (!fs.existsSync(onnxModel) || fs.statSync(onnxModel).size < 1000) {
+      const srcOnnx = path.join(MNEMOPI_BUNDLED_DIR, 'model_optimized.onnx');
+      if (fs.existsSync(srcOnnx) && fs.statSync(srcOnnx).size > 1000000) {
+        if (!fs.existsSync(MNEMOPI_ONNX_DIR)) {
+          fs.mkdirSync(MNEMOPI_ONNX_DIR, { recursive: true });
+        }
+        // 复制 ONNX 模型 (90MB) + 辅助文件
+        const filesToCopy = ['model_optimized.onnx', 'ort_config.json', 'vocab.txt', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'config.json'];
+        let copied = 0;
+        for (const fname of filesToCopy) {
+          const src = path.join(MNEMOPI_BUNDLED_DIR, fname);
+          const dst = path.join(MNEMOPI_ONNX_DIR, fname);
+          if (fs.existsSync(src) && !fs.existsSync(dst)) {
+            fs.copyFileSync(src, dst);
+            copied++;
+          }
+        }
+        // 补充 config.json（内嵌版可能更完整）
+        const configDst = path.join(MNEMOPI_ONNX_DIR, 'config.json');
+        if (!fs.existsSync(configDst)) {
+          fs.writeFileSync(configDst, MNEMOPI_TOKENIZER_FILES['config.json'], 'utf8');
+          copied++;
+        }
+        console.log(`[EmbedCache] Phase 2: ONNX 模型已预置 (${copied} files)`);
+      } else {
+        console.log('[EmbedCache] Phase 2: 发布包中无 model_optimized.onnx，首次 embed 需网络下载');
+      }
+    }
+  } catch (e) {
+    console.warn('[EmbedCache] Phase 2 预置失败:', e.message);
   }
 }
 
@@ -174,7 +212,7 @@ class OmpInstance {
 
     // 确保 mnemopi embed worker 的 fastembed-runtime 依赖已安装
     this._ensureFastembedRuntime();
-    _ensureTokenizerCache();
+    _ensureEmbeddingCache();
 
     // 代理探测：TUN 模式代理对 Bun fetch() 不生效，需显式设置
     const proxy = _detectProxy();

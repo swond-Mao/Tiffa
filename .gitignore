@@ -42,6 +42,9 @@ local_cache/
 data/agent/memories/
 data/agent/mnemopi/
 !data/agent/mnemopi/tokenizer.json
+!data/agent/mnemopi/model_optimized.onnx
+!data/agent/mnemopi/ort_config.json
+!data/agent/mnemopi/vocab.txt
 data/agent/removed-cwds.json
 
 # Log files
