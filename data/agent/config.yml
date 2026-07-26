@@ -8,7 +8,7 @@ modelRoles:
   plan: "kimi/kimi-k3"
   vision: "kimi/kimi-k3"
   commit: "qwen/localmodel"
-  tiny: "xiaomi/mimo-v2-flash"
+  tiny: "xiaomi/mimo-v2.5"
 
 # Mnemopi 记忆系统（v4.0 启用）
 memory:

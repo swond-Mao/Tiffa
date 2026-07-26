@@ -1579,12 +1579,17 @@ function createHistoryAssistantMessage(text, thinking, toolCalls, timestamp, mod
   body.className = 'message-body markdown-body';
 
   // 思考过程（<details> 折叠）
+  // 纯思考消息（无正文）：自动展开，summary 提示更明确
+  const hasOnlyThinking = thinking && !text && (!toolCalls || toolCalls.length === 0);
   if (thinking) {
     const thinkDiv = document.createElement('div');
     thinkDiv.className = 'thinking-block';
     const details = document.createElement('details');
+    if (hasOnlyThinking) details.open = true;
     const summary = document.createElement('summary');
-    summary.textContent = `思考过程 (${thinking.length} 字)`;
+    summary.textContent = hasOnlyThinking
+      ? `模型回复（思考过程 ${thinking.length} 字）`
+      : `思考过程 (${thinking.length} 字)`;
     const thinkContent = document.createElement('div');
     thinkContent.className = 'thinking-content';
     thinkContent.textContent = thinking;
@@ -1944,6 +1949,16 @@ function finalizeAssistantMessage() {
     const body = state.currentAssistantEl.querySelector('.message-body');
     if (header && body && !header.querySelector('.copy-btn')) {
       header.appendChild(createCopyBtn(() => body.innerText || body.textContent));
+    }
+    // 纯思考消息（无正文）：自动展开 thinking 块，并更新 summary 提示
+    const thinkingDetails = body.querySelector('.thinking-block details');
+    if (thinkingDetails && !state.currentTextBuffer?.trim()) {
+      thinkingDetails.open = true;
+      const summary = thinkingDetails.querySelector('summary');
+      if (summary) {
+        const len = (thinkingDetails.querySelector('.thinking-content')?.textContent?.length) || 0;
+        summary.textContent = `模型回复（思考过程 ${len} 字）`;
+      }
     }
   }
   state.currentAssistantEl = null;
