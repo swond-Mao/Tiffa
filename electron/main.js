@@ -378,7 +378,6 @@ class OmpInstance {
     if (event.type === 'ready') {
       this.ready = true;
       this.agentRunning = false;
-      // 成功启动后重置崩溃计数（运行超过 30 秒才算稳定，由 crashResetTimer 处理）
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
 
       // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
