@@ -1681,117 +1681,22 @@ function handleMessageStart(message) {
   }
 }
 
-// ── 重复输出检测：弱量化模型容易陷入重复循环，提前中断节省时间 ──
-let _repeatCheckCounter = 0;
-let _repeatDetected = false;
 
-function checkRepetition(text) {
-  if (!text || text.length < 100) return false;
-  // 每 15 个 delta 检查一次
-  if (++_repeatCheckCounter % 15 !== 0) return false;
-  if (_repeatDetected) return true; // 已检测到，不再重复触发
-
-  // 取末尾 500 字符做分析
-  const window = text.slice(-500);
-  const lines = window.split('\n').filter(l => l.trim().length > 2);
-
-  // 策略1: 连续重复行检测（代码重复的典型模式）
-  let consecutiveRepeat = 0;
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i] === lines[i - 1]) {
-      consecutiveRepeat++;
-      if (consecutiveRepeat >= 3) {
-        triggerRepeatAbort('连续重复行');
-        return true;
-      }
-    } else {
-      consecutiveRepeat = 0;
-    }
-  }
-
-  // 策略2: 行频次检测（散布式重复，如同一行出现很多次）
-  if (lines.length >= 10) {
-    const lineCounts = new Map();
-    for (const line of lines) {
-      const key = line.trim();
-      if (key.length < 3) continue;
-      lineCounts.set(key, (lineCounts.get(key) || 0) + 1);
-    }
-    for (const [, count] of lineCounts) {
-      if (count >= 4) {
-        triggerRepeatAbort('高频重复行');
-        return true;
-      }
-    }
-  }
-
-  // 策略3: 短语级 n-gram 检测（兜底，捕获非换行的重复片段）
-  const gramSize = 6;
-  const counts = new Map();
-  for (let i = 0; i <= window.length - gramSize; i++) {
-    const gram = window.slice(i, i + gramSize);
-    counts.set(gram, (counts.get(gram) || 0) + 1);
-  }
-  for (const [, count] of counts) {
-    if (count > 8) {
-      triggerRepeatAbort('n-gram 重复');
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function triggerRepeatAbort(reason) {
-  if (_repeatDetected) return; // 避免重复通知
-  _repeatDetected = true;
-  console.warn(`[重复检测] ${reason}，中断并等待续行`);
-  addNotice('warning', `检测到模型输出重复(${reason})，已中断，等待自动续行...`);
-  abortMessage();
-  // abort 后等 agent 恢复空闲再自动续行
-  waitAndContinue(reason);
-}
-
-// 等待 agent 空闲后自动续行（用于重复检测中断后的自动恢复）
-function waitAndContinue(reason) {
-  const maxWait = 20000; // 最多等 20 秒
-  const interval = 500;
-  let waited = 0;
-  const tryContinue = () => {
-    if (!state.agentRunning) {
-      // agent 已空闲，发送续行消息
-      ompDesktop.send(`[system] 上一轮输出因重复(${reason})被中断，请继续之前的任务，换一种方式表达，避免重复相同内容，给出完整结果。`).catch(err => {
-        console.warn('[重复检测] 续行发送失败:', err);
-      });
-      return;
-    }
-    waited += interval;
-    if (waited < maxWait) {
-      setTimeout(tryContinue, interval);
-    } else {
-      console.warn('[重复检测] 等待 agent 空闲超时，放弃自动续行');
-      addNotice('warning', '自动续行超时，请手动继续');
-    }
-  };
-  setTimeout(tryContinue, 2000); // 先等 2 秒让 abort 完成
-}
 
 function handleMessageUpdate(message, assistantEvent) {
   if (!assistantEvent) return;
   switch (assistantEvent.type) {
-    case 'text_start': state.currentTextBuffer = ''; _repeatCheckCounter = 0; _repeatDetected = false; break;
+    case 'text_start': state.currentTextBuffer = ''; break;
     case 'text_delta':
       state.currentTextBuffer += assistantEvent.delta;
       updateAssistantContent(state.currentTextBuffer);
       scrollToBottom();
-      checkRepetition(state.currentTextBuffer);
       break;
     case 'text_end':
       state.currentTextBuffer = assistantEvent.content || state.currentTextBuffer;
       updateAssistantContent(state.currentTextBuffer);
       break;
     case 'thinking_start': {
-      _repeatCheckCounter = 0; _repeatDetected = false;
       const el = createThinkingBlock();
       appendToAssistant(el);
       state.currentThinkingEl = el;
@@ -1800,7 +1705,6 @@ function handleMessageUpdate(message, assistantEvent) {
     case 'thinking_delta':
       if (state.currentThinkingEl && state.currentThinkingEl._content) {
         state.currentThinkingEl._content.textContent += assistantEvent.delta;
-        checkRepetition(state.currentThinkingEl._content.textContent);
       }
       break;
     case 'thinking_end':

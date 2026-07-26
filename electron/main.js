@@ -225,6 +225,9 @@ class OmpInstance {
       BUN_INSTALL: PORTABLE_ROOT,
       // mnemopi embed worker: HuggingFace 下载用国内镜像
       HF_ENDPOINT: 'https://hf-mirror.com',
+      // mnemopi embedding 模型：config.yml 中 mnemopi.* 无法作为顶级键（会破坏 memory.backend 读取），
+      // 通过环境变量覆盖默认的 fast-bge-base-en-v1.5
+      MNEMOPI_EMBEDDING_MODEL: 'fast-bge-small-zh-v1.5',
     };
     // 有代理时显式注入（Bun 不走系统 TUN）
     if (proxy) {
