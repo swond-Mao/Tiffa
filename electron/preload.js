@@ -99,6 +99,9 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   writeOmpProvider: (providerId, cfg) => ipcRenderer.invoke('models:writeProvider', providerId, cfg),
   deleteOmpProvider: (providerId) => ipcRenderer.invoke('models:deleteProvider', providerId),
 
+  // ── 配置写入 ──
+  writeApprovalMode: (tiffaMode) => ipcRenderer.invoke('config:writeApprovalMode', tiffaMode),
+
   // ── 工作区/项目管理 ──
   openFolderDialog: () => ipcRenderer.invoke('workspace:openFolderDialog'),
   changeWorkspace: (newCwd) => ipcRenderer.invoke('workspace:change', newCwd),

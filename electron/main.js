@@ -91,6 +91,9 @@ class OmpInstance {
     this.forceKilled = false;
     this._userKilled = false;  // 用户主动 kill，不触发崩溃自动重启
     this._pendingCrashContinue = false;  // 崩溃重启后自动续行
+    this._askPending = false;  // ask 工具等待用户回复中，看门狗跳过
+    this._crashCount = 0;       // 连续崩溃计数
+    this._crashResetTimer = null; // 崩溃计数重置定时器
   }
 
   start() {
@@ -141,9 +144,18 @@ class OmpInstance {
       }
     });
 
+    // stderr 落盘 + console
+    const stderrLogDir = path.join(PORTABLE_ROOT, '.temp');
+    if (!fs.existsSync(stderrLogDir)) fs.mkdirSync(stderrLogDir, { recursive: true });
+    const stderrLogFile = path.join(stderrLogDir, `omp-stderr-${new Date().toISOString().slice(0, 10)}.log`);
+    this._stderrStream = fs.createWriteStream(stderrLogFile, { flags: 'a' });
+
     this.process.stderr.on('data', (chunk) => {
       const text = chunk.toString('utf8').trim();
-      if (text) console.log(`[omp:stderr:${this._shortCwd()}]`, text);
+      if (text) {
+        console.log(`[omp:stderr:${this._shortCwd()}]`, text);
+        this._stderrStream.write(`[${new Date().toISOString()}] ${text}\n`);
+      }
     });
 
     this.process.on('exit', (code, signal) => {
@@ -170,18 +182,42 @@ class OmpInstance {
       if (shouldRestart) {
         const reason = this.forceKilled ? 'force-killed' : 'crashed';
         this.forceKilled = false;
-        this._pendingCrashContinue = true;  // 重启后自动续行
-        const restartCwd = this.cwd;
-        console.log(`[OmpInstance:${this._shortCwd()}] ${reason}，3 秒后自动重启...`);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('omp:restarting', { reason, cwd: this.cwd });
-        }
-        setTimeout(() => {
-          if (!this.process && mainWindow && !mainWindow.isDestroyed()) {
-            console.log(`[OmpInstance:${this._shortCwd()}] 自动重启`);
-            this.start();
+
+        // 崩溃计数 + 指数退避，防止死循环
+        this._crashCount++;
+        clearTimeout(this._crashResetTimer);
+        const CRASH_LIMIT = 3; // 连续崩溃 3 次后停止自动续行
+        const delay = Math.min(3000 * Math.pow(2, this._crashCount - 1), 60000); // 3s → 6s → 12s，上限 60s
+
+        if (this._crashCount >= CRASH_LIMIT) {
+          // 熔断：不再自动续行，让用户介入
+          this._pendingCrashContinue = false;
+          console.log(`[OmpInstance:${this._shortCwd()}] 连续崩溃 ${this._crashCount} 次，停止自动续行`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('omp:exited', {
+              code, signal, cwd: this.cwd,
+              crashLoop: true, crashCount: this._crashCount,
+            });
           }
-        }, 3000);
+          // 5 分钟后重置崩溃计数，允许后续自动恢复
+          this._crashResetTimer = setTimeout(() => { this._crashCount = 0; }, 300000);
+        } else {
+          this._pendingCrashContinue = true;  // 重启后自动续行
+          console.log(`[OmpInstance:${this._shortCwd()}] ${reason}，${delay/1000} 秒后自动重启（第${this._crashCount}次）`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('omp:restarting', { reason, cwd: this.cwd, delay, crashCount: this._crashCount });
+          }
+          const restartCwd = this.cwd;
+          setTimeout(() => {
+            if (!this.process && mainWindow && !mainWindow.isDestroyed()) {
+              console.log(`[OmpInstance:${this._shortCwd()}] 自动重启`);
+              this.start();
+            }
+          }, delay);
+        }
+      } else {
+        // 正常退出，重置崩溃计数
+        this._crashCount = 0;
       }
     });
 
@@ -197,7 +233,17 @@ class OmpInstance {
     if (!this.process) return;
     this.forceKilled = false; // 正常关闭不自动重启
     this._userKilled = true;  // 用户主动关闭，不触发崩溃自动重启
-    _killTree(this.process.pid, sync);
+
+    // 借鉴 dimchang：替换 exit handler，防止旧进程 exit 事件
+    // 误触发崩溃恢复逻辑（与新的 start() 产生竞态）
+    const victim = this.process;
+    victim.removeAllListeners('exit');
+    victim.on('exit', () => {
+      // 旧进程退出是预期行为，静默处理
+      console.log(`[OmpInstance:${this._shortCwd()}] 旧进程已退出（主动 kill）`);
+    });
+
+    _killTree(victim.pid, sync);
     this._cleanup();
     this.stopWatchdog();
   }
@@ -238,7 +284,7 @@ class OmpInstance {
           this.pendingCommands.delete(id);
           reject(new Error('Command timeout'));
         }
-      }, 60000);
+      }, 5 * 60 * 1000); // 5 分钟：本地大上下文 prefill 可能需 60-90 秒
     });
   }
 
@@ -260,6 +306,10 @@ class OmpInstance {
     this.watchdogTimer = setInterval(() => {
       if (!this.agentRunning || !this.process) {
         this.stallPhase = 0;
+        return;
+      }
+      // ask 工具等待用户回复时完全跳过看门狗检查
+      if (this._askPending) {
         return;
       }
       const elapsed = Date.now() - this.lastEventTime;
@@ -315,17 +365,20 @@ class OmpInstance {
     // ask 工具等待用户回复时暂停看门狗（用户思考不是卡住）
     if (event.type === 'tool_execution_start' && event.toolName === 'ask') {
       console.log(`[看门狗:${this._shortCwd()}] ask 工具等待用户回复，暂停超时检测`);
+      this._askPending = true;
       this.stallPhase = 0;
     }
     // ask 工具返回结果后恢复看门狗
     if (event.type === 'tool_execution_end' && event.toolName === 'ask') {
       console.log(`[看门狗:${this._shortCwd()}] ask 工具已回复，恢复超时检测`);
+      this._askPending = false;
       this.lastEventTime = Date.now();
     }
 
     if (event.type === 'ready') {
       this.ready = true;
       this.agentRunning = false;
+      // 成功启动后重置崩溃计数（运行超过 30 秒才算稳定，由 crashResetTimer 处理）
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
 
       // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
@@ -375,6 +428,10 @@ class OmpInstance {
     if (this.rl) {
       this.rl.close();
       this.rl = null;
+    }
+    if (this._stderrStream) {
+      this._stderrStream.end();
+      this._stderrStream = null;
     }
     this.process = null;
     this.ready = false;
@@ -968,6 +1025,30 @@ function setupIpc() {
       fs.writeFileSync(MODELS_YML, doc.toString(), 'utf8');
       console.log(`[主进程] 已删除 provider: ${providerId}`);
       return { success: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ── Config.yml approval mode ──
+  const CONFIG_YML = path.join(PORTABLE_ROOT, 'data', 'agent', 'config.yml');
+  // 前端模式名 → omp 配置值
+  const OMP_APPROVAL_MODE_MAP = { normal: 'always-ask', auto: 'write', yolo: 'yolo' };
+
+  ipcMain.handle('config:writeApprovalMode', async (event, tiffaMode) => {
+    try {
+      const ompMode = OMP_APPROVAL_MODE_MAP[tiffaMode] || 'yolo';
+      let doc;
+      if (fs.existsSync(CONFIG_YML)) {
+        const raw = fs.readFileSync(CONFIG_YML, 'utf8');
+        doc = parseDocument(raw);
+      } else {
+        doc = new Document();
+      }
+      doc.set('tools', doc.get('tools') || doc.createNode({}));
+      doc.get('tools').set('approvalMode', ompMode);
+      fs.writeFileSync(CONFIG_YML, doc.toString(), 'utf8');
+      return { success: true, ompMode };
     } catch (err) {
       return { error: err.message };
     }

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os, sys, json, time, argparse, urllib.parse, urllib.request, urllib.error
 
-COMFY = os.environ.get("COMFY_URL", "http://127.0.0.1:9876/comfyui").rstrip("/")
+COMFY = os.environ.get("COMFY_URL", "http://47.108.197.247:8188").rstrip("/")
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.environ.get("COMFY_OUT", r"E:\workspace\comfyui_out")
 
