@@ -96,6 +96,8 @@ const state = {
   agentRunning: false,
   lastEventTime: 0, // 上次收到事件的时间戳
   stallCheckTimer: null, // 卡住检测定时器
+  firstResponseTimer: null, // 首次响应超时定时器
+  receivedFirstResponse: false, // 是否已收到首次 agent 响应
   currentModel: '--',
   currentProvider: null,
   currentAssistantEl: null,
@@ -359,6 +361,7 @@ function handleEvent(event) {
     case 'agent_start':
       state.agentRunning = true;
       state.instanceAgentRunning.set(state.workspacePath, true);
+      markFirstResponseReceived();
       startStallCheck();
       updateInputState();
       break;
@@ -366,6 +369,7 @@ function handleEvent(event) {
       state.agentRunning = false;
       state.instanceAgentRunning.set(state.workspacePath, false);
       stopStallCheck();
+      stopFirstResponseCheck();
       finalizeAssistantMessage();
       updateInputState();
       updateStatus('就绪');
@@ -379,6 +383,7 @@ function handleEvent(event) {
       if (event.message.role === 'user' && state.agentRunning) {
         break;
       }
+      if (event.message.role === 'assistant') markFirstResponseReceived();
       handleMessageStart(event.message);
       break;
     case 'message_update':
@@ -491,7 +496,8 @@ function handleEvent(event) {
 
 // ── 卡住检测 ──
 // 如果 120 秒没收到任何事件且 agent 仍在运行，提示可能卡住
-const STALL_TIMEOUT_MS = 120000; // 2 分钟
+const STALL_TIMEOUT_MS = 120000; // 2 分钟（深度卡住检测）
+const FIRST_RESPONSE_TIMEOUT_MS = 30000; // 30 秒无首次响应 → 提示模型可能不可达
 
 function startStallCheck() {
   stopStallCheck();
@@ -514,6 +520,32 @@ function stopStallCheck() {
   if (state.stallCheckTimer) {
     clearInterval(state.stallCheckTimer);
     state.stallCheckTimer = null;
+  }
+}
+
+// 首次响应超时检测：发送消息后如果长时间无 agent 事件，提示模型可能不可达
+function startFirstResponseCheck() {
+  stopFirstResponseCheck();
+  state.receivedFirstResponse = false;
+  state.firstResponseTimer = setTimeout(() => {
+    if (state.agentRunning && !state.receivedFirstResponse) {
+      updateStatus('模型可能不可达，正在等待响应...');
+      addNotice('warning', '30 秒未收到模型响应 — 模型可能不可达或网络异常。可以点击"停止"按钮取消，或继续等待。');
+    }
+  }, FIRST_RESPONSE_TIMEOUT_MS);
+}
+
+function stopFirstResponseCheck() {
+  if (state.firstResponseTimer) {
+    clearTimeout(state.firstResponseTimer);
+    state.firstResponseTimer = null;
+  }
+}
+
+function markFirstResponseReceived() {
+  if (!state.receivedFirstResponse) {
+    state.receivedFirstResponse = true;
+    stopFirstResponseCheck();
   }
 }
 
@@ -2537,6 +2569,7 @@ async function sendMessage() {
   state.agentRunning = true;
   state.instanceAgentRunning.set(state.workspacePath, true);
   startStallCheck();
+  startFirstResponseCheck();
   updateInputState();
   updateStatus('思考中...');
   try { await ompDesktop.send(message, images); }
@@ -2546,6 +2579,7 @@ async function sendMessage() {
     state.agentRunning = false;
     state.instanceAgentRunning.set(state.workspacePath, false);
     stopStallCheck();
+    stopFirstResponseCheck();
     finalizeAssistantMessage();
     updateInputState();
     updateStatus('就绪');
