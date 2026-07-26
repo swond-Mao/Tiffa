@@ -24,7 +24,6 @@ if (argRootIdx >= 0 && process.argv[argRootIdx + 1]) {
   global.PORTABLE_ROOT = path.resolve(__dirname, '..');
 }
 const PORTABLE_ROOT = global.PORTABLE_ROOT;
-const IS_VERBOSE = process.argv.includes('--verbose');
 const BUN_EXE = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin', 'bun.exe');
 const OMP_CLI = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
 const EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'claude-mode-extension.ts');
@@ -66,41 +65,8 @@ function _utf8Env() {
   };
 }
 
-// ── 代理智能探测 ──
-// TUN 模式代理对 Bun fetch() 不生效，需显式设置 HTTPS_PROXY
-// 扫描常用代理端口，找到可用的设置到环境变量
-const PROXY_PORTS = [21882, 7890, 7891, 10809, 10808, 20171, 8080];
-let _detectedProxy = null;
-
-function _detectProxy() {
-  if (_detectedProxy) return _detectedProxy;
-  // 优先用环境变量中已有的代理
-  if (process.env.HTTPS_PROXY || process.env.HTTP_PROXY) {
-    _detectedProxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-    return _detectedProxy;
-  }
-  // 同步 TCP 探测：对每个常用代理端口尝试连接
-  for (const port of PROXY_PORTS) {
-    try {
-      const result = cp.spawnSync('powershell', [
-        '-NoProfile', '-Command',
-        `(New-Object System.Net.Sockets.TcpClient).Connect('127.0.0.1',${port})`
-      ], { timeout: 2000, windowsHide: true, stdio: 'ignore' });
-      if (result.status === 0) {
-        _detectedProxy = `http://127.0.0.1:${port}`;
-        console.log(`[代理探测] 发现本地代理: ${_detectedProxy}`);
-        return _detectedProxy;
-      }
-    } catch (e) { /* ignore */ }
-  }
-  console.log('[代理探测] 未发现本地代理');
-  return null;
-}
-
 // ── Global State ──
 let mainWindow = null;
-const OMP_STALL_TIMEOUT = 180000; // 3 分钟无事件视为卡住
-const OMP_WATCHDOG_INTERVAL = 30000; // 每 30 秒检查一次
 const MAX_INSTANCES = 5; // 最多同时运行的 omp 实例数
 
 // ═══════════════════════════════════════════════════════════════
@@ -117,23 +83,11 @@ class OmpInstance {
     this.pendingCommands = new Map();
     this.commandId = 0;
     this.lastActiveTime = Date.now();
-    this.lastEventTime = Date.now();
-    this.stallPhase = 0;
-    this.watchdogTimer = null;
-    this.forceKilled = false;
-    this._userKilled = false;  // 用户主动 kill，不触发崩溃自动重启
-    this._pendingCrashContinue = false;  // 崩溃重启后自动续行
-    this._askPending = false;  // ask 工具等待用户回复中，看门狗跳过
-    this._crashCount = 0;       // 连续崩溃计数
-    this._crashResetTimer = null; // 崩溃计数重置定时器
   }
 
   start() {
     if (this.process) return;
-    this._userKilled = false;  // 新启动时重置用户主动关闭标记
 
-    // 代理探测：TUN 模式代理对 Bun fetch() 不生效，需显式设置
-    const proxy = _detectProxy();
     const env = {
       ...process.env,
       ..._utf8Env(),
@@ -142,16 +96,6 @@ class OmpInstance {
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
       BUN_INSTALL: PORTABLE_ROOT,
     };
-    // 有代理时显式注入（Bun 不走系统 TUN）
-    if (proxy) {
-      env.HTTPS_PROXY = proxy;
-      env.HTTP_PROXY = proxy;
-    }
-
-    // 调试开关
-    if (process.argv.includes('--verbose')) {
-      env.PI_PYTHON_IPC_TRACE = '1';
-    }
 
     delete env.NODE_OPTIONS;
     delete env.ELECTRON_RUN_AS_NODE;
@@ -183,22 +127,15 @@ class OmpInstance {
       }
     });
 
-    // stderr 落盘 + console
-    const stderrLogDir = path.join(PORTABLE_ROOT, '.temp');
-    if (!fs.existsSync(stderrLogDir)) fs.mkdirSync(stderrLogDir, { recursive: true });
-    const stderrLogFile = path.join(stderrLogDir, `omp-stderr-${new Date().toISOString().slice(0, 10)}.log`);
-    this._stderrStream = fs.createWriteStream(stderrLogFile, { flags: 'a' });
-
     this.process.stderr.on('data', (chunk) => {
       const text = chunk.toString('utf8').trim();
       if (text) {
         console.log(`[omp:stderr:${this._shortCwd()}]`, text);
-        this._stderrStream.write(`[${new Date().toISOString()}] ${text}\n`);
       }
     });
 
     this.process.on('exit', (code, signal) => {
-      console.log(`[OmpInstance:${this._shortCwd()}] 已退出:`, { code, signal, forceKilled: this.forceKilled });
+      console.log(`[OmpInstance:${this._shortCwd()}] 已退出:`, { code, signal });
 
       // 拒绝所有待定命令（避免 Promise 永久挂起）
       for (const [id, { reject }] of this.pendingCommands) {
@@ -207,56 +144,10 @@ class OmpInstance {
       this.pendingCommands.clear();
 
       this._cleanup();
-      this.stopWatchdog();
 
       // 通知渲染进程
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('omp:exited', { code, signal, cwd: this.cwd });
-      }
-
-      // 自动重启判断：
-      // 1. 被 forceKill 杀掉的（abort-timeout / agent-unresponsive）
-      // 2. 进程异常退出（code !== 0 且非用户主动 kill），可能是内部崩溃
-      const shouldRestart = this.forceKilled || (code !== 0 && code !== null && !this._userKilled);
-      if (shouldRestart) {
-        const reason = this.forceKilled ? 'force-killed' : 'crashed';
-        this.forceKilled = false;
-
-        // 崩溃计数 + 指数退避，防止死循环
-        this._crashCount++;
-        clearTimeout(this._crashResetTimer);
-        const CRASH_LIMIT = 3; // 连续崩溃 3 次后停止自动续行
-        const delay = Math.min(3000 * Math.pow(2, this._crashCount - 1), 60000); // 3s → 6s → 12s，上限 60s
-
-        if (this._crashCount >= CRASH_LIMIT) {
-          // 熔断：不再自动续行，让用户介入
-          this._pendingCrashContinue = false;
-          console.log(`[OmpInstance:${this._shortCwd()}] 连续崩溃 ${this._crashCount} 次，停止自动续行`);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('omp:exited', {
-              code, signal, cwd: this.cwd,
-              crashLoop: true, crashCount: this._crashCount,
-            });
-          }
-          // 5 分钟后重置崩溃计数，允许后续自动恢复
-          this._crashResetTimer = setTimeout(() => { this._crashCount = 0; }, 300000);
-        } else {
-          this._pendingCrashContinue = true;  // 重启后自动续行
-          console.log(`[OmpInstance:${this._shortCwd()}] ${reason}，${delay/1000} 秒后自动重启（第${this._crashCount}次）`);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('omp:restarting', { reason, cwd: this.cwd, delay, crashCount: this._crashCount });
-          }
-          const restartCwd = this.cwd;
-          setTimeout(() => {
-            if (!this.process && mainWindow && !mainWindow.isDestroyed()) {
-              console.log(`[OmpInstance:${this._shortCwd()}] 自动重启`);
-              this.start();
-            }
-          }, delay);
-        }
-      } else {
-        // 正常退出，重置崩溃计数
-        this._crashCount = 0;
       }
     });
 
@@ -264,27 +155,12 @@ class OmpInstance {
       console.error(`[OmpInstance:${this._shortCwd()}] 启动失败:`, err);
       this.process = null;
     });
-
-    this.startWatchdog();
   }
 
   kill(sync = false) {
     if (!this.process) return;
-    this.forceKilled = false; // 正常关闭不自动重启
-    this._userKilled = true;  // 用户主动关闭，不触发崩溃自动重启
-
-    // 借鉴 dimchang：替换 exit handler，防止旧进程 exit 事件
-    // 误触发崩溃恢复逻辑（与新的 start() 产生竞态）
-    const victim = this.process;
-    victim.removeAllListeners('exit');
-    victim.on('exit', () => {
-      // 旧进程退出是预期行为，静默处理
-      console.log(`[OmpInstance:${this._shortCwd()}] 旧进程已退出（主动 kill）`);
-    });
-
-    _killTree(victim.pid, sync);
+    _killTree(this.process.pid, sync);
     this._cleanup();
-    this.stopWatchdog();
   }
 
   forceKill(reason) {
@@ -292,16 +168,8 @@ class OmpInstance {
       this.agentRunning = false;
       return;
     }
-
-    this.forceKilled = true;
     console.log(`[OmpInstance:${this._shortCwd()}] forceKill (原因: ${reason})`);
-
     _killTree(this.process.pid);
-
-    // 通知渲染进程
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('omp:stall-killed', { reason, cwd: this.cwd });
-    }
   }
 
   sendCommand(frame) {
@@ -317,17 +185,6 @@ class OmpInstance {
 
       const line = JSON.stringify(frame) + '\n';
       this.process.stdin.write(line, 'utf8');
-
-      // 调试：记录 sendCommand 发送的关键帧（仅 --verbose 模式）
-      if (IS_VERBOSE && (frame.type === 'prompt' || frame.type === 'set_model' || frame.type === 'get_state')) {
-        try {
-          const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
-          const summary = frame.type === 'prompt'
-            ? `CMD prompt: ${(frame.message || '').substring(0, 80)}`
-            : `CMD ${frame.type}: ${JSON.stringify(frame).substring(0, 100)}`;
-          fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${summary}\n`);
-        } catch {}
-      }
 
       setTimeout(() => {
         if (this.pendingCommands.has(id)) {
@@ -345,116 +202,17 @@ class OmpInstance {
     }
     const line = JSON.stringify(frame) + '\n';
     this.process.stdin.write(line, 'utf8');
-    // 调试：记录发送的帧（仅 --verbose 模式）
-    if (IS_VERBOSE) {
-      try {
-        const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
-        const summary = frame.type === 'prompt'
-          ? `SEND prompt: ${(frame.message || '').substring(0, 80)}`
-          : `SEND ${frame.type}: ${JSON.stringify(frame).substring(0, 100)}`;
-        fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${summary}\n`);
-      } catch {}
-    }
-  }
-
-  // ── 看门狗 ──
-
-  startWatchdog() {
-    this.stopWatchdog();
-    this.lastEventTime = Date.now();
-    this.stallPhase = 0;
-    this.watchdogTimer = setInterval(() => {
-      if (!this.agentRunning || !this.process) {
-        this.stallPhase = 0;
-        return;
-      }
-      // ask 工具等待用户回复时完全跳过看门狗检查
-      if (this._askPending) {
-        return;
-      }
-      const elapsed = Date.now() - this.lastEventTime;
-
-      if (this.stallPhase === 0 && elapsed > OMP_STALL_TIMEOUT) {
-        this.stallPhase = 1;
-        console.warn(`[看门狗:${this._shortCwd()}] 第一级：${Math.round(elapsed / 1000)}秒无事件，通知 agent`);
-        this.sendRaw({ type: 'abort' });
-        this.sendRaw({
-          type: 'steer',
-          message: `[系统提示] 你的工具执行已超过 ${Math.round(elapsed / 1000)} 秒无响应，可能卡住了。已发送中止信号。请考虑：1) 重试该工具调用 2) 换一种方式完成任务 3) 跳过此步骤继续。`,
-        });
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('omp:stall-warning', {
-            elapsed: Math.round(elapsed / 1000),
-            phase: 'notified',
-            cwd: this.cwd,
-          });
-        }
-      }
-
-      if (this.stallPhase === 1 && elapsed > OMP_STALL_TIMEOUT + 30000) {
-        this.stallPhase = 2;
-        console.error(`[看门狗:${this._shortCwd()}] 第二级：通知 agent 后 30 秒仍未恢复，强制终止`);
-        this.forceKill('agent-unresponsive');
-      }
-    }, OMP_WATCHDOG_INTERVAL);
-  }
-
-  stopWatchdog() {
-    if (this.watchdogTimer) {
-      clearInterval(this.watchdogTimer);
-      this.watchdogTimer = null;
-    }
-    this.stallPhase = 0;
   }
 
   // ── 事件处理 ──
 
   _handleEvent(event) {
-    this.lastEventTime = Date.now();
     this.lastActiveTime = Date.now();
-
-    // 如果之前处于 stall 状态，现在收到事件说明 agent 恢复了
-    if (this.stallPhase > 0 && this.agentRunning) {
-      console.log(`[看门狗:${this._shortCwd()}] agent 已恢复，重置 stall 状态`);
-      this.stallPhase = 0;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('omp:stall-recovered', { cwd: this.cwd });
-      }
-    }
-
-    // ask 工具等待用户回复时暂停看门狗（用户思考不是卡住）
-    if (event.type === 'tool_execution_start' && event.toolName === 'ask') {
-      console.log(`[看门狗:${this._shortCwd()}] ask 工具等待用户回复，暂停超时检测`);
-      this._askPending = true;
-      this.stallPhase = 0;
-    }
-    // ask 工具返回结果后恢复看门狗
-    if (event.type === 'tool_execution_end' && event.toolName === 'ask') {
-      console.log(`[看门狗:${this._shortCwd()}] ask 工具已回复，恢复超时检测`);
-      this._askPending = false;
-      this.lastEventTime = Date.now();
-    }
 
     if (event.type === 'ready') {
       this.ready = true;
       this.agentRunning = false;
       console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
-
-
-      // 崩溃/forceKill 重启后自动续行（gap-fill 由扩展自动注入）
-      if (this._pendingCrashContinue) {
-        this._pendingCrashContinue = false;
-        console.log(`[OmpInstance:${this._shortCwd()}] 崩溃重启就绪，2秒后自动续行`);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('omp:crash-recovered', { cwd: this.cwd });
-        }
-        setTimeout(() => {
-          if (this.process && this.ready && !this.agentRunning) {
-            console.log(`[OmpInstance:${this._shortCwd()}] 发送自动续行消息`);
-            this.sendRaw({ type: 'prompt', message: '进程异常重启，请继续之前的任务。' });
-          }
-        }, 2000);
-      }
     }
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
@@ -480,28 +238,6 @@ class OmpInstance {
     // Forward all events to renderer (带 cwd 标记)
     event._cwd = this.cwd;
 
-    // 调试：记录关键事件到日志文件（仅 --verbose 模式）
-    if (IS_VERBOSE) {
-      const _debugLog = (msg) => {
-        try {
-          const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
-          fs.appendFileSync(p, `[${new Date().toISOString()}] [${this._shortCwd()}] ${msg}\n`);
-        } catch {}
-      };
-      if (event.type === 'ready' || event.type === 'agent_start' || event.type === 'agent_end'
-        || event.type === 'message_start' || event.type === 'message_end'
-        || event.type === 'prompt_result' || event.type === 'turn_start' || event.type === 'turn_end') {
-        _debugLog(`${event.type} ${event.agentInvoked ? 'agentInvoked' : ''} ${event.role || ''} ${event.model || ''}`);
-      } else if (event.type === 'text_delta' || event.type === 'thinking_delta') {
-        if (!this._lastDeltaLogged || Date.now() - this._lastDeltaLogged > 5000) {
-          _debugLog(`${event.type} (delta logged, skipping rest for 5s)`);
-          this._lastDeltaLogged = Date.now();
-        }
-      } else if (event.type === 'error') {
-        _debugLog(`ERROR: ${JSON.stringify(event).substring(0, 200)}`);
-      }
-    }
-
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('omp:event', event);
     }
@@ -511,10 +247,6 @@ class OmpInstance {
     if (this.rl) {
       this.rl.close();
       this.rl = null;
-    }
-    if (this._stderrStream) {
-      this._stderrStream.end();
-      this._stderrStream = null;
     }
     this.process = null;
     this.ready = false;
@@ -612,7 +344,6 @@ class OmpInstanceManager {
   // 关闭所有实例
   closeAll() {
     for (const inst of this.instances.values()) {
-      inst.forceKilled = false; // 正常关闭不自动重启
       inst.kill();
     }
     this.instances.clear();
@@ -622,7 +353,6 @@ class OmpInstanceManager {
   // 关闭所有实例（退出时用，同步暴力清理）
   killAll() {
     for (const inst of this.instances.values()) {
-      inst.forceKilled = false;
       // 同步杀进程，确保 app 退出前进程真的死透
       if (inst.process) {
         _killTree(inst.process.pid, true);
@@ -730,13 +460,6 @@ function setupIpc() {
 
   // omp commands
   ipcMain.handle('omp:send', async (event, message, images) => {
-    // 调试：记录用户消息到达主进程（仅 --verbose 模式）
-    if (IS_VERBOSE) {
-      try {
-        const p = path.join(PORTABLE_ROOT, '.temp', 'omp-debug.log');
-        fs.appendFileSync(p, `[${new Date().toISOString()}] [主进程] omp:send 被调用: ${(message || '').substring(0, 80)}\n`);
-      } catch {}
-    }
     // /omfg 命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
     const omfgMatch = typeof message === 'string' && message.match(/^\/omfg\s*(.+)/);
     if (omfgMatch) {
@@ -819,19 +542,7 @@ function setupIpc() {
   });
 
   ipcMain.handle('omp:abort', async () => {
-    const inst = _active();
-    inst.sendRaw({ type: 'abort' });
-
-    if (inst.process) {
-      const pid = inst.process.pid;
-      const abortTimeout = setTimeout(() => {
-        if (inst.process && inst.process.pid === pid && inst.agentRunning) {
-          console.log('[主进程] abort 后 30 秒 agent 未恢复，强制终止');
-          inst.forceKill('abort-timeout');
-        }
-      }, 30000);
-      inst.process.once('exit', () => clearTimeout(abortTimeout));
-    }
+    _active().sendRaw({ type: 'abort' });
   });
 
   ipcMain.handle('omp:setModel', async (event, provider, modelId) => {
