@@ -10,11 +10,11 @@
 
 ---
 
-你试过凌晨三点让 Claude 帮你改代码，结果 API 额度用完了。
+你试过凌晨三点让 AI 帮你改代码，结果 API 额度用完了。
 
 你试过跟 Cursor 聊了一下午，关掉窗口，全忘了。
 
-你试过把 1.58bit 的量化模型跑起来，它连一句完整的话都说不出来——但你想，也许不是它不行，是你没给它一张像样的工作台。
+你试过把一个 1.58bit 量化、3.5GB 的模型跑起来，它连一句完整的话都说不出来——
 
 **Tiffa 就是那张工作台。**
 
@@ -22,11 +22,9 @@
 
 ## 它是什么
 
-Tiffa 是一个基于 `@oh-my-pi/pi-coding-agent` 的便携 AI 助手，做了七层 Claude 化改造，套了一层 Electron 桌面壳。
+Tiffa 是基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 助手，做了七层改造，套了一层 Electron 桌面壳。
 
-听起来平平无奇？那换个说法——
-
-**它让一个 1.58bit 量化、3.5GB 的模型，稳定完成了智能体任务。**
+**它让一个 3.5GB 的 Q1_0 极限量化模型，稳定完成了智能体任务。**
 
 不是靠更贵的模型。是靠更好的基础设施。
 
@@ -36,11 +34,94 @@ Tiffa 是一个基于 `@oh-my-pi/pi-coding-agent` 的便携 AI 助手，做了�
 
 | | 它们 | Tiffa |
 |---|---|---|
-| 你的对话 | 关了就没了 | 三层记忆，跨会话持久 |
+| 你的对话 | 关了就没了 | 四重记忆，跨会话跨项目持久 |
 | 模型选择 | 云端指定的 | 本地 llama.cpp 优先，云 API 备选 |
 | 离线 | 不行 | 行 |
 | 搬走 | 一堆全局依赖 | 一个文件夹，U 盘拷走 |
 | 弱模型 | 不可用 | 可用 |
+
+---
+
+## 核心架构：四重记忆
+
+AI 不该是金鱼。Tiffa 的记忆不是简单存储，是一套分层架构：
+
+```
+┌─────────────────────────────────────────────┐
+│  L1  USER.md      你亲口告诉它的             → 零延迟注入，每轮必读 │
+│      "我叫张三，偏好 Q8_0 量化"                             │
+├─────────────────────────────────────────────┤
+│  L2  MEMORY.md    它自己推断的全局事实      → 零延迟注入，跨项目共享 │
+│      "用户有 RTX 5090，NSSM 管服务"                          │
+├─────────────────────────────────────────────┤
+│  L3  PROJECT.md   当前项目的架构/决策        → 零延迟注入，按 cwd 隔离 │
+│      "本项目用 SQLite，缓存目录在 data/"                        │
+├─────────────────────────────────────────────┤
+│  L4  Mnemopi     语义记忆（RAG）           → autoRetain 积累，manual recall 检索 │
+│      三层记忆的内容向量索引，跨项目语义搜索                        │
+└─────────────────────────────────────────────┘
+```
+
+关了重开，它还认得你。换个项目，它知道上下文。隔了一周，翻日志还能接上。
+
+### Mnemopi v6.1 语义记忆
+
+- **embedding 模型**：`BAAI/bge-small-zh-v1.5`（本地运行，无需 API）
+- **召回策略**：每 2 轮自动写入，`autoRetain: true`，`scoping: global`
+- **注入上限**：每次最多 2000 token，不撑爆上下文
+- **断片补救**：上下文压缩时自动提取关键信息（改动文件、决策要点），下一轮即时注入
+
+---
+
+## 核心架构：三重约束
+
+弱模型最怕约束写太多，把上下文撑满了。Tiffa 的做法是分三层，各司其职：
+
+```
+第一重：TTSR 流式规则（零 Context 成本）
+  data/agent/rules/*.md
+  → 模型输出时实时检测，违规立即拦截
+  → 10 条规则，不占一轮 token
+
+第二重：before_agent_start Hook（语义约束）
+  data/memory/constraints.md
+  → 读文件规范、任务计划、3次失败换方法、skill铁律
+  → 系统 Prompt 前缀注入，行为/语义类约束专属
+
+第三重：tool_call Hook（危险操作拦截）
+  → 危险路径拦截（System32/Windows/Program Files）
+  → 配置文件自改拦截（config.yml/models.yml/扩展文件）
+  → workspace 根目录新建子目录拦截
+  → 静默工具调用检测（连续 3 次 → steer 提醒）
+```
+
+### TTSR 规则（第一重）
+
+规则写在 `.md` 文件里，**流式匹配**，模型输出时实时检测，违规立即拦截，不占 token：
+
+```
+data/agent/rules/
+├── no-bare-codeblock.md      # 代码块必须标注语言
+├── no-filler-opening.md       # 禁止废话开头
+├── no-xml-toolcall.md         # 禁止 XML 格式调用工具
+├── no-md-filepath-link.md     # 禁止链接包装文件路径
+├── no-hardcoded-secrets.md    # 禁止硬编码密钥
+├── no-git-add-all.md          # 禁止 git add -A
+├── no-git-push-force.md       # 禁止 git push --force
+├── cwd-file-placement.md       # 文件必须放在项目目录内
+├── chinese-punctuation.md      # 中文标点
+└── tool-call-commentary.md    # 禁止工具调用废话
+```
+
+### /omfg — 一句话创建规则
+
+不满意模型的行为？直接说：
+
+```
+/omfg 你总是用英文回复
+```
+
+模型会分析问题，生成一条 TTSR 规则文件，即时生效。不用改代码，不用重启。
 
 ---
 
@@ -60,57 +141,20 @@ Tiffa 是一个基于 `@oh-my-pi/pi-coding-agent` 的便携 AI 助手，做了�
 
 七层合在一起，效果是：**Q1_0 极限量化模型也能稳定干活。**
 
-这不只是优化。这是范式转换——不是模型不够强，是你没给它足够好的工作台。
-
 ---
 
-## TTSR — 零成本规则系统
+## 弱模型增强
 
-传统做法：每轮把约束写进 systemPrompt，占几百 token，弱模型上下文本来就短，越写越傻。
-
-TTSR（Time Traveling Stream Rules）的做法：规则写在 `.md` 文件里，**流式匹配**——模型输出时实时检测，违规立即拦截，不占一轮 token。
-
-```
-data/agent/rules/
-├── no-bare-codeblock.md      # 代码块必须标注语言
-├── no-filler-opening.md       # 禁止废话开头
-├── no-xml-toolcall.md         # 禁止 XML 格式调用工具
-├── no-md-filepath-link.md     # 禁止链接包装文件路径
-├── no-hardcoded-secrets.md    # 禁止硬编码密钥
-├── no-git-add-all.md          # 禁止 git add -A
-├── no-git-push-force.md       # 禁止 git push --force
-├── cwd-file-placement.md      # 文件必须放在项目目录内
-├── chinese-punctuation.md     # 中文标点
-└── tool-call-commentary.md    # 禁止工具调用废话
-```
-
-### /omfg — 一句话创建规则
-
-不满意模型的行为？直接说：
-
-```
-/omfg 你总是用英文回复
-```
-
-模型会分析问题，生成一条 TTSR 规则文件，即时生效。不用改代码，不用重启。
-
----
-
-## 三层记忆
-
-AI 不该是金鱼。
-
-```
-USER.md      你告诉它的        "我叫张三，偏好 Q8_0 量化"
-MEMORY.md    它自己推断的      "用户有 RTX 5090，习惯用 NSSM 管服务"
-daily-log/   今天做了什么      "2026-07-25: 品牌重命名、欢迎页重设计"
-```
-
-关了重开，它还认得你。换个项目，它知道上下文。隔了一周，翻日志还能接上。
-
-### 断片补救（Gap-fill）
-
-上下文压缩或进程崩溃时，自动提取关键信息（已读文件、改动文件、决策要点），下一轮对话自动注入。模型不会突然"失忆"。
+| 机制 | 效果 |
+|------|------|
+| TTSR 规则拦截 | 零 Context 成本约束，每轮省 ~500 token |
+| 废话开头拦截 | 弱模型最高频犯蠢模式，直接砍掉 |
+| XML 工具调用拦截 | 从"完全无法调工具"到能调 |
+| 工具调用废话拦截 | 少说多做，省 token |
+| 取消 eval 注册 | 从"一条命令跑不了"到能完成简单任务 |
+| 断片补救 gap-fill | 崩溃续行有上下文 |
+| Loop Guard | 精确重复检测 + 自动重试 |
+| Tool Call Loop | 相同参数连续调工具拦截 |
 
 ---
 
@@ -128,32 +172,15 @@ Electron GUI，不是终端里的一行行文字：
 
 ---
 
-## 弱模型增强
-
-不是所有模型都叫 Claude。Tiffa 的七层基础设施让弱模型也能干活：
-
-| 机制 | 效果 |
-|------|------|
-| TTSR 规则拦截 | 零 context 成本约束，每轮省 ~500 token |
-| 废话开头拦截 | 弱模型最高频犯蠢模式，直接砍掉 |
-| XML 工具调用拦截 | 从"完全无法调工具"到能调 |
-| 工具调用废话拦截 | 少说多做，省 token |
-| 取消 eval 注册 | 从"一条命令跑不了"到能完成简单任务 |
-| 断片补救 | 崩溃续行有上下文 |
-| Tiffa 内核 Loop Guard | 精确重复检测 + 自动重试 |
-| Tiffa 内核 Tool Call Loop | 相同参数连续调工具拦截 |
-
----
-
 ## 便携
 
 ```
-oh-my-tiffa/        ← 这一个文件夹就是全部
-├── electron/       ← 桌面前端
-├── npm-global/     ← Bun + 内核
-├── plugins/        ← 扩展 + 技能
-├── data/           ← 配置 + 记忆 + 会话 + 规则
-└── workspace/      ← 你的项目
+Tiffa/           ← 这一个文件夹就是全部
+├── electron/    ← 桌面前端
+├── npm-global/   ← Bun + 内核
+├── plugins/     ← 扩展 + 技能
+├── data/        ← 配置 + 记忆 + 会话 + 规则
+└── workspace/   ← 你的项目
 ```
 
 拷到 U 盘，插上就用。不写注册表，不装全局包，不留痕迹。
@@ -164,7 +191,7 @@ oh-my-tiffa/        ← 这一个文件夹就是全部
 
 本地 llama.cpp 优先，云 API 备选。
 
-1.58bit 量化、3.5GB 的模型，照样跑智能体任务——代码读写、文件编辑、工具调用，一个不少。不是魔法，是七层基础设施在兜底。
+3.5GB 的 Q1_0 量化模型，照样跑智能体任务——代码读写、文件编辑、工具调用，一个不少。
 
 ---
 
@@ -174,7 +201,7 @@ oh-my-tiffa/        ← 这一个文件夹就是全部
 tiffa-desktop.exe      # 双击启动
 tiffa-desktop.vbs      # 无控制台窗口
 start-desktop.bat      # 带 --portable-root
-start-tiffa.bat        # TUI/WebUI/RPC 终端模式
+start-tiffa.bat       # TUI/WebUI/RPC 终端模式
 ```
 
 或者开发模式：`cd electron && npm start`
