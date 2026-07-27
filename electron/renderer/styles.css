@@ -2402,12 +2402,8 @@ body {
   transition: max-height 0.2s;
 }
 
-.collapsible-pre-wrap.expanded > pre {
+.collapsible-pre-wrap > pre:not(.collapsed) {
   max-height: none;
-}
-
-.collapsible-pre-wrap > pre.collapsed {
-  max-height: 150px;
 }
 
 .code-toggle-btn {

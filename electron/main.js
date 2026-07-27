@@ -613,6 +613,10 @@ function setupIpc() {
       message = omfgPrompt;
       console.log(`[/omfg] intercepted: complaint="${complaint}"`);
     }
+    const frame = { type: 'prompt', message };
+    if (images && images.length > 0) {
+      frame.images = images;
+    }
     return _active().sendCommand(frame);
   });
 

@@ -278,7 +278,7 @@ export default async function (pi: any) {
   })
 
   // ── 3. session.compacting ── gap-fill 断片提取 + compact dump + 立即注入
-  pi.on("session.compacting", async (event: any) => {
+  pi.on("session.compacting", async (event: any, ctx?: any) => {
     try {
       const sessionID = event.sessionId || ""
       log("session.compacting", `=== fired === sessionID: ${sessionID}`)
@@ -359,9 +359,22 @@ export default async function (pi: any) {
 
         if (entries.length > 0) {
           const uniq = [...new Set(entries)].slice(0, 60)
+          const stats = [
+            readFileSet.size > 0 ? `${readFileSet.size} 已读` : "",
+            fileSet.size > 0 ? `${fileSet.size} 改动` : "",
+            cmdSet.size > 0 ? `${cmdSet.size} 命令` : "",
+            decisionLines.size > 0 ? `${decisionLines.size} 决策` : "",
+          ].filter(Boolean).join("、")
           const body = `# Gap-fill (断片补救) - ${sessionID}\n\n> 由 compacting hook 自动提取，60 分钟后清理。\n\n${uniq.join("\n")}\n`
           writeFileSync(gapFillPath, body, "utf8")
-          log("session.compacting.gapfill", `wrote ${uniq.length} entries to ${gapFillPath}`)
+          log("session.compacting.gapfill", `wrote ${uniq.length} entries to ${gapFillPath} [${stats}]`)
+
+          // 可观测性：通知用户 gap-fill 已触发及提取摘要
+          try {
+            if (ctx?.ui?.notify) {
+              ctx.ui.notify(`断片补救已触发：提取 ${stats || "0 项"}，详见 inbox/gap-fill-${sessionID}.md`, "info")
+            }
+          } catch (e: any) { log("session.compacting.notify.error", e?.message || String(e)) }
 
           // 立即注入压缩后上下文（不等下轮）
           const contextText = [

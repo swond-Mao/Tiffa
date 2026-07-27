@@ -1,10 +1,24 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import os, sys, json, time, argparse, urllib.parse, urllib.request, urllib.error
-
 COMFY = os.environ.get("COMFY_URL", "http://47.108.197.247:8188").rstrip("/")
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.environ.get("COMFY_OUT", r"E:\workspace\comfyui_out")
+_OUT_DIR_DEFAULT = r"E:\workspace\comfyui_out"
+
+
+def resolve_out_dir(args_out_dir=None):
+    """Resolve output directory: CLI arg > COMFY_OUT env > hardcoded default."""
+    if args_out_dir:
+        return os.path.abspath(args_out_dir)
+    env = os.environ.get("COMFY_OUT", "")
+    if env:
+        return os.path.abspath(env)
+    return os.path.abspath(_OUT_DIR_DEFAULT)
+
+
+# _out_dir_override is set in main() after argparse so cmd_* funcs can use it
+_out_dir_override = None
+
+
+def get_out_dir():
+    return _out_dir_override or resolve_out_dir()
 
 WF_EDIT = os.path.join(SKILL_DIR, "workflow_edit_api.json")
 WF_ERNIE = os.path.join(SKILL_DIR, "workflow_ernie_turbo_api.json")
@@ -61,7 +75,8 @@ def submit_and_wait(wf, timeout):
             hist = {}
         if pid in hist:
             outputs = hist[pid].get("outputs", {})
-            os.makedirs(OUT_DIR, exist_ok=True)
+            out_dir = get_out_dir()
+            os.makedirs(out_dir, exist_ok=True)
             saved = []
             for node_id, out in outputs.items():
                 for img in out.get("images", []):
@@ -74,9 +89,9 @@ def submit_and_wait(wf, timeout):
                         req = urllib.request.Request(COMFY + url, method="GET")
                         with urllib.request.urlopen(req, timeout=60) as r:
                             blob = r.read()
-                        out_path = os.path.join(OUT_DIR, "%s_%s_%s" % (JOB, node_id, fname))
-                        with open(out_path, "wb") as wf:
-                            wf.write(blob)
+                        out_path = os.path.join(out_dir, "%s_%s_%s" % (JOB, node_id, fname))
+                        with open(out_path, "wb") as f:
+                            f.write(blob)
                         saved.append(out_path)
                         print("[comfy] saved %s: %s" % (node_id, out_path), flush=True)
                     except Exception as e:
@@ -322,6 +337,7 @@ def main():
                     help="主角 LoRA 开关：liuyifei（默认）或 kopiu。自动切换 LoRA strength 并在提示词前加 trigger 词")
     k2.add_argument("--name", default="krea2")
     k2.add_argument("--timeout", type=int, default=600)
+    k2.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
     k2.set_defaults(func=cmd_krea2)
 
     e = sub.add_parser("edit", help="edit an image by instruction")
@@ -331,6 +347,7 @@ def main():
     e.add_argument("--steps", type=int, default=0)
     e.add_argument("--name", default="edit")
     e.add_argument("--timeout", type=int, default=600)
+    e.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
     e.set_defaults(func=cmd_edit)
 
     n = sub.add_parser("ernie", help="Ernie-Image-Turbo (good text rendering, multi-line prompt)")
@@ -340,6 +357,7 @@ def main():
     n.add_argument("--size", default="", help="WxH override, e.g. 768x1280")
     n.add_argument("--name", default="ernie")
     n.add_argument("--timeout", type=int, default=600)
+    n.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
     n.set_defaults(func=cmd_ernie)
 
     z = sub.add_parser("zimage", help="Z-image turbo (distilled, 9 steps, cfg=1, multi-line prompt)")
@@ -352,6 +370,7 @@ def main():
     z.add_argument("--with-colleague", action="store_true", help="enable the baked-in colleague LoRA (kopiu-Z) — only for the colleague's face")
     z.add_argument("--name", default="zimage")
     z.add_argument("--timeout", type=int, default=600)
+    z.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
     z.set_defaults(func=cmd_zimage)
 
     k = sub.add_parser("klein", help="Flux2-Klein standalone (free size, high realism, multi-line prompt)")
@@ -364,12 +383,14 @@ def main():
     k.add_argument("--sampler", default="", help="sampler name override, e.g. euler, dpmpp_2m")
     k.add_argument("--name", default="klein")
     k.add_argument("--timeout", type=int, default=600)
+    k.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
     k.set_defaults(func=cmd_klein)
 
     a = ap.parse_args()
+    global _out_dir_override
+    _out_dir_override = resolve_out_dir(getattr(a, "output", "") or None)
     res = a.func(a)
     print("RESULT:" + json.dumps(res, ensure_ascii=False))
-
 
 if __name__ == "__main__":
     main()

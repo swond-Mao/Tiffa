@@ -184,7 +184,7 @@ Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生�
 | stall 检测 | 3 分钟无事件 → abort + steer；再 30 秒未恢复 → forceKill |
 | 崩溃自动重启 | code≠0 非用户 kill 的退出 → 3 秒后重启 |
 
-### IPC Handler (36 个)
+### IPC Handler (37 个)
 
 **Omp 管理 (12)**：omp:send, omp:abort, omp:setModel, omp:getModels, omp:isReady, omp:getState, omp:steer, omp:extensionResponse, omp:compact, omp:command, omp:activate, omp:instances
 
@@ -193,8 +193,7 @@ Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生�
 **Workspace/项目 (2)**：workspace:openFolderDialog, workspace:change
 
 **模型配置 (3)**：models:read, models:write, models:restart
-
-**Session 管理 (13)**：sessions:listProjects, sessions:listSessions, sessions:switch, sessions:new, sessions:loadHistory, sessions:archiveProject, sessions:deleteProject, sessions:listArchived, sessions:restoreProject, sessions:archiveSession, sessions:deleteSession, sessions:listArchivedSessions, sessions:restoreSession
+**Session 管理 (14)**：sessions:listProjects, sessions:listSessions, sessions:switch, sessions:new, sessions:loadHistory, sessions:archiveProject, sessions:deleteProject, sessions:listArchived, sessions:restoreProject, sessions:archiveSession, sessions:deleteSession, sessions:rename, sessions:listArchivedSessions, sessions:restoreSession
 
 ### Renderer 功能
 

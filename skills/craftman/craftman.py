@@ -157,6 +157,7 @@ def exec_comfyui(prompt, params, out_dir):
     cmd = [sys.executable, comfy_py, style, prompt, "--name", safe_name]
     if size:
         cmd += ["--size", size]
+    cmd += ["--output", str(out_dir)]
 
     eprint(f"[craftman]  > comfy {style}")
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
