@@ -713,7 +713,15 @@ function setupIpc() {
   });
 
   ipcMain.handle('tiffa:steer', async (event, message) => {
-    _active().sendRaw({ type: 'steer', message });
+    const inst = tiffaManager.getActive();
+    if (!inst) throw new Error('no active process');
+    inst.sendRaw({ type: 'steer', message });
+  });
+
+  ipcMain.handle('tiffa:followUp', async (event, message) => {
+    const inst = tiffaManager.getActive();
+    if (!inst) throw new Error('no active process');
+    inst.sendRaw({ type: 'follow_up', message });
   });
 
   ipcMain.handle('tiffa:extensionResponse', async (event, id, value) => {
@@ -1752,6 +1760,8 @@ function setupIpc() {
               timestamp: obj.timestamp || msg.timestamp,
               model: msg.model || '',
               provider: msg.provider || '',
+              steering: msg.steering || false,
+              follow_up: msg.follow_up || false,
             });
           }
         } catch {}

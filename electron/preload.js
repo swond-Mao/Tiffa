@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   isReady: () => ipcRenderer.invoke('tiffa:isReady'),
   diagnostics: () => ipcRenderer.invoke('tiffa:diagnostics'),
   steer: (message) => ipcRenderer.invoke('tiffa:steer', message),
+  followUp: (message) => ipcRenderer.invoke('tiffa:followUp', message),
   extensionResponse: (id, value) => ipcRenderer.invoke('tiffa:extensionResponse', id, value),
   compact: () => ipcRenderer.invoke('tiffa:compact'),
   command: (type, payload) => ipcRenderer.invoke('tiffa:command', type, payload),
