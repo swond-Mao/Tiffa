@@ -84,10 +84,15 @@ class TiffaInstance {
     this.pendingCommands = new Map();
     this.commandId = 0;
     this.lastActiveTime = Date.now();
+    this.userKilled = false;    // 用户主动 kill，不自动重启
+    this.crashCount = 0;        // 连续崩溃次数
+    this.maxCrashRestart = 3;   // 最多自动重启 3 次
+    this._restartTimer = null;
   }
 
   start() {
     if (this.process) return;
+    this.userKilled = false;
 
     const env = {
       ...process.env,
@@ -136,7 +141,7 @@ class TiffaInstance {
     });
 
     this.process.on('exit', (code, signal) => {
-      console.log(`[TiffaInstance:${this._shortCwd()}] 已退出:`, { code, signal });
+      console.log(`[TiffaInstance:${this._shortCwd()}] 已退出:`, { code, signal, userKilled: this.userKilled, crashCount: this.crashCount });
 
       // 拒绝所有待定命令（避免 Promise 永久挂起）
       for (const [id, { reject }] of this.pendingCommands) {
@@ -146,9 +151,23 @@ class TiffaInstance {
 
       this._cleanup();
 
+      // 崩溃自动重启：非用户主动 kill、非零退出码、未超出重启上限
+      const shouldRestart = !this.userKilled && code !== 0 && this.crashCount < this.maxCrashRestart;
+      if (shouldRestart) {
+        this.crashCount++;
+        console.log(`[TiffaInstance:${this._shortCwd()}] 3秒后自动重启 (第${this.crashCount}次)`);
+        this._restartTimer = setTimeout(() => {
+          this._restartTimer = null;
+          this.start();
+        }, 3000);
+      }
+
       // 通知渲染进程
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('tiffa:exited', { code, signal, cwd: this.cwd, sessionId: this.sessionId });
+        mainWindow.webContents.send('tiffa:exited', {
+          code, signal, cwd: this.cwd, sessionId: this.sessionId,
+          autoRestarting: shouldRestart, crashCount: this.crashCount,
+        });
       }
     });
 
@@ -160,11 +179,21 @@ class TiffaInstance {
 
   kill(sync = false) {
     if (!this.process) return;
+    this.userKilled = true;
+    if (this._restartTimer) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = null;
+    }
     _killTree(this.process.pid, sync);
     this._cleanup();
   }
 
   forceKill(reason) {
+    this.userKilled = true;
+    if (this._restartTimer) {
+      clearTimeout(this._restartTimer);
+      this._restartTimer = null;
+    }
     if (!this.process) {
       this.agentRunning = false;
       return;
@@ -213,6 +242,7 @@ class TiffaInstance {
     if (event.type === 'ready') {
       this.ready = true;
       this.agentRunning = false;
+      this.crashCount = 0; // 成功启动后重置崩溃计数
       console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
     }
 
@@ -433,6 +463,11 @@ class TiffaInstanceManager {
   // 关闭所有实例（退出时用，同步暴力清理）
   killAll() {
     for (const inst of this.instances.values()) {
+      inst.userKilled = true;
+      if (inst._restartTimer) {
+        clearTimeout(inst._restartTimer);
+        inst._restartTimer = null;
+      }
       if (inst.process) {
         _killTree(inst.process.pid, true);
       }

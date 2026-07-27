@@ -122,6 +122,8 @@ const state = {
   xmlTranslationEnabled: false,
   // 每个实例(cwd)的 agentRunning 状态，切换项目时保存/恢复
   instanceAgentRunning: new Map(),
+  // 每个对话(sessionPath)的 agentRunning 状态，切换对话时保存/恢复
+  sessionAgentRunning: new Map(),
   // Per-session 消息缓冲：切换会话时缓存 DOM 子树，切回来时恢复
   sessionMessageCache: new Map(),  // sessionPath -> { html, scrollPos }
   // loadEpoch 防竞态：快速切换会话时防止旧回调覆盖新数据
@@ -458,6 +460,7 @@ function handleEvent(event) {
       break;
     case 'agent_end':
       state.agentRunning = false;
+      state.sessionAgentRunning.set(state.activeSessionPath, false);
       state.instanceAgentRunning.set(state.workspacePath, false);
       stopStallCheck();
       stopFirstResponseCheck();
@@ -552,6 +555,11 @@ function handleEvent(event) {
             delete state.sessionModelMap[oldPath];
             saveModelMap();
           }
+          // 迁移 sessionAgentRunning
+          if (state.sessionAgentRunning.has(oldPath)) {
+            state.sessionAgentRunning.set(newPath, state.sessionAgentRunning.get(oldPath));
+            state.sessionAgentRunning.delete(oldPath);
+          }
           // 迁移 session 对象的 path
           const ns = state.sessions.find(s => s.path === oldPath);
           if (ns) ns.path = newPath;
@@ -631,15 +639,26 @@ function markFirstResponseReceived() {
 }
 
 function handleExited(data) {
-  // 多实例：只处理当前活跃实例的退出
-  if (data.cwd && state.workspacePath && data.cwd !== state.workspacePath) {
-    return; // 非活跃实例退出，忽略
+  // 多实例：按 sessionId 过滤，避免后台对话退出影响当前活跃对话
+  if (data.sessionId && state.activeSessionId) {
+    if (data.sessionId !== state.activeSessionId) return;
+  } else if (data.cwd && state.workspacePath && data.cwd !== state.workspacePath) {
+    return; // fallback：无 sessionId 时按 cwd 过滤
   }
+
+  // 进程正在自动重启，不重置 UI 状态，等重启结果
+  if (data.autoRestarting) {
+    updateStatus(`重启中 (第${data.crashCount}次)...`);
+    return;
+  }
+
   state.tiffaReady = false;
   state.agentRunning = false;
+  state.sessionAgentRunning.set(state.activeSessionPath, false);
   finalizeAssistantMessage();
   updateInputState();
-  if (data.crashLoop) {
+  // 崩溃耗尽（超过自动重启上限）
+  if (data.crashCount && data.crashCount > 0) {
     updateStatus(`连续崩溃 ${data.crashCount} 次，已停止自动重启`);
     addNotice('error', `Tiffa 连续崩溃 ${data.crashCount} 次，已停止自动续行。请检查模型服务是否正常，然后手动发消息继续。`);
   } else {
@@ -798,8 +817,11 @@ async function loadProjects() {
             dom.messages.innerHTML = '';
             await loadAndRenderHistory(latest.path);
           } catch {}
-          // switchSession 异步通知 Tiffa，不阻塞 UI
-          tiffaDesktop.switchSession(latest.path).catch(() => {});
+          // activateSession 激活对话级实例（每个对话独立进程）
+          const targetSid = extractSessionId(latest.path);
+          if (targetSid) {
+            tiffaDesktop.activateSession(state.workspacePath, targetSid).catch(() => {});
+          }
         };
         if (state.welcomePhase === 'showing') {
           setTimeout(doRestore, 5500);
@@ -1556,6 +1578,14 @@ function renderSessionTabs() {
 async function switchToSession(sessionPath) {
   if (state.activeSessionPath === sessionPath) return;
   const oldSessionPath = state.activeSessionPath;
+
+  // 保存旧对话的 agentRunning 状态（切换回来时恢复）
+  if (oldSessionPath) {
+    state.sessionAgentRunning.set(oldSessionPath, state.agentRunning);
+  }
+  stopStallCheck();
+  stopFirstResponseCheck();
+
   state.activeSessionPath = sessionPath;
   state.activeSessionPaths.add(sessionPath);
 
@@ -1638,6 +1668,13 @@ async function switchToSession(sessionPath) {
     }
   } catch (err) {
     addNotice('error', `切换对话失败: ${err.message}`);
+  }
+
+  // 恢复目标对话的 agentRunning 状态（每个对话独立跟踪）
+  state.agentRunning = state.sessionAgentRunning.get(sessionPath) || false;
+  updateInputState();
+  if (state.agentRunning) {
+    updateStatus('运行中...');
   }
 
   // 激活对话级实例（独立进程，切换不干扰其他对话）
@@ -2727,6 +2764,7 @@ async function sendMessage() {
   dom.messages.appendChild(createMessageElement('user', message));
   scrollToBottom();
   state.agentRunning = true;
+  state.sessionAgentRunning.set(state.activeSessionPath, true);
   state.instanceAgentRunning.set(state.workspacePath, true);
   startStallCheck();
   startFirstResponseCheck();
@@ -2735,8 +2773,9 @@ async function sendMessage() {
   try { await tiffaDesktop.send(message, images); }
   catch (err) {
     addNotice('error', `发送失败: ${err.message}`);
-    // 发送失败时重置状态，避免 UI 卡在"思考中..."
+    // 发送失败时重置状态，避免 UI 卡在“思考中...”
     state.agentRunning = false;
+    state.sessionAgentRunning.set(state.activeSessionPath, false);
     state.instanceAgentRunning.set(state.workspacePath, false);
     stopStallCheck();
     stopFirstResponseCheck();
