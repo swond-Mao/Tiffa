@@ -136,6 +136,12 @@ const state = {
   // Per-workspace approval mode: 'auto' | 'yolo' | 'normal'
   // 'auto' = 自动批准读，确认写; 'yolo' = 全自动; 'normal' = 逐条确认
   approvalMode: 'yolo',
+  // 输入行为模式：'guide' = 引导(steer) | 'queue' = 排队(follow_up)
+  inputBehavior: localStorage.getItem('tiffa:inputBehavior') || 'guide',
+  // 本地跟踪：sendSteer 后标记下一条用户消息为 steered（后端可能不携带 steering 字段）
+  pendingSteerMarker: false,
+  // 本地跟踪：sendFollowUp 后标记下一条用户消息为 queued
+  pendingFollowUpMarker: false,
   // Todo 阶段数据
   todoPhases: [],
   // 启动欢迎页阶段：'showing' | 'done'
@@ -188,6 +194,7 @@ const dom = {
   btnNewSession: document.getElementById('btnNewSession'),
   sessionTabs: document.getElementById('sessionTabs'),
   messages: document.getElementById('messages'),
+  inputArea: document.getElementById('inputArea'),
   newSessionOverlay: document.getElementById('newSessionOverlay'),
   input: document.getElementById('messageInput'),
   btnSend: document.getElementById('btnSend'),
@@ -1724,7 +1731,10 @@ async function loadAndRenderHistory(sessionPath) {
       if (msg.role === 'user') {
         const text = msg.text || '';
         if (!text) continue;
-        fragment.appendChild(createHistoryUserMessage(text, msg.timestamp));
+        fragment.appendChild(createHistoryUserMessage(text, msg.timestamp, {
+          steered: !!msg.steering,
+          queued: !!msg.follow_up,
+        }));
       } else if (msg.role === 'assistant') {
         const text = msg.text || '';
         const thinking = msg.thinking || '';
@@ -1740,13 +1750,23 @@ async function loadAndRenderHistory(sessionPath) {
   }
 }
 
-function createHistoryUserMessage(content, timestamp) {
+// 用户消息公共辅助：roleLabel 和 classList 逻辑统一维护
+function getUserRoleLabel(opts = {}) {
+  return opts.steered ? '⟳ 引导' : opts.queued ? '⏳ 排队' : '你';
+}
+function applyUserMessageClasses(el, opts = {}) {
+  if (opts.steered) el.classList.add('steered');
+  if (opts.queued) el.classList.add('queued');
+}
+
+function createHistoryUserMessage(content, timestamp, opts = {}) {
   const div = document.createElement('div');
   div.className = 'message user';
+  applyUserMessageClasses(div, opts);
   const header = document.createElement('div');
   header.className = 'message-header';
   const time = timestamp ? new Date(timestamp).toLocaleTimeString() : '';
-  header.innerHTML = `<span class="message-role user">你</span><span class="message-time">${escapeHtml(time)}</span>`;
+  header.innerHTML = `<span class="message-role user">${getUserRoleLabel(opts)}</span><span class="message-time">${escapeHtml(time)}</span>`;
   const body = document.createElement('div');
   body.className = 'message-body';
   body.textContent = content;
@@ -1861,7 +1881,15 @@ function updateSessionTabTitle(title) {
 
 function handleMessageStart(message) {
   if (message.role === 'user') {
-    dom.messages.appendChild(createMessageElement('user', message.content));
+    // 后端可能不携带 steering/follow_up 字段，优先用本地跟踪标记
+    const isSteered = message.steering || state.pendingSteerMarker;
+    const isQueued = message.follow_up || state.pendingFollowUpMarker;
+    if (state.pendingSteerMarker) state.pendingSteerMarker = false;
+    if (state.pendingFollowUpMarker) state.pendingFollowUpMarker = false;
+    dom.messages.appendChild(createMessageElement('user', message.content, {
+      steered: !!isSteered,
+      queued: !!isQueued,
+    }));
     scrollToBottom();
   } else if (message.role === 'assistant') {
     const el = createAssistantMessageElement();
@@ -1940,12 +1968,14 @@ function createCopyBtn(getContentFn) {
   return btn;
 }
 
-function createMessageElement(role, content) {
+function createMessageElement(role, content, opts = {}) {
   const div = document.createElement('div');
   div.className = `message ${role}`;
+  if (role === 'user') applyUserMessageClasses(div, opts);
   const header = document.createElement('div');
   header.className = 'message-header';
-  header.innerHTML = `<span class="message-role ${role}">${role === 'user' ? '你' : '助手'}</span>
+  const roleLabel = role === 'user' ? getUserRoleLabel(opts) : '助手';
+  header.innerHTML = `<span class="message-role ${role}">${roleLabel}</span>
     <span class="message-time">${new Date().toLocaleTimeString()}</span>`;
   const body = document.createElement('div');
   body.className = 'message-body';
@@ -2504,7 +2534,19 @@ function setupInput() {
       }
       if (e.key === 'Escape') { e.preventDefault(); hideSlashPopup(); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (state.agentRunning) {
+        submitMidRun();
+      } else {
+        sendMessage();
+      }
+    }
+    // Shift+Enter 在生成中：取反模式（引导↔排队）；有内容才提交，空输入框仍允许换行
+    if (e.key === 'Enter' && e.shiftKey && state.agentRunning && dom.input.value.trim()) {
+      e.preventDefault();
+      submitMidRun(true);
+    }
   });
   dom.input.addEventListener('input', () => {
     dom.input.style.height = 'auto';
@@ -2804,10 +2846,66 @@ async function abortMessage() {
   }, 15000);
 }
 
+// ── Steer / Follow-up：生成中途干预或追加 ──
+// 术语映射：后端 steering ↔ 渲染层 steered ↔ 设置模式 guide
+//           后端 follow_up ↔ 渲染层 queued  ↔ 设置模式 queue
+
+/**
+ * @param {boolean} invertBehavior - true 则取反（guide↔queue）
+ */
+function submitMidRun(invertBehavior) {
+  const text = dom.input.value.trim();
+  if (!text) return;
+  let mode = state.inputBehavior;
+  if (invertBehavior) mode = (mode === 'guide') ? 'queue' : 'guide';
+  dom.input.value = '';
+  dom.input.style.height = 'auto';
+  if (mode === 'guide') {
+    sendSteer(text);
+  } else {
+    sendFollowUp(text);
+  }
+}
+
+async function sendSteer(text) {
+  state.pendingSteerMarker = true;
+  const el = createMessageElement('user', text, { steered: true });
+  dom.messages.appendChild(el);
+  scrollToBottom();
+  updateInputState();
+  try { await tiffaDesktop.steer(text); }
+  catch (err) {
+    el.remove();
+    state.pendingSteerMarker = false;
+    addNotice('error', `引导失败: ${err.message}`);
+  }
+}
+
+async function sendFollowUp(text) {
+  state.pendingFollowUpMarker = true;
+  const el = createMessageElement('user', text, { queued: true });
+  dom.messages.appendChild(el);
+  scrollToBottom();
+  addNotice('info', '消息已排队，当前任务完成后执行');
+  try { await tiffaDesktop.followUp(text); }
+  catch (err) {
+    el.remove();
+    state.pendingFollowUpMarker = false;
+    addNotice('error', `排队失败: ${err.message}`);
+  }
+}
+
 function updateInputState() {
   dom.btnSend.classList.toggle('hidden', state.agentRunning);
   dom.btnAbort.classList.toggle('hidden', !state.agentRunning);
-  dom.input.disabled = state.agentRunning;
+  // 生成中输入框视觉区分：添加 running class，不禁用输入
+  if (dom.inputArea) dom.inputArea.classList.toggle('input-running', state.agentRunning);
+  // 生成中不禁用输入框，只切换 placeholder 提示
+  dom.input.placeholder = state.agentRunning
+    ? (state.inputBehavior === 'guide'
+        ? 'Enter 引导 | Shift+Enter 排队'
+        : 'Enter 排队 | Shift+Enter 引导')
+    : '输入消息，Enter 发送，Shift+Enter 换行...';
   if (!state.agentRunning) {
     // 消费 draftInput：一次性预填输入框
     if (state.draftInput) {
@@ -3558,11 +3656,40 @@ function restoreApprovalMode(cwd) {
 function setupSettings() {
   dom.btnSettings.addEventListener('click', () => {
     dom.settingsOverlay.classList.toggle('hidden');
-    if (!dom.settingsOverlay.classList.contains('hidden')) { loadConstraintsPreview(); loadModelConfig(); loadModelList(); renderThemePresets(); }
+    if (!dom.settingsOverlay.classList.contains('hidden')) {
+      loadConstraintsPreview(); loadModelConfig(); loadModelList(); renderThemePresets();
+      renderInputBehaviorToggle();
+    }
   });
   dom.btnCloseSettings.addEventListener('click', () => dom.settingsOverlay.classList.add('hidden'));
   dom.settingsOverlay.addEventListener('click', (e) => { if (e.target === dom.settingsOverlay) dom.settingsOverlay.classList.add('hidden'); });
   dom.btnOpenConstraints.addEventListener('click', async () => { tiffaDesktop.openPath((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints.md'); });
+}
+
+function renderInputBehaviorToggle() {
+  const container = document.getElementById('inputBehaviorToggle');
+  const hint = document.getElementById('inputBehaviorHint');
+  if (!container) return;
+  const btns = container.querySelectorAll('.settings-toggle-btn');
+  btns.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === state.inputBehavior);
+    btn.onclick = () => {
+      state.inputBehavior = btn.dataset.value;
+      localStorage.setItem('tiffa:inputBehavior', state.inputBehavior);
+      btns.forEach(b => b.classList.toggle('active', b.dataset.value === state.inputBehavior));
+      updateInputBehaviorHint();
+      updateInputState();
+    };
+  });
+  updateInputBehaviorHint();
+}
+
+function updateInputBehaviorHint() {
+  const hint = document.getElementById('inputBehaviorHint');
+  if (!hint) return;
+  hint.textContent = state.inputBehavior === 'guide'
+    ? '引导：当前工具完成后立即按新方向继续，跳过剩余工具'
+    : '排队：追加到会话末尾，等当前 agent turn 跑完再处理';
 }
 
 function renderThemePresets() {

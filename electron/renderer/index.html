@@ -195,6 +195,17 @@
             <div id="themeModeSelector" class="theme-mode-selector"></div>
           </div>
           <div class="settings-section">
+            <div class="settings-section-title">输入行为</div>
+            <div class="settings-section-desc">生成中途按 Enter 的默认行为</div>
+            <div class="settings-toggle-row" id="inputBehaviorToggle">
+              <button class="settings-toggle-btn" data-value="guide">引导</button>
+              <button class="settings-toggle-btn" data-value="queue">排队</button>
+            </div>
+            <div class="settings-toggle-hint" id="inputBehaviorHint">
+              引导：当前工具完成后立即按新方向继续，跳过剩余工具
+            </div>
+          </div>
+          <div class="settings-section">
             <div class="settings-section-title">约束规则</div>
             <div class="settings-section-desc">编辑 constraints.md 管理弱模型输出约束</div>
             <div id="constraintsPreview" class="constraints-preview">加载中...</div>

@@ -1084,6 +1084,20 @@ body {
   background: var(--assistant-bg);
 }
 
+/* ── Steer / Follow-up 消息样式 ── */
+.message.steered {
+  border-left: 3px solid hsl(35 90% 55%);
+}
+.message.steered .message-role {
+  color: hsl(35 90% 55%);
+}
+.message.queued {
+  border-left: 3px solid hsl(var(--text-400));
+}
+.message.queued .message-role {
+  color: hsl(var(--text-400));
+}
+
 .message.tool-result .message-body {
   background: hsl(var(--bg-100));
   border: 1px solid hsl(var(--border-200));
@@ -1246,6 +1260,9 @@ body {
   padding: 12px 24px 16px;
   background: hsl(var(--bg-100));
   border-top: 1px solid hsl(var(--border-200));
+}
+#inputArea.input-running {
+  border-top: 2px solid hsl(35 90% 55% / 0.5);
 }
 
 .input-wrapper {
@@ -1722,6 +1739,39 @@ body {
   font-size: 12px;
   color: hsl(var(--text-400));
   margin-bottom: 12px;
+}
+
+/* ── 输入行为切换开关（苹果风胶囊） ── */
+.settings-toggle-row {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border-200));
+}
+.settings-toggle-btn {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  cursor: pointer;
+  background: hsl(var(--bg-200));
+  color: hsl(var(--text-200));
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.settings-toggle-btn:focus-visible {
+  outline: 2px solid hsl(var(--accent-main-000));
+  outline-offset: 2px;
+  z-index: 1;
+}
+.settings-toggle-btn.active {
+  background: hsl(var(--accent-main-000));
+  color: white;
+}
+.settings-toggle-hint {
+  font-size: 12px;
+  color: hsl(var(--text-400));
+  margin-top: 6px;
 }
 
 /* ── 供应商筛选 ── */
