@@ -112,6 +112,7 @@ const state = {
   activeProjectDirName: null,
   sessions: [],          // 当前项目全部会话（含活跃和非活跃）
   activeSessionPath: null,
+  activeSessionId: null,    // 当前活跃对话的 sessionId（从 sessionPath 提取 UUID）
   activeSessionPaths: new Set(),  // 顶栏活跃tab（最多5个）
   historyCollapsed: true,         // 历史对话面板折叠状态
   workspacePath: '',
@@ -144,6 +145,13 @@ const state = {
   pendingImages: [],
 };
 
+// 从 sessionPath 提取 sessionId（UUID）
+// sessionPath 格式: .../sessions/<dir>/<timestamp>_<uuid>.jsonl
+function extractSessionId(sessionPath) {
+  if (!sessionPath) return null;
+  const match = sessionPath.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  return match ? match[1] : null;
+}
 // ── sessionModelMap 持久化 ──
 const MODEL_MAP_FILE = 'session-model-map.json';
 async function saveModelMap() {
@@ -372,9 +380,11 @@ async function init() {
   });
 
   ompDesktop.onEvent((event) => {
-    // 多实例：只处理当前活跃实例的事件
-    if (event._cwd && state.workspacePath && event._cwd !== state.workspacePath) {
-      return; // 忽略非活跃实例的事件
+    // 多对话实例：只处理当前活跃对话的事件（按 sessionId 路由）
+    if (event._sessionId != null && state.activeSessionId != null) {
+      if (event._sessionId !== state.activeSessionId) return;
+    } else if (event._cwd && state.workspacePath && event._cwd !== state.workspacePath) {
+      return; // fallback：项目级实例按 cwd 过滤
     }
     handleEvent(event);
   });
@@ -422,15 +432,7 @@ function handleEvent(event) {
   // 记录事件时间，用于卡住检测
   state.lastEventTime = Date.now();
 
-  // 新建对话过渡期：忽略旧会话的残留事件，防止状态混乱
-  if (state.pendingNewSession && (
-    event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end' ||
-    event.type === 'agent_end' || event.type === 'turn_end' || event.type === 'tool_execution_start' ||
-    event.type === 'tool_execution_update' || event.type === 'tool_execution_end'
-  )) {
-    console.log('[渲染] 新建对话过渡期，忽略事件:', event.type);
-    return;
-  }
+  // 多对话实例模式下，事件按 sessionId 路由，不再需要 pendingNewSession 过滤
 
   switch (event.type) {
     case 'ready':
@@ -536,54 +538,38 @@ function handleEvent(event) {
       updateStatus(event.success ? '就绪' : '重试失败');
       break;
     case 'session_switch':
+      // 多对话实例模式下，session_switch 来自当前对话进程内部
+      // 更新 sessionPath 映射（__new__ -> 真实路径）
       if (event.sessionPath) {
         const newPath = event.sessionPath;
         const oldPath = state.activeSessionPath;
 
-        if (state.pendingNewSession) {
-          // 新建对话过渡期：清屏 + 关遮罩，但不关 pendingNewSession
-          // （omp 可能在 session_switch 后继续发旧会话的 message_* 事件）
-          // pendingNewSession 由新建对话流程在 await 返回后延迟关闭
-          if (oldPath && oldPath.startsWith('__new__') && state.sessionModelMap[oldPath]) {
+        // 如果当前是 __new__ tab，更新为真实路径
+        if (oldPath && oldPath.startsWith('__new__')) {
+          // 迁移 sessionModelMap
+          if (state.sessionModelMap[oldPath]) {
             state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
             delete state.sessionModelMap[oldPath];
             saveModelMap();
           }
-          if (oldPath && oldPath.startsWith('__new__')) {
-            const ns = state.sessions.find(s => s.path === oldPath);
-            if (ns) ns.path = newPath;
-          } else {
-            state.sessions.push({ path: newPath, title: '新对话', firstMessage: '', messageCount: 0 });
-          }
-          // 清屏 + showWelcome
-          dom.messages.innerHTML = '';
-          showWelcome();
-          state.sessionMessageCache.delete(newPath);
-          // 标记 session_switch 已到达（但不关 pendingNewSession）
-          state._newSessionSwitched = true;
-          // 延迟关闭 pendingNewSession，拦截残留事件
-          // 同时强制重置 agentRunning（旧 agent 被 new_session 打断，不会有 agent_end）
-          setTimeout(() => {
-            if (state.pendingNewSession) {
-              state.pendingNewSession = false;
-              state.agentRunning = false;
-              state.instanceAgentRunning.set(state.workspacePath, false);
-              stopStallCheck();
-              stopFirstResponseCheck();
-              updateInputState();
-              updateStatus('就绪');
-              dom.input.focus();
-            }
-          }, 300);
+          // 迁移 session 对象的 path
+          const ns = state.sessions.find(s => s.path === oldPath);
+          if (ns) ns.path = newPath;
+          // 迁移 activeSessionPaths
+          state.activeSessionPaths.delete(oldPath);
+          state.activeSessionPaths.add(newPath);
+        }
+
+        // 更新 activeSessionId 为真实 sessionId
+        const realSessionId = extractSessionId(newPath);
+        if (realSessionId) {
+          state.activeSessionId = realSessionId;
         }
 
         state.activeSessionPath = newPath;
-        state.activeSessionPaths.add(newPath);
         renderSessionTabs();
-        if (!state.pendingNewSession) {
-          updateStatus('就绪');
-          dom.input.focus();
-        }
+        updateStatus('就绪');
+        dom.input.focus();
       }
       break;
   }
@@ -1139,6 +1125,7 @@ async function selectProject(dirName) {
   state.activeProjectDirName = dirName;
   if (!isReselect) {
     state.activeSessionPath = null;
+    state.activeSessionId = null;
     state.activeSessionPaths.clear();  // 切换项目时重置活跃tab
   }
   restoreApprovalMode(state.workspacePath);
@@ -1173,6 +1160,7 @@ async function selectProject(dirName) {
     const latest = realSessions[realSessions.length - 1]; // 最新在最后
     if (latest && latest.path) {
       state.activeSessionPath = latest.path;
+      state.activeSessionId = extractSessionId(latest.path) || latest.path;
       state.activeSessionPaths.add(latest.path);
       renderSessionTabs();
 
@@ -1187,18 +1175,21 @@ async function selectProject(dirName) {
           });
           enhanceCodeBlocks(dom.messages);
           lazyHighlightCodeBlocks(dom.messages);
-          // 通知 omp 切换会话上下文
-          ompDesktop.switchSession(latest.path).then(() => {
-            const saved = state.sessionModelMap[latest.path];
-            if (saved && saved.provider && saved.modelId) {
-              try {
-                ompDesktop.setModel(saved.provider, saved.modelId);
-                state.currentModel = saved.modelId;
-                state.currentProvider = saved.provider;
-                dom.currentModel.textContent = saved.modelId;
-              } catch {}
-            }
-          }).catch(() => {});
+          // 激活对话级实例
+          const targetSid = extractSessionId(latest.path);
+          if (targetSid) {
+            ompDesktop.activateSession(state.workspacePath, targetSid).then(() => {
+              const saved = state.sessionModelMap[latest.path];
+              if (saved && saved.provider && saved.modelId) {
+                try {
+                  ompDesktop.setModel(saved.provider, saved.modelId);
+                  state.currentModel = saved.modelId;
+                  state.currentProvider = saved.provider;
+                  dom.currentModel.textContent = saved.modelId;
+                } catch {}
+              }
+            }).catch(() => {});
+          }
           return;
         }
 
@@ -1219,19 +1210,21 @@ async function selectProject(dirName) {
             dom.messages.innerHTML = '';
             await loadAndRenderHistory(latest.path);
           } catch {}
-          // switchSession 通知 omp 内部切换（可能失败，不影响 UI 显示）
-          ompDesktop.switchSession(latest.path).then(() => {
-            // 切换会话后恢复该对话之前使用的模型
-            const saved = state.sessionModelMap[latest.path];
-            if (saved && saved.provider && saved.modelId) {
-              try {
-                ompDesktop.setModel(saved.provider, saved.modelId);
-                state.currentModel = saved.modelId;
-                state.currentProvider = saved.provider;
-                dom.currentModel.textContent = saved.modelId;
-              } catch {}
-            }
-          }).catch(() => {});
+          // 激活对话级实例
+          const targetSid2 = extractSessionId(latest.path);
+          if (targetSid2) {
+            ompDesktop.activateSession(state.workspacePath, targetSid2).then(() => {
+              const saved = state.sessionModelMap[latest.path];
+              if (saved && saved.provider && saved.modelId) {
+                try {
+                  ompDesktop.setModel(saved.provider, saved.modelId);
+                  state.currentModel = saved.modelId;
+                  state.currentProvider = saved.provider;
+                  dom.currentModel.textContent = saved.modelId;
+                } catch {}
+              }
+            }).catch(() => {});
+          }
         }
       };
 
@@ -1446,87 +1439,58 @@ function setupSessionTabs() {
         updateStatus('就绪');
         return;
       }
-
       updateStatus('新建对话...');
-      state.pendingNewSession = true;  // 开启过渡期，忽略旧会话残留事件
-      state._newSessionSwitched = false;
 
-      // 如果 agent 正在运行，先强制重置 UI 状态（omp 的 new_session 会打断旧 agent）
-      if (state.agentRunning) {
-        state.agentRunning = false;
-        state.instanceAgentRunning.set(state.workspacePath, false);
-        stopStallCheck();
-        stopFirstResponseCheck();
-        finalizeAssistantMessage();
-        updateInputState();
+      // 生成临时 sessionId（对话级实例独立进程）
+      const tempSessionId = crypto.randomUUID();
+      const tempSessionPath = '__new__' + Date.now();
+
+      // 创建临时 session 对象
+      const newSession = {
+        path: tempSessionPath,
+        title: '新对话',
+        firstMessage: '',
+        messageCount: 0,
+      };
+      state.sessions.push(newSession);
+      state.activeSessionPath = tempSessionPath;
+      state.activeSessionId = tempSessionId;
+      state.activeSessionPaths.add(tempSessionPath);
+      if (state.currentProvider && state.currentModel) {
+        state.sessionModelMap[tempSessionPath] = { provider: state.currentProvider, modelId: state.currentModel };
+        saveModelMap();
       }
 
-      // 立即清屏 + 显示欢迎页，不让用户看到加载过程
+      // 清屏 + 显示欢迎页
       dom.messages.innerHTML = '';
       showWelcome();
-      await ompDesktop.newSession();
-      // 新会话会重置为默认模型，把当前模型设回去（继承之前的模型）
+      renderSessionTabs();
+
+      // 激活对话级实例（独立 omp 进程）
+      const result = await ompDesktop.activateSession(state.workspacePath, tempSessionId);
+      if (result.error) {
+        addNotice('error', `新建对话失败: ${result.error}`);
+        updateStatus('就绪');
+        return;
+      }
+      state.ompReady = result.ready !== false;
+
+      // 设置模型（继承之前的模型）
       if (state.currentProvider && state.currentModel && state.currentModel !== '--') {
         try { await ompDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
       }
 
-      if (state._newSessionSwitched) {
-        // session_switch 已在 await 期间到达，清屏已在事件处理器中完成
-        if (state.currentProvider && state.currentModel) {
-          const sp = state.activeSessionPath;
-          if (sp && !state.sessionModelMap[sp]) {
-            state.sessionModelMap[sp] = { provider: state.currentProvider, modelId: state.currentModel };
-            saveModelMap();
-          }
-        }
-        setTimeout(() => {
-          state.pendingNewSession = false;
-          updateStatus('就绪');
-          dom.input.focus();
-        }, 300);
-      } else {
-        // session_switch 还没来，创建临时 __new__ tab
-        const newSession = {
-          path: '__new__' + Date.now(),
-          title: '新对话',
-          firstMessage: '',
-          messageCount: 0,
-        };
-        state.sessions.push(newSession);
-        state.activeSessionPath = newSession.path;
-        state.activeSessionPaths.add(newSession.path);
-        if (state.currentProvider && state.currentModel) {
-          state.sessionModelMap[newSession.path] = { provider: state.currentProvider, modelId: state.currentModel };
-          saveModelMap();
-        }
-        renderSessionTabs();
-      }
-      // 后台异步刷新真实会话列表（文件写入后）
+      updateInputState();
+      updateStatus('就绪');
+      dom.input.focus();
+
+      // 后台异步刷新真实会话列表
       setTimeout(async () => {
         if (state.activeProjectDirName) {
           await loadSessions(state.activeProjectDirName);
         }
       }, 2000);
-      // 兜底：5秒后如果 session_switch 没来，强制关闭过渡期
-      setTimeout(() => {
-        if (state.pendingNewSession) {
-          state.pendingNewSession = false;
-          state.agentRunning = false;
-          state.instanceAgentRunning.set(state.workspacePath, false);
-          stopStallCheck();
-          stopFirstResponseCheck();
-          updateInputState();
-          updateStatus('就绪');
-          dom.input.focus();
-        }
-      }, 5000);
     } catch (err) {
-      state.pendingNewSession = false;
-      state.agentRunning = false;
-      state.instanceAgentRunning.set(state.workspacePath, false);
-      stopStallCheck();
-      stopFirstResponseCheck();
-      updateInputState();
       addNotice('error', `新建对话失败: ${err.message}`);
       updateStatus('就绪');
     }
@@ -1594,10 +1558,14 @@ async function switchToSession(sessionPath) {
   const oldSessionPath = state.activeSessionPath;
   state.activeSessionPath = sessionPath;
   state.activeSessionPaths.add(sessionPath);
+
+  // 提取目标对话的 sessionId
+  const targetSessionId = extractSessionId(sessionPath);
+  state.activeSessionId = targetSessionId || sessionPath;  // __new__ tab 用 path 自身作 id
+
   // 活跃tab上限5个，超过时移除最早未激活的
   const activeList = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
   if (activeList.length > 5) {
-    // 找到不在当前激活路径中的最早的tab移除
     for (const s of activeList) {
       if (s.path !== sessionPath) {
         state.activeSessionPaths.delete(s.path);
@@ -1607,46 +1575,53 @@ async function switchToSession(sessionPath) {
   }
   renderSessionTabs();
   try {
-    // 缓存当前会话的消息 DOM（Per-session 消息缓冲）
+    // 缓存当前会话的消息 DOM
     if (oldSessionPath) {
       state.sessionMessageCache.set(oldSessionPath, {
         html: dom.messages.innerHTML,
         scrollPos: dom.messages.scrollTop,
       });
-      // 限制缓存大小（最多 3 个会话，防止长会话 innerHTML 撑爆内存）
       if (state.sessionMessageCache.size > 3) {
         const oldest = state.sessionMessageCache.keys().next().value;
         state.sessionMessageCache.delete(oldest);
       }
     }
 
-    // __new__ tab 还没写盘，不能 switchSession/loadHistory
+    // __new__ tab 还没写盘，不能 loadHistory
     if (sessionPath.startsWith('__new__')) {
       dom.messages.innerHTML = '';
       showWelcome();
+      // 激活对应的对话级实例
+      if (targetSessionId) {
+        const result = await ompDesktop.activateSession(state.workspacePath, targetSessionId);
+        if (!result.error) {
+          state.ompReady = result.ready !== false;
+          // 恢复模型
+          const saved = state.sessionModelMap[sessionPath];
+          if (saved && saved.provider && saved.modelId) {
+            try { await ompDesktop.setModel(saved.provider, saved.modelId); } catch {}
+          }
+          updateInputState();
+        }
+      }
       return;
     }
 
     // 先渲染历史（从文件系统读取，不依赖 omp ready）
     const cached = state.sessionMessageCache.get(sessionPath);
     if (cached) {
-      // 启动阶段：先保持欢迎页，延迟后恢复对话内容
       if (state.welcomePhase === 'showing') {
         setTimeout(() => {
           dom.messages.innerHTML = cached.html;
           dom.messages.scrollTop = cached.scrollPos;
-          dom.messages.querySelectorAll('pre').forEach(pre => {
-            pre.dataset.enhanced = '';
-          });
+          dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
           enhanceCodeBlocks(dom.messages);
           lazyHighlightCodeBlocks(dom.messages);
         }, 5500);
       } else {
         dom.messages.innerHTML = cached.html;
         dom.messages.scrollTop = cached.scrollPos;
-        dom.messages.querySelectorAll('pre').forEach(pre => {
-          pre.dataset.enhanced = '';
-        });
+        dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
         enhanceCodeBlocks(dom.messages);
         lazyHighlightCodeBlocks(dom.messages);
       }
@@ -1665,17 +1640,23 @@ async function switchToSession(sessionPath) {
     addNotice('error', `切换对话失败: ${err.message}`);
   }
 
-  // 异步通知 omp 切换会话上下文（不阻塞 UI，失败也不影响已渲染的历史）
-  ompDesktop.switchSession(sessionPath).then(() => {
-    const saved = state.sessionModelMap[sessionPath];
-    if (saved && saved.provider && saved.modelId) {
-      ompDesktop.setModel(saved.provider, saved.modelId).then(() => {
-        state.currentModel = saved.modelId;
-        state.currentProvider = saved.provider;
-        dom.currentModel.textContent = saved.modelId;
-      }).catch(() => {});
-    }
-  }).catch(() => {});
+  // 激活对话级实例（独立进程，切换不干扰其他对话）
+  if (targetSessionId) {
+    ompDesktop.activateSession(state.workspacePath, targetSessionId).then((result) => {
+      if (!result.error) {
+        state.ompReady = result.ready !== false;
+        const saved = state.sessionModelMap[sessionPath];
+        if (saved && saved.provider && saved.modelId) {
+          ompDesktop.setModel(saved.provider, saved.modelId).then(() => {
+            state.currentModel = saved.modelId;
+            state.currentProvider = saved.provider;
+            dom.currentModel.textContent = saved.modelId;
+          }).catch(() => {});
+        }
+        updateInputState();
+      }
+    }).catch(() => {});
+  }
 }
 
 async function loadAndRenderHistory(sessionPath) {
@@ -2699,9 +2680,10 @@ async function sendMessage() {
   const message = dom.input.value.trim();
   if (!message && state.pendingImages.length === 0) return;
   if (!state.ompReady) { addNotice('warning', 'omp 尚未就绪'); return; }
-  if (state.agentRunning) { addNotice('warning', '当前对话正在运行中，请先停止或新建对话'); return; }
-  // Bug Fix 1: 如果当前没有活动会话，自动创建一个新对话
+
+  // 如果当前没有活动会话，自动创建一个新对话
   if (!state.activeSessionPath) {
+    const tempSessionId = crypto.randomUUID();
     const tempPath = '__new__' + Date.now();
     const newSession = {
       path: tempPath,
@@ -2711,10 +2693,24 @@ async function sendMessage() {
     };
     state.sessions.push(newSession);
     state.activeSessionPath = tempPath;
+    state.activeSessionId = tempSessionId;
     state.activeSessionPaths.add(tempPath);
-    state.pendingNewSession = true;
-    state._newSessionSwitched = false;
     renderSessionTabs();
+    // 激活对话级实例
+    try {
+      const result = await ompDesktop.activateSession(state.workspacePath, tempSessionId);
+      if (result.error) {
+        addNotice('error', `创建对话失败: ${result.error}`);
+        return;
+      }
+      state.ompReady = result.ready !== false;
+      if (state.currentProvider && state.currentModel && state.currentModel !== '--') {
+        try { await ompDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
+      }
+    } catch (err) {
+      addNotice('error', `创建对话失败: ${err.message}`);
+      return;
+    }
   }
 
   // Clear welcome screen on first message

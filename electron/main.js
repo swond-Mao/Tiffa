@@ -67,15 +67,16 @@ function _utf8Env() {
 
 // ── Global State ──
 let mainWindow = null;
-const MAX_INSTANCES = 5; // 最多同时运行的 omp 实例数
+const MAX_INSTANCES = 8; // 最多同时运行的 omp 实例数（项目级 + 对话级共享）
 
 // ═══════════════════════════════════════════════════════════════
 // OmpInstance: 单个 omp 子进程的完整生命周期管理
 // ═══════════════════════════════════════════════════════════════
 
 class OmpInstance {
-  constructor(cwd) {
+  constructor(cwd, sessionId = null) {
     this.cwd = cwd;
+    this.sessionId = sessionId;  // null = 项目级实例；UUID = 对话级实例
     this.process = null;
     this.rl = null;          // readline.Interface（stdout 逐行解析）
     this.ready = false;
@@ -147,7 +148,7 @@ class OmpInstance {
 
       // 通知渲染进程
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('omp:exited', { code, signal, cwd: this.cwd });
+        mainWindow.webContents.send('omp:exited', { code, signal, cwd: this.cwd, sessionId: this.sessionId });
       }
     });
 
@@ -234,9 +235,9 @@ class OmpInstance {
       }
       return;
     }
-
-    // Forward all events to renderer (带 cwd 标记)
+    // Forward all events to renderer (带 cwd + sessionId 标记)
     event._cwd = this.cwd;
+    event._sessionId = this.sessionId;
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('omp:event', event);
@@ -265,41 +266,47 @@ class OmpInstance {
 
 class OmpInstanceManager {
   constructor() {
-    this.instances = new Map(); // cwd (normalized) -> OmpInstance
-    this.spawning = new Map(); // cwd (normalized) -> Promise<OmpInstance>（防并发重复 spawn）
-    this.activeCwd = null;     // 当前活跃实例的 cwd
+    this.instances = new Map(); // key: cwd#sessionId -> OmpInstance
+    this.spawning = new Map(); // key: cwd#sessionId -> Promise<OmpInstance>
+    this.activeKey = null;     // 当前活跃实例的 key
+    this.activeCwd = null;     // 当前活跃实例的 cwd（向后兼容）
   }
 
-  // 激活某个 cwd 的实例（懒启动）
+  _key(cwd, sessionId) {
+    return path.resolve(cwd) + '#' + (sessionId || 'project');
+  }
+
+  // 激活项目级实例（用于文件操作、项目切换等）
   async activate(cwd) {
     const normalized = path.resolve(cwd);
+    const key = this._key(cwd, null);
+    this.activeKey = key;
     this.activeCwd = normalized;
     currentWorkspaceDir = normalized;
 
-    // 已存在实例 → 直接复用
-    if (this.instances.has(normalized)) {
-      const inst = this.instances.get(normalized);
+    // 已存在实例 -> 直接复用
+    if (this.instances.has(key)) {
+      const inst = this.instances.get(key);
       inst.lastActiveTime = Date.now();
       return inst;
     }
 
-    // 正在 spawn 中 → 复用同一个 Promise，避免并发创建重复进程
-    if (this.spawning.has(normalized)) {
-      return this.spawning.get(normalized);
+    // 正在 spawn 中 -> 复用同一个 Promise
+    if (this.spawning.has(key)) {
+      return this.spawning.get(key);
     }
 
-    // 超过上限 → LRU 淘汰最久未活跃的
+    // 超过上限 -> LRU 淘汰
     if (this.instances.size >= MAX_INSTANCES) {
       this._evictLRU();
     }
 
-    // 创建新实例（用 Promise 包装，支持并发 dedup）
+    // 创建新实例
     const spawnPromise = (async () => {
-      const inst = new OmpInstance(normalized);
-      this.instances.set(normalized, inst);
+      const inst = new OmpInstance(normalized, null);
+      this.instances.set(key, inst);
       inst.start();
 
-      // 等待就绪（最多 30 秒，比 15 秒更宽容，避免慢机器上误超时）
       await new Promise((resolve) => {
         let checks = 0;
         const check = setInterval(() => {
@@ -314,29 +321,101 @@ class OmpInstanceManager {
       return { inst, ready: inst.ready };
     })();
 
-    this.spawning.set(normalized, spawnPromise);
+    this.spawning.set(key, spawnPromise);
     try {
       return await spawnPromise;
     } finally {
-      this.spawning.delete(normalized);
+      this.spawning.delete(key);
+    }
+  }
+
+  // 激活对话级实例（每个对话独立 omp 进程）
+  async activateSession(cwd, sessionId) {
+    const normalized = path.resolve(cwd);
+    const key = this._key(cwd, sessionId);
+    this.activeKey = key;
+    this.activeCwd = normalized;
+    currentWorkspaceDir = normalized;
+
+    // 已存在实例 -> 直接复用
+    if (this.instances.has(key)) {
+      const inst = this.instances.get(key);
+      inst.lastActiveTime = Date.now();
+      return inst;
+    }
+
+    // 正在 spawn 中 -> 复用同一个 Promise
+    if (this.spawning.has(key)) {
+      return this.spawning.get(key);
+    }
+
+    // 超过上限 -> LRU 淘汰
+    if (this.instances.size >= MAX_INSTANCES) {
+      this._evictLRU();
+    }
+
+    // 创建新实例（对话级：带 sessionId）
+    const spawnPromise = (async () => {
+      const inst = new OmpInstance(normalized, sessionId);
+      this.instances.set(key, inst);
+      inst.start();
+
+      await new Promise((resolve) => {
+        let checks = 0;
+        const check = setInterval(() => {
+          checks++;
+          if (inst.ready || checks > 300) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+      });
+
+      return { inst, ready: inst.ready };
+    })();
+
+    this.spawning.set(key, spawnPromise);
+    try {
+      return await spawnPromise;
+    } finally {
+      this.spawning.delete(key);
     }
   }
 
   // 获取当前活跃实例
   getActive() {
-    if (!this.activeCwd) return null;
-    return this.instances.get(this.activeCwd) || null;
+    if (!this.activeKey) return null;
+    return this.instances.get(this.activeKey) || null;
   }
 
-  // 关闭某个 cwd 的实例
-  close(cwd) {
-    const normalized = path.resolve(cwd);
-    const inst = this.instances.get(normalized);
+  // 关闭某个 key 的实例
+  closeByKey(key) {
+    const inst = this.instances.get(key);
     if (inst) {
       inst.kill();
-      this.instances.delete(normalized);
+      this.instances.delete(key);
+    }
+    if (this.activeKey === key) {
+      this.activeKey = null;
+      this.activeCwd = null;
+    }
+  }
+
+  // 关闭某个 cwd 的所有实例（项目级 + 对话级）
+  close(cwd) {
+    const normalized = path.resolve(cwd);
+    const keysToDelete = [];
+    for (const [key, inst] of this.instances) {
+      if (inst.cwd === normalized) {
+        inst.kill();
+        keysToDelete.push(key);
+      }
+    }
+    for (const key of keysToDelete) {
+      this.instances.delete(key);
     }
     if (this.activeCwd === normalized) {
+      this.activeKey = null;
       this.activeCwd = null;
     }
   }
@@ -347,17 +426,16 @@ class OmpInstanceManager {
       inst.kill();
     }
     this.instances.clear();
+    this.activeKey = null;
     this.activeCwd = null;
   }
 
   // 关闭所有实例（退出时用，同步暴力清理）
   killAll() {
     for (const inst of this.instances.values()) {
-      // 同步杀进程，确保 app 退出前进程真的死透
       if (inst.process) {
         _killTree(inst.process.pid, true);
       }
-      // 拒绝所有待定命令
       for (const [id, { reject }] of inst.pendingCommands) {
         reject(new Error('app quitting'));
       }
@@ -365,6 +443,7 @@ class OmpInstanceManager {
     }
     this.instances.clear();
     this.spawning.clear();
+    this.activeKey = null;
     this.activeCwd = null;
   }
 
@@ -373,28 +452,29 @@ class OmpInstanceManager {
     let oldest = null;
     let oldestTime = Infinity;
 
-    for (const [cwd, inst] of this.instances) {
-      // 不淘汰当前活跃的
-      if (cwd === this.activeCwd) continue;
+    for (const [key, inst] of this.instances) {
+      if (key === this.activeKey) continue;
       if (inst.lastActiveTime < oldestTime) {
         oldestTime = inst.lastActiveTime;
-        oldest = cwd;
+        oldest = key;
       }
     }
 
     if (oldest) {
       console.log(`[OmpManager] LRU 淘汰: ${oldest}`);
-      this.close(oldest);
+      this.closeByKey(oldest);
     }
   }
 
   // 获取所有实例状态（供前端显示）
   getStatus() {
     const result = [];
-    for (const [cwd, inst] of this.instances) {
+    for (const [key, inst] of this.instances) {
       result.push({
-        cwd,
-        active: cwd === this.activeCwd,
+        key,
+        cwd: inst.cwd,
+        sessionId: inst.sessionId,
+        active: key === this.activeKey,
         ready: inst.ready,
         agentRunning: inst.agentRunning,
         lastActiveTime: inst.lastActiveTime,
@@ -533,12 +613,30 @@ function setupIpc() {
       message = omfgPrompt;
       console.log(`[/omfg] intercepted: complaint="${complaint}"`);
     }
-
-    const frame = { type: 'prompt', message };
-    if (images && images.length > 0) {
-      frame.images = images;
-    }
     return _active().sendCommand(frame);
+  });
+
+  // 激活对话级实例（每对话独立进程）
+  ipcMain.handle('omp:activateSession', async (event, cwd, sessionId) => {
+    try {
+      const normalized = path.resolve(cwd);
+      ensureProjectInJson(normalized);
+      const result = await ompManager.activateSession(normalized, sessionId);
+      return { success: true, cwd: ompManager.activeCwd, sessionId, ready: result.ready };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // 关闭对话级实例（关闭标签时释放进程）
+  ipcMain.handle('omp:closeSession', async (event, cwd, sessionId) => {
+    try {
+      const key = ompManager._key(cwd, sessionId);
+      ompManager.closeByKey(key);
+      return { success: true };
+    } catch (err) {
+      return { error: err.message };
+    }
   });
 
   ipcMain.handle('omp:abort', async () => {

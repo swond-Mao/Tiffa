@@ -94,6 +94,8 @@ contextBridge.exposeInMainWorld('ompDesktop', {
 
   // ── 多实例管理 ──
   activateInstance: (cwd) => ipcRenderer.invoke('omp:activate', cwd),
+  activateSession: (cwd, sessionId) => ipcRenderer.invoke('omp:activateSession', cwd, sessionId),
+  closeSession: (cwd, sessionId) => ipcRenderer.invoke('omp:closeSession', cwd, sessionId),
   getInstances: () => ipcRenderer.invoke('omp:instances'),
 
   // ── XML 翻译开关 ──
