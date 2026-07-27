@@ -47,7 +47,7 @@ function log(category: string, payload: string | string[] | unknown) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 事件流创建：导入 omp 内置 AssistantMessageEventStream
+// 事件流创建：导入 Tiffa 内核内置 AssistantMessageEventStream
 // ═══════════════════════════════════════════════════════════
 
 let _createStreamFn: (() => any) | null | undefined = undefined
@@ -69,8 +69,8 @@ async function getCreateStreamFn(): Promise<(() => any) | null> {
 
   // 策略2: 直接路径 import（便携包环境）
   try {
-    const ompModules = join(PORTABLE_ROOT, "npm-global", "node_modules")
-    const mod = await import(join(ompModules, "@oh-my-pi", "pi-coding-agent", "node_modules", "@oh-my-pi", "pi-ai", "src", "utils", "event-stream.ts"))
+    const tiffaModules = join(PORTABLE_ROOT, "npm-global", "node_modules")
+    const mod = await import(join(tiffaModules, "@oh-my-pi", "pi-coding-agent", "node_modules", "@oh-my-pi", "pi-ai", "src", "utils", "event-stream.ts"))
     if (typeof mod.createAssistantMessageEventStream === "function") {
       _createStreamFn = mod.createAssistantMessageEventStream
       log("stream.import", "Direct path import succeeded")
@@ -88,7 +88,7 @@ async function getCreateStreamFn(): Promise<(() => any) | null> {
 
 /**
  * 手动构造一个兼容 AssistantMessageEventStream 的流对象。
- * 这只在 import 全部失败时使用，尽量匹配 omp 内置的行为：
+ * 这只在 import 全部失败时使用，尽量匹配 Tiffa 内核内置的行为：
  * - push(event) 在 done 后丢弃事件
  * - end(result) 解决 finalResultPromise
  * - 支持 async iteration
@@ -429,8 +429,8 @@ function buildOpenAITools(context: any): any[] {
 // ═══════════════════════════════════════════════════════════
 // 自定义 streamSimple 实现
 // 重要：streamSimple 必须同步返回 stream 对象！
-// omp 内核调用 streamSimple(model, context, options) 时期望同步得到 stream，
-// 如果返回 Promise，omp 会尝试迭代 Promise 导致 "undefined is not a function"。
+// Tiffa 内核调用 streamSimple(model, context, options) 时期望同步得到 stream，
+// 如果返回 Promise，Tiffa 内核会尝试迭代 Promise 导致 "undefined is not a function"。
 // 异步操作（fetch、流处理）在 stream 内部完成。
 // ═══════════════════════════════════════════════════════════
 
@@ -438,17 +438,17 @@ function xmlTranslatingStreamSimple(model: any, context: any, options: any): any
   // 每次请求时检查开关状态
   const xmlTranslationEnabled = isXmlTranslationEnabled()
 
-  // 调试：记录 omp 传入的 model 对象结构，确认 baseUrl/apiKey 是否被传入
+  // 调试：记录 Tiffa 内核传入的 model 对象结构，确认 baseUrl/apiKey 是否被传入
   log("xml-translator.model-info", `model=${JSON.stringify({id:model.id,name:model.name,provider:model.provider,api:model.api,baseUrl:model.baseUrl,requestModelId:model.requestModelId})} options_keys=${Object.keys(options||{}).join(",")}`)
 
-  // 同步创建 stream：优先使用已缓存的 omp 内置 stream，否则用 manual 实现
+  // 同步创建 stream：优先使用已缓存的 Tiffa 内核内置 stream，否则用 manual 实现
   // 注意：不能 await getCreateStreamFn()，因为 streamSimple 必须同步返回 stream
   let stream: any
   if (_createStreamFn && typeof _createStreamFn === "function") {
     try {
       stream = _createStreamFn()
     } catch (err: any) {
-      log("xml-translator.stream.fallback", `omp stream failed: ${err?.message}, using manual`)
+      log("xml-translator.stream.fallback", `Tiffa stream failed: ${err?.message}, using manual`)
       stream = createManualStream()
     }
   } else {
@@ -472,7 +472,7 @@ function xmlTranslatingStreamSimple(model: any, context: any, options: any): any
 // ═══════════════════════════════════════════════════════════
 
 async function handlePassThrough(model: any, context: any, options: any, stream: any) {
-  // 从 provider 配置缓存获取 baseUrl/apiKey（omp 不一定会合并到 model 对象上）
+  // 从 provider 配置缓存获取 baseUrl/apiKey（Tiffa 内核不一定会合并到 model 对象上）
   const provCfg = model.provider ? _providerConfigs.get(model.provider) : undefined
   const baseUrl = model.baseUrl || provCfg?.baseUrl || options?.baseUrl || process.env.LLM_BASE_URL || "http://127.0.0.1:11434/v1"
   const url = baseUrl.replace(/\/+$/, "") + "/chat/completions"
@@ -482,7 +482,7 @@ async function handlePassThrough(model: any, context: any, options: any, stream:
   const body: Record<string, unknown> = {
 
 // ── 从 model / context / options 获取请求参数 ──
-  // 从 provider 配置缓存获取 baseUrl/apiKey（omp 不一定会合并到 model 对象上）
+  // 从 provider 配置缓存获取 baseUrl/apiKey（Tiffa 内核不一定会合并到 model 对象上）
   const provCfg = model.provider ? _providerConfigs.get(model.provider) : undefined
   const baseUrl = model.baseUrl || provCfg?.baseUrl || options?.baseUrl || process.env.LLM_BASE_URL || "http://127.0.0.1:11434/v1"
   const url = baseUrl.replace(/\/+$/, "") + "/chat/completions"
@@ -504,7 +504,7 @@ async function handlePassThrough(model: any, context: any, options: any, stream:
   }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-  // 优先用 options.apiKey（omp 传入），其次用 provider 配置缓存，忽略 "none" 占位
+  // 优先用 options.apiKey（Tiffa 内核传入），其次用 provider 配置缓存，忽略 "none" 占位
   const effectiveApiKey = (options?.apiKey && options.apiKey !== "none") ? options.apiKey
     : (provCfg?.apiKey && provCfg.apiKey !== "none") ? provCfg.apiKey : null
   if (effectiveApiKey && typeof effectiveApiKey === "string") {

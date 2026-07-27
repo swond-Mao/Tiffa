@@ -3,12 +3,12 @@ chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
 
 REM ═══════════════════════════════════════════════════
-REM omp 便携包启动脚本 (v1.1)
-REM 参考 opencode 便携包架构，自包含运行
+REM Tiffa 便携包启动脚本 (v1.1)
+REM 自包含运行，支持 TUI / WebUI / RPC 三种模式
 REM v1.1: 增加 models.yml 模板检测 + 环境变量注入
 REM ═══════════════════════════════════════════════════
 
-REM ── 便携包根目录（脚本所在目录的上两级）──
+REM ── 便携包根目录（脚本所在目录）──
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 
@@ -19,11 +19,11 @@ set "USERPROFILE=%ROOT%\home"
 
 REM ── Bun 运行时路径 ──
 set "BUN_EXE=%ROOT%\npm-global\node_modules\bun\bin\bun.exe"
-set "OMP_CLI=%ROOT%\npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"
+set "TIFFA_CLI=%ROOT%\npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"
 
 REM ── 工作目录 ──
-set "OMP_WORKSPACE=%ROOT%\workspace"
-if not exist "%OMP_WORKSPACE%" mkdir "%OMP_WORKSPACE%"
+set "TIFFA_WORKSPACE=%ROOT%\workspace"
+if not exist "%TIFFA_WORKSPACE%" mkdir "%TIFFA_WORKSPACE%"
 
 REM ── 确保必要目录存在 ──
 if not exist "%PI_CODING_AGENT_DIR%" mkdir "%PI_CODING_AGENT_DIR%"
@@ -32,16 +32,16 @@ if not exist "%ROOT%\data\memory" mkdir "%ROOT%\data\memory"
 if not exist "%ROOT%\data\memory\inbox" mkdir "%ROOT%\data\memory\inbox"
 if not exist "%ROOT%\data\log" mkdir "%ROOT%\data\log"
 
-REM ── 检查 Bun 和 omp 是否存在 ──
+REM ── 检查 Bun 和 Tiffa 内核是否存在 ──
 if not exist "%BUN_EXE%" (
     echo [错误] 未找到 Bun: %BUN_EXE%
-    echo 请先运行 install-omp.bat 安装依赖。
+    echo 请先运行 install.ps1 安装依赖。
     pause
     exit /b 1
 )
-if not exist "%OMP_CLI%" (
-    echo [错误] 未找到 omp CLI: %OMP_CLI%
-    echo 请先运行 install-omp.bat 安装依赖。
+if not exist "%TIFFA_CLI%" (
+    echo [错误] 未找到 Tiffa 内核: %TIFFA_CLI%
+    echo 请先运行 install.ps1 安装依赖。
     pause
     exit /b 1
 )
@@ -59,7 +59,7 @@ if not exist "%PI_CODING_AGENT_DIR%\models.yml" (
     )
 )
 
-REM ── 环境变量注入（供 Claude 化扩展读取）──
+REM ── 环境变量注入（供扩展读取）──
 REM 如果未设置 KIMI_API_KEY，从 models.yml 中提取（兼容现有配置）
 if not defined KIMI_API_KEY (
     REM 尝试从 models.yml 读取 kimi apiKey（简单 grep）
@@ -77,31 +77,31 @@ if not defined KIMI_API_KEY (
 )
 
 REM ── 解析参数 ──
-set "OMP_MODE=tui"
-set "OMP_EXTRA_ARGS="
+set "TIFFA_MODE=tui"
+set "TIFFA_EXTRA_ARGS="
 
 :parse_args
 if "%~1"=="" goto :done_parsing
 if /i "%~1"=="--web" (
-    set "OMP_MODE=rpc-ui"
+    set "TIFFA_MODE=rpc-ui"
     shift
     goto :parse_args
 )
 if /i "%~1"=="--tui" (
-    set "OMP_MODE=tui"
+    set "TIFFA_MODE=tui"
     shift
     goto :parse_args
 )
 if /i "%~1"=="--rpc" (
-    set "OMP_MODE=rpc"
+    set "TIFFA_MODE=rpc"
     shift
     goto :parse_args
 )
 if /i "%~1"=="--help" (
     echo.
-    echo omp 便携包启动脚本
+    echo Tiffa 便携包启动脚本
     echo.
-    echo 用法: start-omp.bat [选项] [消息]
+    echo 用法: start-tiffa.bat [选项] [消息]
     echo.
     echo 选项:
     echo   --tui     TUI 模式 (默认，终端交互)
@@ -109,7 +109,7 @@ if /i "%~1"=="--help" (
     echo   --rpc     RPC 模式 (纯 JSON-RPC，用于集成)
     echo   --help    显示帮助
     echo.
-    echo 其他参数将传递给 omp。
+    echo 其他参数将传递给 Tiffa 内核。
     echo.
     echo 模型配置: 见 data/agent/models.yml
     echo 长期记忆: 见 data/memory/MEMORY.md
@@ -117,7 +117,7 @@ if /i "%~1"=="--help" (
     pause
     exit /b 0
 )
-set "OMP_EXTRA_ARGS=%OMP_EXTRA_ARGS% %~1"
+set "TIFFA_EXTRA_ARGS=%TIFFA_EXTRA_ARGS% %~1"
 shift
 goto :parse_args
 :done_parsing
@@ -125,26 +125,26 @@ goto :parse_args
 REM ── 显示启动信息 ──
 echo.
 echo ══════════════════════════════════════════
-echo   omp 便携包 (oh-my-pi v17.0.7)
+echo   Tiffa 便携包 (内核 v17.0.7)
 echo ══════════════════════════════════════════
-echo   模式:     %OMP_MODE%
+echo   模式:     %TIFFA_MODE%
 echo   配置:     %PI_CODING_AGENT_DIR%
-echo   工作区:   %OMP_WORKSPACE%
+echo   工作区:   %TIFFA_WORKSPACE%
 echo   记忆:     %ROOT%\data\memory
 echo ══════════════════════════════════════════
 echo.
 
-REM ── 启动 omp ──
-cd /d "%OMP_WORKSPACE%"
+REM ── 启动 Tiffa ──
+cd /d "%TIFFA_WORKSPACE%"
 
-if "%OMP_MODE%"=="tui" (
-    "%BUN_EXE%" "%OMP_CLI%" -e "%ROOT%\plugins\claude-mode-extension.ts" %OMP_EXTRA_ARGS%
-) else if "%OMP_MODE%"=="rpc-ui" (
+if "%TIFFA_MODE%"=="tui" (
+    "%BUN_EXE%" "%TIFFA_CLI%" -e "%ROOT%\plugins\claude-mode-extension.ts" %TIFFA_EXTRA_ARGS%
+) else if "%TIFFA_MODE%"=="rpc-ui" (
     echo [INFO] RPC-UI 模式：输出 JSON 事件流到 stdout
     echo [INFO] 可用此模式构建 WebUI 前端
-    "%BUN_EXE%" "%OMP_CLI%" --mode rpc-ui -e "%ROOT%\plugins\claude-mode-extension.ts" %OMP_EXTRA_ARGS%
-) else if "%OMP_MODE%"=="rpc" (
-    "%BUN_EXE%" "%OMP_CLI%" --mode rpc -e "%ROOT%\plugins\claude-mode-extension.ts" %OMP_EXTRA_ARGS%
+    "%BUN_EXE%" "%TIFFA_CLI%" --mode rpc-ui -e "%ROOT%\plugins\claude-mode-extension.ts" %TIFFA_EXTRA_ARGS%
+) else if "%TIFFA_MODE%"=="rpc" (
+    "%BUN_EXE%" "%TIFFA_CLI%" --mode rpc -e "%ROOT%\plugins\claude-mode-extension.ts" %TIFFA_EXTRA_ARGS%
 )
 
 endlocal

@@ -140,8 +140,8 @@ Electron GUI，不是终端里的一行行文字：
 | 工具调用废话拦截 | 少说多做，省 token |
 | 取消 eval 注册 | 从"一条命令跑不了"到能完成简单任务 |
 | 断片补救 | 崩溃续行有上下文 |
-| omp 原生 Loop Guard | 精确重复检测 + 自动重试 |
-| omp 原生 Tool Call Loop | 相同参数连续调工具拦截 |
+| Tiffa 内核 Loop Guard | 精确重复检测 + 自动重试 |
+| Tiffa 内核 Tool Call Loop | 相同参数连续调工具拦截 |
 
 ---
 
@@ -171,9 +171,10 @@ oh-my-tiffa/        ← 这一个文件夹就是全部
 ## 启动
 
 ```bat
-omp-desktop.exe        # 双击启动
-omp-desktop.vbs        # 无控制台窗口
+tiffa-desktop.exe      # 双击启动
+tiffa-desktop.vbs      # 无控制台窗口
 start-desktop.bat      # 带 --portable-root
+start-tiffa.bat        # TUI/WebUI/RPC 终端模式
 ```
 
 或者开发模式：`cd electron && npm start`

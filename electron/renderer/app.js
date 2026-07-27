@@ -92,7 +92,7 @@ function applyOutputFixes(text) {
 
 // ── Global State ──
 const state = {
-  ompReady: false,
+  tiffaReady: false,
   agentRunning: false,
   lastEventTime: 0, // 上次收到事件的时间戳
   stallCheckTimer: null, // 卡住检测定时器
@@ -156,14 +156,14 @@ function extractSessionId(sessionPath) {
 const MODEL_MAP_FILE = 'session-model-map.json';
 async function saveModelMap() {
   try {
-    const root = await ompDesktop.getRootPath();
-    await ompDesktop.writeFile(root + '\\data\\agent\\' + MODEL_MAP_FILE, JSON.stringify(state.sessionModelMap));
+    const root = await tiffaDesktop.getRootPath();
+    await tiffaDesktop.writeFile(root + '\\data\\agent\\' + MODEL_MAP_FILE, JSON.stringify(state.sessionModelMap));
   } catch (e) { console.warn('[持久化] 保存模型映射失败:', e); }
 }
 async function loadModelMap() {
   try {
-    const root = await ompDesktop.getRootPath();
-    const result = await ompDesktop.readFile(root + '\\data\\agent\\' + MODEL_MAP_FILE);
+    const root = await tiffaDesktop.getRootPath();
+    const result = await tiffaDesktop.readFile(root + '\\data\\agent\\' + MODEL_MAP_FILE);
     if (result && result.content) {
       const map = JSON.parse(result.content);
       if (map && typeof map === 'object') state.sessionModelMap = map;
@@ -335,7 +335,7 @@ const minimap = {
 
 // ── Initialize ──
 async function init() {
-  state.workspacePath = await ompDesktop.getWorkspacePath();
+  state.workspacePath = await tiffaDesktop.getWorkspacePath();
   dom.sidebarTreeSection = dom.sidebar.querySelector('.sidebar-tree-section');
   minimap.init();
 
@@ -350,7 +350,7 @@ async function init() {
       e.preventDefault();
       const raw = decodeURIComponent(href.replace('tiffa-local://', ''));
       const filePath = raw.replace(/\//g, '\\');
-      ompDesktop.openPath(filePath);
+      tiffaDesktop.openPath(filePath);
       return;
     }
     // file:/// 协议链接（模型可能直接输出）
@@ -358,13 +358,13 @@ async function init() {
       e.preventDefault();
       const raw = decodeURIComponent(href.replace('file:///', ''));
       const filePath = raw.replace(/\//g, '\\');
-      ompDesktop.openPath(filePath);
+      tiffaDesktop.openPath(filePath);
       return;
     }
     // 纯 Windows 路径（如 X:\path，作为 href 不常见但防御性处理）
     if (/^[A-Z]:[\\\/]/.test(href)) {
       e.preventDefault();
-      ompDesktop.openPath(href);
+      tiffaDesktop.openPath(href);
       return;
     }
   });
@@ -379,7 +379,7 @@ async function init() {
     }
   });
 
-  ompDesktop.onEvent((event) => {
+  tiffaDesktop.onEvent((event) => {
     // 多对话实例：只处理当前活跃对话的事件（按 sessionId 路由）
     if (event._sessionId != null && state.activeSessionId != null) {
       if (event._sessionId !== state.activeSessionId) return;
@@ -388,7 +388,7 @@ async function init() {
     }
     handleEvent(event);
   });
-  ompDesktop.onExited(handleExited);
+  tiffaDesktop.onExited(handleExited);
 
   setupInput();
   setupProjectPanel();
@@ -409,9 +409,9 @@ async function init() {
   await loadEnabledModels();
   await loadProjects();
 
-  const ready = await ompDesktop.isReady();
+  const ready = await tiffaDesktop.isReady();
   if (ready) {
-    state.ompReady = true;
+    state.tiffaReady = true;
     updateStatus('就绪');
     fetchCurrentModel();
   }
@@ -436,7 +436,7 @@ function handleEvent(event) {
 
   switch (event.type) {
     case 'ready':
-      state.ompReady = true;
+      state.tiffaReady = true;
       updateStatus('就绪');
       fetchCurrentModel();
       break;
@@ -635,13 +635,13 @@ function handleExited(data) {
   if (data.cwd && state.workspacePath && data.cwd !== state.workspacePath) {
     return; // 非活跃实例退出，忽略
   }
-  state.ompReady = false;
+  state.tiffaReady = false;
   state.agentRunning = false;
   finalizeAssistantMessage();
   updateInputState();
   if (data.crashLoop) {
     updateStatus(`连续崩溃 ${data.crashCount} 次，已停止自动重启`);
-    addNotice('error', `omp 连续崩溃 ${data.crashCount} 次，已停止自动续行。请检查模型服务是否正常，然后手动发消息继续。`);
+    addNotice('error', `Tiffa 连续崩溃 ${data.crashCount} 次，已停止自动续行。请检查模型服务是否正常，然后手动发消息继续。`);
   } else {
     updateStatus(`已断开 (code: ${data.code})`);
   }
@@ -722,7 +722,7 @@ async function openNewProjectFolder() {
     // 保存旧实例状态
     if (state.workspacePath) state.instanceAgentRunning.set(state.workspacePath, state.agentRunning);
 
-    const result = await ompDesktop.openFolderDialog();
+    const result = await tiffaDesktop.openFolderDialog();
     if (result.canceled) return;
     if (result.error) {
       addNotice('error', `打开文件夹失败: ${result.error}`);
@@ -730,7 +730,7 @@ async function openNewProjectFolder() {
     }
     const folderPath = result.path;
     updateStatus('切换项目...');
-    const changeResult = await ompDesktop.activateInstance(folderPath);
+    const changeResult = await tiffaDesktop.activateInstance(folderPath);
     if (changeResult.error) {
       addNotice('error', `切换项目失败: ${changeResult.error}`);
       updateStatus('就绪');
@@ -739,10 +739,10 @@ async function openNewProjectFolder() {
     state.workspacePath = folderPath;
     state.activeProjectDirName = null;
     state.activeSessionPath = null;
-    state.ompReady = true;
+    state.tiffaReady = true;
     // 恢复新实例状态
     try {
-      const instances = await ompDesktop.getInstances();
+      const instances = await tiffaDesktop.getInstances();
       const current = instances.find(i => i.cwd === folderPath);
       if (current) {
         state.instanceAgentRunning.set(folderPath, current.agentRunning);
@@ -759,7 +759,7 @@ async function openNewProjectFolder() {
       state.currentTextBuffer = '';
     }
     updateStatus(state.agentRunning ? '思考中...' : '就绪');
-    // 重新加载项目列表（新 cwd 会在 omp 发消息后自动出现）
+    // 重新加载项目列表（新 cwd 会在 Tiffa 发消息后自动出现）
     await loadProjects();
     addNotice('info', `已切换到: ${folderPath}`);
   } catch (err) {
@@ -770,7 +770,7 @@ async function openNewProjectFolder() {
 
 async function loadProjects() {
   dom.projectList.innerHTML = '<div class="project-loading">加载中...</div>';
-  const result = await ompDesktop.listProjects();
+  const result = await tiffaDesktop.listProjects();
   if (result.error) {
     dom.projectList.innerHTML = `<div class="project-loading" style="color:var(--danger)">${escapeHtml(result.error)}</div>`;
     return;
@@ -778,7 +778,7 @@ async function loadProjects() {
   state.projects = result;
   // 同时加载归档项目列表
   try {
-    const archivedResult = await ompDesktop.listArchivedProjects();
+    const archivedResult = await tiffaDesktop.listArchivedProjects();
     state.archivedProjects = (archivedResult && !archivedResult.error) ? archivedResult : [];
   } catch { state.archivedProjects = []; }
   renderProjects();
@@ -793,13 +793,13 @@ async function loadProjects() {
         state.activeSessionPaths.add(latest.path);
         renderSessionTabs();
         const doRestore = async () => {
-          // 先渲染历史（文件系统读取，不依赖 omp），再通知 omp 切换
+          // 先渲染历史（文件系统读取，不依赖 Tiffa），再通知 Tiffa 切换
           try {
             dom.messages.innerHTML = '';
             await loadAndRenderHistory(latest.path);
           } catch {}
-          // switchSession 异步通知 omp，不阻塞 UI
-          ompDesktop.switchSession(latest.path).catch(() => {});
+          // switchSession 异步通知 Tiffa，不阻塞 UI
+          tiffaDesktop.switchSession(latest.path).catch(() => {});
         };
         if (state.welcomePhase === 'showing') {
           setTimeout(doRestore, 5500);
@@ -922,7 +922,7 @@ function showProjectContextMenu(e, project) {
     if (!item) return;
     const action = item.dataset.action;
     closeContextMenu();
-    if (action === 'open-explorer') ompDesktop.openPath(project.cwd);
+    if (action === 'open-explorer') tiffaDesktop.openPath(project.cwd);
     else if (action === 'archive') await archiveProject(project);
     else if (action === 'delete') await deleteProject(project);
   });
@@ -950,7 +950,7 @@ async function archiveProject(project) {
   const confirmed = confirm(`归档项目「${project.displayName || project.cwd}」？\n\n项目会话将移至归档区，可随时恢复。`);
   if (!confirmed) return;
   try {
-    const result = await ompDesktop.archiveProject(project.dirName);
+    const result = await tiffaDesktop.archiveProject(project.dirName);
     if (result.error) {
       addNotice('error', `归档失败: ${result.error}`);
       return;
@@ -975,14 +975,14 @@ async function deleteProject(project) {
   const doubleCheck = confirm(`再次确认：删除「${project.displayName}」的全部数据？此操作不可撤销。`);
   if (!doubleCheck) return;
   try {
-    const result = await ompDesktop.deleteProject(project.dirName);
+    const result = await tiffaDesktop.deleteProject(project.dirName);
     if (result.error) {
       addNotice('error', `删除失败: ${result.error}`);
       return;
     }
     // 加入 removedCwds 防止 discoverWorkspaceProjects 让它复活
     if (project.cwd) {
-      try { await ompDesktop.addRemovedCwd(project.cwd); } catch {}
+      try { await tiffaDesktop.addRemovedCwd(project.cwd); } catch {}
     }
     if (project.dirName === state.activeProjectDirName) {
       state.activeProjectDirName = null;
@@ -1038,7 +1038,7 @@ function showArchivedProjectContextMenu(e, project) {
 
 async function restoreArchivedProject(project) {
   try {
-    const result = await ompDesktop.restoreProject(project.dirName);
+    const result = await tiffaDesktop.restoreProject(project.dirName);
     if (result && result.error) {
       addNotice('error', `恢复失败: ${result.error}`);
       return;
@@ -1054,14 +1054,14 @@ async function hardDeleteArchivedProject(project) {
   const confirmed = confirm(`永久删除归档项目「${project.displayName || project.cwd}」？\n\n所有数据将丢失，无法恢复！`);
   if (!confirmed) return;
   try {
-    const result = await ompDesktop.deleteProject(project.dirName);
+    const result = await tiffaDesktop.deleteProject(project.dirName);
     if (result && result.error) {
       addNotice('error', `删除失败: ${result.error}`);
       return;
     }
     // 加入 removedCwds 防止复活
     if (project.cwd) {
-      try { await ompDesktop.addRemovedCwd(project.cwd); } catch {}
+      try { await tiffaDesktop.addRemovedCwd(project.cwd); } catch {}
     }
     addNotice('info', `已永久删除: ${project.displayName || project.dirName}`);
     await loadProjects();
@@ -1097,11 +1097,11 @@ async function selectProject(dirName) {
   const project = state.projects.find(p => p.dirName === dirName);
   if (!project || !project.cwd) return;
 
-  // 激活对应实例（懒启动或复用已有实例，无需重启 omp）
+  // 激活对应实例（懒启动或复用已有实例，无需重启 Tiffa）
   if (project.cwd !== state.workspacePath || isReselect) {
     updateStatus('切换项目...');
     try {
-      const result = await ompDesktop.activateInstance(project.cwd);
+      const result = await tiffaDesktop.activateInstance(project.cwd);
       if (result.error) {
         addNotice('error', `切换项目失败: ${result.error}`);
         updateStatus('就绪');
@@ -1109,11 +1109,11 @@ async function selectProject(dirName) {
       }
       state.workspacePath = result.cwd || project.cwd;
       if (result.ready === false) {
-        state.ompReady = false;
-        updateStatus('正在启动 omp 实例，请稍候...');
-        addNotice('info', '新项目 omp 实例正在启动，就绪后可发送消息');
+        state.tiffaReady = false;
+        updateStatus('正在启动 Tiffa 实例，请稍候...');
+        addNotice('info', '新项目 Tiffa 实例正在启动，就绪后可发送消息');
       } else {
-        state.ompReady = true;
+        state.tiffaReady = true;
       }
     } catch (err) {
       addNotice('error', `切换项目失败: ${err.message}`);
@@ -1134,7 +1134,7 @@ async function selectProject(dirName) {
   const newCwd = state.workspacePath;
   // 同步真实状态：切走期间可能错过了 agent_end 事件
   try {
-    const instances = await ompDesktop.getInstances();
+    const instances = await tiffaDesktop.getInstances();
     const current = instances.find(i => i.cwd === newCwd);
     if (current) {
       state.instanceAgentRunning.set(newCwd, current.agentRunning);
@@ -1178,11 +1178,11 @@ async function selectProject(dirName) {
           // 激活对话级实例
           const targetSid = extractSessionId(latest.path);
           if (targetSid) {
-            ompDesktop.activateSession(state.workspacePath, targetSid).then(() => {
+            tiffaDesktop.activateSession(state.workspacePath, targetSid).then(() => {
               const saved = state.sessionModelMap[latest.path];
               if (saved && saved.provider && saved.modelId) {
                 try {
-                  ompDesktop.setModel(saved.provider, saved.modelId);
+                  tiffaDesktop.setModel(saved.provider, saved.modelId);
                   state.currentModel = saved.modelId;
                   state.currentProvider = saved.provider;
                   dom.currentModel.textContent = saved.modelId;
@@ -1205,7 +1205,7 @@ async function selectProject(dirName) {
           state.currentTextBuffer = '';
           scrollToBottom(true);
         } else {
-          // 先渲染历史（从文件系统读取，不依赖 omp），再通知 omp 切换会话
+          // 先渲染历史（从文件系统读取，不依赖 Tiffa），再通知 Tiffa 切换会话
           try {
             dom.messages.innerHTML = '';
             await loadAndRenderHistory(latest.path);
@@ -1213,11 +1213,11 @@ async function selectProject(dirName) {
           // 激活对话级实例
           const targetSid2 = extractSessionId(latest.path);
           if (targetSid2) {
-            ompDesktop.activateSession(state.workspacePath, targetSid2).then(() => {
+            tiffaDesktop.activateSession(state.workspacePath, targetSid2).then(() => {
               const saved = state.sessionModelMap[latest.path];
               if (saved && saved.provider && saved.modelId) {
                 try {
-                  ompDesktop.setModel(saved.provider, saved.modelId);
+                  tiffaDesktop.setModel(saved.provider, saved.modelId);
                   state.currentModel = saved.modelId;
                   state.currentProvider = saved.provider;
                   dom.currentModel.textContent = saved.modelId;
@@ -1245,7 +1245,7 @@ async function selectProject(dirName) {
 }
 
 async function loadSessions(dirName) {
-  const result = await ompDesktop.listSessions(dirName);
+  const result = await tiffaDesktop.listSessions(dirName);
   if (result.error) {
     state.sessions = [];
   } else {
@@ -1330,7 +1330,7 @@ function renderHistoryPanel() {
       e.stopPropagation();
       const sessionPath = archiveBtn.dataset.path;
       if (sessionPath) {
-        const result = await ompDesktop.archiveSession(sessionPath);
+        const result = await tiffaDesktop.archiveSession(sessionPath);
         if (result.success) {
           addNotice('info', '对话已归档');
           state.activeSessionPaths.delete(sessionPath);
@@ -1359,7 +1359,7 @@ function renderHistoryPanel() {
       const sessionPath = deleteBtn.dataset.path;
       if (sessionPath) {
         if (!confirm('确定要删除这个对话吗？删除后无法恢复。')) return;
-        const result = await ompDesktop.deleteSession(sessionPath);
+        const result = await tiffaDesktop.deleteSession(sessionPath);
         if (result.success) {
           addNotice('info', '对话已删除');
           state.activeSessionPaths.delete(sessionPath);
@@ -1417,7 +1417,7 @@ function setupSessionTabs() {
       // 没有选中项目时，先引导用户选择文件夹
       if (!state.activeProjectDirName) {
         updateStatus('请先选择项目文件夹...');
-        const result = await ompDesktop.openFolderDialog();
+        const result = await tiffaDesktop.openFolderDialog();
         if (result.canceled) { updateStatus('就绪'); return; }
         if (result.error) {
           addNotice('error', `打开文件夹失败: ${result.error}`);
@@ -1425,14 +1425,14 @@ function setupSessionTabs() {
           return;
         }
         // 切换到选中的文件夹
-        const changeResult = await ompDesktop.activateInstance(result.path);
+        const changeResult = await tiffaDesktop.activateInstance(result.path);
         if (changeResult.error) {
           addNotice('error', `切换项目失败: ${changeResult.error}`);
           updateStatus('就绪');
           return;
         }
         state.workspacePath = result.path;
-        state.ompReady = true;
+        state.tiffaReady = true;
         // 重新加载项目列表并自动选中
         await loadProjects();
         // loadProjects 内部会自动选中第一个项目并加载 session
@@ -1466,18 +1466,18 @@ function setupSessionTabs() {
       showWelcome();
       renderSessionTabs();
 
-      // 激活对话级实例（独立 omp 进程）
-      const result = await ompDesktop.activateSession(state.workspacePath, tempSessionId);
+      // 激活对话级实例（独立 Tiffa 进程）
+      const result = await tiffaDesktop.activateSession(state.workspacePath, tempSessionId);
       if (result.error) {
         addNotice('error', `新建对话失败: ${result.error}`);
         updateStatus('就绪');
         return;
       }
-      state.ompReady = result.ready !== false;
+      state.tiffaReady = result.ready !== false;
 
       // 设置模型（继承之前的模型）
       if (state.currentProvider && state.currentModel && state.currentModel !== '--') {
-        try { await ompDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
+        try { await tiffaDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
       }
 
       updateInputState();
@@ -1593,13 +1593,13 @@ async function switchToSession(sessionPath) {
       showWelcome();
       // 激活对应的对话级实例
       if (targetSessionId) {
-        const result = await ompDesktop.activateSession(state.workspacePath, targetSessionId);
+        const result = await tiffaDesktop.activateSession(state.workspacePath, targetSessionId);
         if (!result.error) {
-          state.ompReady = result.ready !== false;
+          state.tiffaReady = result.ready !== false;
           // 恢复模型
           const saved = state.sessionModelMap[sessionPath];
           if (saved && saved.provider && saved.modelId) {
-            try { await ompDesktop.setModel(saved.provider, saved.modelId); } catch {}
+            try { await tiffaDesktop.setModel(saved.provider, saved.modelId); } catch {}
           }
           updateInputState();
         }
@@ -1607,7 +1607,7 @@ async function switchToSession(sessionPath) {
       return;
     }
 
-    // 先渲染历史（从文件系统读取，不依赖 omp ready）
+    // 先渲染历史（从文件系统读取，不依赖 Tiffa ready）
     const cached = state.sessionMessageCache.get(sessionPath);
     if (cached) {
       if (state.welcomePhase === 'showing') {
@@ -1642,12 +1642,12 @@ async function switchToSession(sessionPath) {
 
   // 激活对话级实例（独立进程，切换不干扰其他对话）
   if (targetSessionId) {
-    ompDesktop.activateSession(state.workspacePath, targetSessionId).then((result) => {
+    tiffaDesktop.activateSession(state.workspacePath, targetSessionId).then((result) => {
       if (!result.error) {
-        state.ompReady = result.ready !== false;
+        state.tiffaReady = result.ready !== false;
         const saved = state.sessionModelMap[sessionPath];
         if (saved && saved.provider && saved.modelId) {
-          ompDesktop.setModel(saved.provider, saved.modelId).then(() => {
+          tiffaDesktop.setModel(saved.provider, saved.modelId).then(() => {
             state.currentModel = saved.modelId;
             state.currentProvider = saved.provider;
             dom.currentModel.textContent = saved.modelId;
@@ -1663,7 +1663,7 @@ async function loadAndRenderHistory(sessionPath) {
   // loadEpoch 防竞态：快速切换会话时防止旧回调覆盖新数据
   const epoch = ++state.loadEpoch;
   try {
-    const result = await ompDesktop.loadSessionHistory(sessionPath);
+    const result = await tiffaDesktop.loadSessionHistory(sessionPath);
     // 如果在等待期间又切换了会话，放弃本次结果
     if (epoch !== state.loadEpoch) return;
 
@@ -1787,7 +1787,7 @@ function createHistoryAssistantMessage(text, thinking, toolCalls, timestamp, mod
   if (text) {
     const fixed = applyOutputFixes(text);
     const rendered = document.createElement('div');
-    rendered.innerHTML = ompDesktop.markedNoHighlight(fixed);
+    rendered.innerHTML = tiffaDesktop.markedNoHighlight(fixed);
     body.appendChild(rendered);
   }
 
@@ -1890,7 +1890,7 @@ function createCopyBtn(getContentFn) {
     e.stopPropagation();
     const text = typeof getContentFn === 'function' ? getContentFn() : getContentFn;
     try {
-      ompDesktop.clipboardWriteText(text);
+      tiffaDesktop.clipboardWriteText(text);
       btn.textContent = '已复制';
       setTimeout(() => { btn.textContent = '复制'; }, 1500);
     } catch {
@@ -1944,7 +1944,7 @@ function updateAssistantContent(rawText) {
   const body = state.currentAssistantEl.querySelector('.message-body');
   if (!body) return;
   const text = applyOutputFixes(rawText);
-  body.innerHTML = ompDesktop.marked(text);
+  body.innerHTML = tiffaDesktop.marked(text);
   enhanceCodeBlocks(body);
 }
 
@@ -1963,9 +1963,9 @@ const codeBlockObserver = new IntersectionObserver((entries) => {
       const lang = langMatch ? langMatch[1] : '';
       const raw = el.textContent || '';
       try {
-        el.innerHTML = lang && ompDesktop.hljs.getLanguage(lang)
-          ? ompDesktop.hljs.highlight(raw, { language: lang }).value
-          : ompDesktop.hljs.highlightAuto(raw).value;
+        el.innerHTML = lang && tiffaDesktop.hljs.getLanguage(lang)
+          ? tiffaDesktop.hljs.highlight(raw, { language: lang }).value
+          : tiffaDesktop.hljs.highlightAuto(raw).value;
       } catch { /* 高亮失败保持原文 */ }
     } else {
       collapsePreIfTall(el);
@@ -2018,7 +2018,7 @@ function enhanceCodeBlocks(container) {
           const code = pre.querySelector('code');
           const text = code ? code.textContent : pre.textContent;
           try {
-            ompDesktop.clipboardWriteText(text);
+            tiffaDesktop.clipboardWriteText(text);
             btn.textContent = '已复制!';
             setTimeout(() => btn.textContent = '复制', 2000);
           } catch {
@@ -2375,9 +2375,9 @@ function handleExtensionUI(event) {
       // 编辑器输入（ask 工具等）
       showModalInput(event.title || '请输入', event.prefill || '').then(v => {
         if (v !== null) {
-          ompDesktop.extensionResponse(id, { value: v });
+          tiffaDesktop.extensionResponse(id, { value: v });
         } else {
-          ompDesktop.extensionResponse(id, { cancelled: true });
+          tiffaDesktop.extensionResponse(id, { cancelled: true });
         }
       });
       break;
@@ -2386,51 +2386,51 @@ function handleExtensionUI(event) {
       const opts = event.options || [];
       showModalSelect(event.title || '请选择', opts).then(value => {
         if (value !== null && value !== undefined) {
-          ompDesktop.extensionResponse(id, { value });
+          tiffaDesktop.extensionResponse(id, { value });
         } else {
-          ompDesktop.extensionResponse(id, { cancelled: true });
+          tiffaDesktop.extensionResponse(id, { cancelled: true });
         }
       });
       break;
     }
     case 'confirm': {
       showModalConfirm(event.title, event.message).then(result => {
-        ompDesktop.extensionResponse(id, result ? { confirmed: true } : { cancelled: true });
+        tiffaDesktop.extensionResponse(id, result ? { confirmed: true } : { cancelled: true });
       });
       break;
     }
     case 'input': {
       showModalInput(event.title || '请输入', event.placeholder || '').then(v => {
         if (v !== null) {
-          ompDesktop.extensionResponse(id, { value: v });
+          tiffaDesktop.extensionResponse(id, { value: v });
         } else {
-          ompDesktop.extensionResponse(id, { cancelled: true });
+          tiffaDesktop.extensionResponse(id, { cancelled: true });
         }
       });
       break;
     }
     case 'setWidget':
       // 终端 UI 控件展示（ask 工具的交互面板等），桌面端不需要渲染，直接确认
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'notify':
       addNotice(event.notifyType || 'info', event.message);
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'setStatus':
       updateStatus(event.statusText || '');
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'setTitle':
       document.title = `Tiffa - ${event.title || ''}`;
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'cancel':
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'open_url':
-      if (event.url) ompDesktop.openExternal(event.url);
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      if (event.url) tiffaDesktop.openExternal(event.url);
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     case 'set_editor_text':
       // 设置 draftInput 而非直接写 dom.input.value，避免与 updateInputState 冲突
@@ -2444,11 +2444,11 @@ function handleExtensionUI(event) {
           dom.input.dispatchEvent(new Event('input'));
         }
       }
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
       break;
     default:
       console.warn('[Extension UI] 未处理的 method:', method);
-      ompDesktop.extensionResponse(id, { confirmed: true });
+      tiffaDesktop.extensionResponse(id, { confirmed: true });
   }
 }
 
@@ -2529,8 +2529,8 @@ function insertFilePaths(files) {
   const paths = Array.from(files)
     .map(f => {
       // Electron 32+ 移除了 File.path，需走 webUtils.getPathForFile（preload 桥接）
-      if (window.ompDesktop && typeof window.ompDesktop.getPathForFile === 'function') {
-        try { return window.ompDesktop.getPathForFile(f); } catch { return f.path; }
+      if (window.tiffaDesktop && typeof window.tiffaDesktop.getPathForFile === 'function') {
+        try { return window.tiffaDesktop.getPathForFile(f); } catch { return f.path; }
       }
       return f.path;
     })
@@ -2679,7 +2679,7 @@ function moveSlashSelection(delta) {
 async function sendMessage() {
   const message = dom.input.value.trim();
   if (!message && state.pendingImages.length === 0) return;
-  if (!state.ompReady) { addNotice('warning', 'omp 尚未就绪'); return; }
+  if (!state.tiffaReady) { addNotice('warning', 'Tiffa 尚未就绪'); return; }
 
   // 如果当前没有活动会话，自动创建一个新对话
   if (!state.activeSessionPath) {
@@ -2698,14 +2698,14 @@ async function sendMessage() {
     renderSessionTabs();
     // 激活对话级实例
     try {
-      const result = await ompDesktop.activateSession(state.workspacePath, tempSessionId);
+      const result = await tiffaDesktop.activateSession(state.workspacePath, tempSessionId);
       if (result.error) {
         addNotice('error', `创建对话失败: ${result.error}`);
         return;
       }
-      state.ompReady = result.ready !== false;
+      state.tiffaReady = result.ready !== false;
       if (state.currentProvider && state.currentModel && state.currentModel !== '--') {
-        try { await ompDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
+        try { await tiffaDesktop.setModel(state.currentProvider, state.currentModel); } catch {}
       }
     } catch (err) {
       addNotice('error', `创建对话失败: ${err.message}`);
@@ -2723,7 +2723,7 @@ async function sendMessage() {
     ? state.pendingImages.map(img => ({ data: img.data, mimeType: img.mimeType }))
     : undefined;
   clearPendingImages();
-  // 立即显示用户消息 + "思考中"状态（本地模型 prefill 可能 60-90 秒，不等 omp 事件）
+  // 立即显示用户消息 + "思考中"状态（本地模型 prefill 可能 60-90 秒，不等 Tiffa 事件）
   dom.messages.appendChild(createMessageElement('user', message));
   scrollToBottom();
   state.agentRunning = true;
@@ -2732,7 +2732,7 @@ async function sendMessage() {
   startFirstResponseCheck();
   updateInputState();
   updateStatus('思考中...');
-  try { await ompDesktop.send(message, images); }
+  try { await tiffaDesktop.send(message, images); }
   catch (err) {
     addNotice('error', `发送失败: ${err.message}`);
     // 发送失败时重置状态，避免 UI 卡在"思考中..."
@@ -2748,13 +2748,13 @@ async function sendMessage() {
 
 async function abortMessage() {
   try {
-    await ompDesktop.abort();
+    await tiffaDesktop.abort();
   } catch (err) { /* ignore */ }
   stopStallCheck();
-  // 不立即设 agentRunning=false，等 omp 的 agent_end 事件来更新
+  // 不立即设 agentRunning=false，等 Tiffa 的 agent_end 事件来更新
   // 给 UI 反馈，避免用户以为没反应
   updateStatus('已发送停止信号，等待 agent 响应...');
-  // 15 秒兜底：如果 omp 没发 agent_end，强制重置 UI 状态
+  // 15 秒兜底：如果 Tiffa 没发 agent_end，强制重置 UI 状态
   setTimeout(() => {
     if (state.agentRunning) {
       state.agentRunning = false;
@@ -2877,7 +2877,7 @@ function getTodoStatusIcon(status) {
 }
 
 async function loadFileTree(dirPath) {
-  const entries = await ompDesktop.listDir(dirPath);
+  const entries = await tiffaDesktop.listDir(dirPath);
   if (entries.error) {
     dom.fileTree.innerHTML = `<div class="file-tree-item" style="color:var(--danger)">${entries.error}</div>`;
     return;
@@ -2911,7 +2911,7 @@ function formatFileSize(bytes) {
 async function toggleDirectory(entry, item, depth) {
   const child = item.nextElementSibling;
   if (child && child.classList.contains('file-tree-children')) { child.remove(); return; }
-  const entries = await ompDesktop.listDir(entry.path);
+  const entries = await tiffaDesktop.listDir(entry.path);
   if (entries.error) return;
   const filtered = entries.filter(e => {
     if (e.name.startsWith('.') && e.name !== '.omp') return false;
@@ -2932,11 +2932,11 @@ function getFileIcon(ext) {
 async function openFilePreview(entry) {
   const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico'];
   if (imageExts.includes(entry.ext)) {
-    const result = await ompDesktop.readImage(entry.path);
+    const result = await tiffaDesktop.readImage(entry.path);
     if (result.error) { addNotice('error', result.error); return; }
     addPreviewTab(entry.name, 'image', null, result);
   } else {
-    const result = await ompDesktop.readFile(entry.path);
+    const result = await tiffaDesktop.readFile(entry.path);
     if (result.error) { addNotice('error', result.error); return; }
     addPreviewTab(entry.name, 'code', entry.path, result);
   }
@@ -3026,7 +3026,7 @@ function renderCodeContent(tab) {
   const langMap = { '.js': 'javascript', '.ts': 'typescript', '.py': 'python', '.html': 'html', '.css': 'css', '.json': 'json', '.md': 'markdown', '.yml': 'yaml', '.yaml': 'yaml', '.bat': 'bash', '.sh': 'bash', '.xml': 'xml', '.sql': 'sql', '.rs': 'rust', '.go': 'go', '.java': 'java', '.cpp': 'cpp', '.c': 'c', '.h': 'c' };
   const lang = langMap[ext] || '';
   let highlighted;
-  try { highlighted = lang && ompDesktop.hljs.getLanguage(lang) ? ompDesktop.hljs.highlight(content, { language: lang }).value : ompDesktop.hljs.highlightAuto(content).value; }
+  try { highlighted = lang && tiffaDesktop.hljs.getLanguage(lang) ? tiffaDesktop.hljs.highlight(content, { language: lang }).value : tiffaDesktop.hljs.highlightAuto(content).value; }
   catch { highlighted = escapeHtml(content); }
   return `<div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">${escapeHtml(tab.name || '')} ${content.length > 0 ? `(${(content.length / 1024).toFixed(1)}KB)` : ''}</div><pre class="code-preview"><code class="hljs">${highlighted}</code></pre>`;
 }
@@ -3169,7 +3169,7 @@ function showSessionTabContextMenu(e, session) {
 }
 
 async function archiveSessionFromTab(session) {
-  const result = await ompDesktop.archiveSession(session.path);
+  const result = await tiffaDesktop.archiveSession(session.path);
   if (result.success) {
     addNotice('info', '对话已归档');
     state.activeSessionPaths.delete(session.path);
@@ -3193,7 +3193,7 @@ async function archiveSessionFromTab(session) {
 async function deleteSessionFromTab(session) {
   const title = session.title || session.firstMessage || '新对话';
   if (!confirm(`确定要删除对话「${title}」吗？删除后无法恢复。`)) return;
-  const result = await ompDesktop.deleteSession(session.path);
+  const result = await tiffaDesktop.deleteSession(session.path);
   if (result.success) {
     addNotice('info', '对话已删除');
     state.activeSessionPaths.delete(session.path);
@@ -3232,7 +3232,7 @@ async function renameSession(session) {
     renderHistoryPanel();
     return;
   }
-  const result = await ompDesktop.renameSession(session.path, trimmedTitle);
+  const result = await tiffaDesktop.renameSession(session.path, trimmedTitle);
   if (result.success) {
     session.title = trimmedTitle;
     renderSessionTabs();
@@ -3247,7 +3247,7 @@ async function renameSession(session) {
 async function branchSession(session) {
   if (!session || !session.path) return;
   try {
-    const result = await ompDesktop.getUserEntries(session.path);
+    const result = await tiffaDesktop.getUserEntries(session.path);
     if (!result || !result.entries || result.entries.length === 0) {
       addNotice('warning', '该对话没有可分支的用户消息');
       return;
@@ -3298,7 +3298,7 @@ function showBranchPicker(session, entries) {
       close();
       // 发送 branch 命令
       try {
-        await ompDesktop.command('branch', { entryId: msgId });
+        await tiffaDesktop.command('branch', { entryId: msgId });
         // 设置 draftInput 预填分支后的输入
         state.draftInput = text;
         addNotice('info', '已创建分支，输入框已预填原始消息');
@@ -3316,7 +3316,7 @@ function showBranchPicker(session, entries) {
 async function exportSessionHtml(session) {
   if (!session || !session.path) return;
   try {
-    const result = await ompDesktop.exportSessionHtml(session.path);
+    const result = await tiffaDesktop.exportSessionHtml(session.path);
     if (result && result.path) {
       addNotice('success', `已导出到: ${result.path}`);
     } else if (result && result.error) {
@@ -3431,7 +3431,7 @@ function updateHljsTheme(resolvedMode) {
 async function setupXmlTranslation() {
   // 从开关文件恢复状态
   try {
-    const result = await ompDesktop.getXmlTranslationStatus();
+    const result = await tiffaDesktop.getXmlTranslationStatus();
     if (result && result.enabled) {
       state.xmlTranslationEnabled = true;
       dom.btnXmlTranslation.classList.add('active');
@@ -3441,7 +3441,7 @@ async function setupXmlTranslation() {
   dom.btnXmlTranslation.addEventListener('click', async () => {
     state.xmlTranslationEnabled = !state.xmlTranslationEnabled;
     try {
-      await ompDesktop.toggleXmlTranslation(state.xmlTranslationEnabled);
+      await tiffaDesktop.toggleXmlTranslation(state.xmlTranslationEnabled);
     } catch {}
     if (state.xmlTranslationEnabled) {
       dom.btnXmlTranslation.classList.add('active');
@@ -3492,12 +3492,12 @@ function cycleApprovalMode() {
   renderApprovalModeIndicator();
   addNotice('info', `审批模式: ${APPROVAL_MODE_LABELS[state.approvalMode]}`);
   // 写入 config.yml（下次会话生效）
-  ompDesktop.writeApprovalMode(state.approvalMode).then(result => {
+  tiffaDesktop.writeApprovalMode(state.approvalMode).then(result => {
     if (!result?.success) console.warn('[审批] 写入 config.yml 失败:', result?.error);
   }).catch(() => {});
-  // 通知 omp（当前会话通过 steer 告知）
+  // 通知 Tiffa（当前会话通过 steer 告知）
   if (state.agentRunning) {
-    try { ompDesktop.command('steer', { message: `[system] 用户切换审批模式为: ${state.approvalMode}（${APPROVAL_MODE_LABELS[state.approvalMode]}）` }); } catch {}
+    try { tiffaDesktop.command('steer', { message: `[system] 用户切换审批模式为: ${state.approvalMode}（${APPROVAL_MODE_LABELS[state.approvalMode]}）` }); } catch {}
   }
 }
 
@@ -3512,7 +3512,7 @@ function restoreApprovalMode(cwd) {
   }
   renderApprovalModeIndicator();
   // 写入 config.yml 同步
-  ompDesktop.writeApprovalMode(state.approvalMode).catch(() => {});
+  tiffaDesktop.writeApprovalMode(state.approvalMode).catch(() => {});
 }
 
 // ── Settings ──
@@ -3523,7 +3523,7 @@ function setupSettings() {
   });
   dom.btnCloseSettings.addEventListener('click', () => dom.settingsOverlay.classList.add('hidden'));
   dom.settingsOverlay.addEventListener('click', (e) => { if (e.target === dom.settingsOverlay) dom.settingsOverlay.classList.add('hidden'); });
-  dom.btnOpenConstraints.addEventListener('click', async () => { ompDesktop.openPath((await ompDesktop.getRootPath()) + '\\data\\memory\\constraints.md'); });
+  dom.btnOpenConstraints.addEventListener('click', async () => { tiffaDesktop.openPath((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints.md'); });
 }
 
 function renderThemePresets() {
@@ -3591,11 +3591,11 @@ async function loadModelList() {
     // 确保modelsConfigData已加载（用于过滤内置模型）
     if (!modelsConfigData) {
       try {
-        const cfgResult = await ompDesktop.readModelsYml();
+        const cfgResult = await tiffaDesktop.readModelsYml();
         if (cfgResult && !cfgResult.error) modelsConfigData = cfgResult.data;
       } catch {}
     }
-    const result = await ompDesktop.getModels();
+    const result = await tiffaDesktop.getModels();
     if (result && result.models) renderModelList(result.models);
     else dom.modelList.innerHTML = '<div class="model-item empty">暂无可用模型</div>';
   } catch { dom.modelList.innerHTML = '<div class="model-item empty">无法获取模型列表</div>'; }
@@ -3608,8 +3608,8 @@ let showHiddenModels = false;    // 临时展开已隐藏模型
 
 async function loadHiddenModels() {
   try {
-    const root = await ompDesktop.getRootPath();
-    const result = await ompDesktop.readFile(root + '\\data\\agent\\hidden-models.json');
+    const root = await tiffaDesktop.getRootPath();
+    const result = await tiffaDesktop.readFile(root + '\\data\\agent\\hidden-models.json');
     if (result && result.content) {
       hiddenModels = new Set(JSON.parse(result.content));
     }
@@ -3618,8 +3618,8 @@ async function loadHiddenModels() {
 
 async function saveHiddenModels() {
   try {
-    const root = await ompDesktop.getRootPath();
-    await ompDesktop.writeFile(root + '\\data\\agent\\hidden-models.json', JSON.stringify([...hiddenModels]));
+    const root = await tiffaDesktop.getRootPath();
+    await tiffaDesktop.writeFile(root + '\\data\\agent\\hidden-models.json', JSON.stringify([...hiddenModels]));
   } catch {}
 }
 
@@ -3637,7 +3637,7 @@ function renderModelList(models) {
       if (prov.models) for (const m of prov.models) userModelIds.add(m.id);
     }
     if (userModelIds.size > 0) {
-      // 只保留 models.yml 中定义的模型，以及 home-models（omp config.yml 中的本地模型）
+      // 只保留 models.yml 中定义的模型，以及 home-models（Tiffa config.yml 中的本地模型）
       filteredModelList = modelList.filter(m => userModelIds.has(m.id) || (m.provider && m.provider.startsWith('home-')));
     }
   }
@@ -3738,7 +3738,7 @@ function renderModelList(models) {
 
 async function switchModel(provider, modelId) {
   try {
-    await ompDesktop.setModel(provider, modelId);
+    await tiffaDesktop.setModel(provider, modelId);
     state.currentModel = modelId;
     state.currentProvider = provider;
     dom.currentModel.textContent = modelId;
@@ -3755,10 +3755,10 @@ async function switchModel(provider, modelId) {
   } catch (err) { addNotice('error', `切换模型失败: ${err.message}`); }
 }
 
-// 从 omp 获取当前模型名并更新顶栏显示
+// 从 Tiffa 获取当前模型名并更新顶栏显示
 async function fetchCurrentModel() {
   try {
-    const result = await ompDesktop.getModels();
+    const result = await tiffaDesktop.getModels();
     if (result && result.models && result.models.length > 0) {
       const first = result.models[0];
       const name = first.name || first.id || '';
@@ -3778,7 +3778,7 @@ async function fetchCurrentModel() {
             const last = JSON.parse(saved);
             if (last && last.modelId && last.modelId !== state.currentModel && last.provider) {
               try {
-                await ompDesktop.setModel(last.provider, last.modelId);
+                await tiffaDesktop.setModel(last.provider, last.modelId);
                 state.currentModel = last.modelId;
                 state.currentProvider = last.provider;
                 dom.currentModel.textContent = last.modelId;
@@ -3793,7 +3793,7 @@ async function fetchCurrentModel() {
 
 async function loadConstraintsPreview() {
   try {
-    const result = await ompDesktop.readFile((await ompDesktop.getRootPath()) + '\\data\\memory\\constraints.md');
+    const result = await tiffaDesktop.readFile((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints.md');
     if (result && result.content) {
       const lines = result.content.split('\n').filter(l => l.trim());
       dom.constraintsPreview.innerHTML = `<pre class="constraints-text">${escapeHtml(lines.slice(0, 15).join('\n'))}${lines.length > 15 ? '\n...' : ''}</pre>`;
@@ -3845,11 +3845,11 @@ async function loadModelSwitcherList() {
     // 确保 modelsConfigData 已加载（用于过滤非用户配置的模型）
     if (!modelsConfigData) {
       try {
-        const cfgResult = await ompDesktop.readModelsYml();
+        const cfgResult = await tiffaDesktop.readModelsYml();
         if (cfgResult && !cfgResult.error) modelsConfigData = cfgResult.data;
       } catch {}
     }
-    const result = await ompDesktop.getModels();
+    const result = await tiffaDesktop.getModels();
     if (result && result.models) {
       modelSwitcherCache = result.models.filter(m => !hiddenModels.has(m.id));
       renderModelSwitcherList('');
@@ -3928,11 +3928,11 @@ let modelsConfigData = null;
 function setupModelConfig() {
   document.getElementById('btnAddProvider').addEventListener('click', () => addProviderUI());
   document.getElementById('btnSaveModels').addEventListener('click', () => saveModelConfig());
-  document.getElementById('btnRestartOmp').addEventListener('click', async () => {
+  document.getElementById('btnRestartTiffa').addEventListener('click', async () => {
     const s = document.querySelector('.config-status');
     if (s) { s.textContent = '重启中...'; s.className = 'config-status loading'; }
     try {
-      const r = await ompDesktop.restartOmp();
+      const r = await tiffaDesktop.restartTiffa();
       if (s) { s.textContent = r.success ? '已重启' : '重启失败'; s.className = r.success ? 'config-status saved' : 'config-status error'; }
     } catch (err) { if (s) { s.textContent = '重启失败: ' + err.message; s.className = 'config-status error'; } }
     setTimeout(() => { if (s) s.textContent = ''; }, 5000);
@@ -3943,7 +3943,7 @@ async function loadModelConfig() {
   const container = document.getElementById('modelConfig');
   container.innerHTML = '<div class="model-item loading">加载中...</div>';
   try {
-    const result = await ompDesktop.readModelsYml();
+    const result = await tiffaDesktop.readModelsYml();
     if (result.error) { container.innerHTML = `<div class="model-item empty">读取失败: ${escapeHtml(result.error)}</div>`; return; }
     modelsConfigData = result.data;
     renderModelConfig();
@@ -3971,7 +3971,7 @@ function createProviderCard(provKey, provVal) {
     e.stopPropagation();
     if (!confirm(`确定删除供应商 "${provKey}"？\n这将同时删除 models.yml 中的配置和白名单中的相关模型。`)) return;
     // 用 YAML 注释保留式删除
-    const result = await ompDesktop.deleteOmpProvider(provKey);
+    const result = await tiffaDesktop.deleteTiffaProvider(provKey);
     if (result.error) { addNotice('error', '删除失败: ' + result.error); return; }
     // 清理白名单中该供应商的孤儿 key
     if (enabledModels && enabledModels.some(k => k.startsWith(`${provKey}/`))) {
@@ -4004,7 +4004,7 @@ function createProviderCard(provKey, provVal) {
     const apiKey = provVal.apiKey || '';
     if (!baseUrl) { addNotice('error', '请先填写 API 地址'); return; }
     fetchBtn.disabled = true; fetchStatusDiv.style.display = 'block'; fetchStatusDiv.textContent = '正在拉取...'; fetchStatusDiv.style.color = 'var(--text-muted)';
-    const result = await ompDesktop.fetchProviderModels(baseUrl, apiKey);
+    const result = await tiffaDesktop.fetchProviderModels(baseUrl, apiKey);
     fetchBtn.disabled = false;
     if (result.error) { fetchStatusDiv.textContent = '拉取失败: ' + result.error; fetchStatusDiv.style.color = 'var(--danger)'; return; }
     const models = result.models || [];
@@ -4152,7 +4152,7 @@ function editModelInline(container, provKey, idx, model, onDone) {
   btnRow.appendChild(saveBtn); btnRow.appendChild(cancelBtn); container.appendChild(btnRow);
 }
 
-// ── 供应商预设库（37 个预设，来自 omp 17.x 源码） ──
+// ── 供应商预设库（37 个预设，来自 Tiffa 17.x 源码） ──
 const PROVIDER_PRESETS = [
   // 热门
   { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', authUrl: 'https://platform.deepseek.com/api_keys', hint: 'sk-...', cat: '热门' },
@@ -4203,8 +4203,8 @@ let enabledModels = undefined; // undefined = 未配置白名单
 
 async function loadEnabledModels() {
   try {
-    const root = await ompDesktop.getRootPath();
-    const result = await ompDesktop.readFile(root + '\\data\\agent\\' + ENABLED_MODELS_FILE);
+    const root = await tiffaDesktop.getRootPath();
+    const result = await tiffaDesktop.readFile(root + '\\data\\agent\\' + ENABLED_MODELS_FILE);
     if (result && result.content) {
       const arr = JSON.parse(result.content);
       // 空数组等同于未配置白名单，避免误操作导致看不到任何模型
@@ -4215,8 +4215,8 @@ async function loadEnabledModels() {
 
 async function saveEnabledModels() {
   try {
-    const root = await ompDesktop.getRootPath();
-    await ompDesktop.writeFile(root + '\\data\\agent\\' + ENABLED_MODELS_FILE, JSON.stringify(enabledModels || []));
+    const root = await tiffaDesktop.getRootPath();
+    await tiffaDesktop.writeFile(root + '\\data\\agent\\' + ENABLED_MODELS_FILE, JSON.stringify(enabledModels || []));
   } catch {}
 }
 
@@ -4392,7 +4392,7 @@ function addProviderUI() {
       modal.querySelector('#btnCancel').addEventListener('click', close);
       modal.querySelector('#btnBack').addEventListener('click', () => { selectedPreset = null; render(); });
       modal.querySelector('#changePresetBtn').addEventListener('click', () => { selectedPreset = null; render(); });
-      if (preset && preset.authUrl) modal.querySelector('#authUrlBtn')?.addEventListener('click', () => ompDesktop.openExternal(preset.authUrl));
+      if (preset && preset.authUrl) modal.querySelector('#authUrlBtn')?.addEventListener('click', () => tiffaDesktop.openExternal(preset.authUrl));
 
       const saveFetchBtn = modal.querySelector('#btnSaveFetch');
       const saveOnlyBtn = modal.querySelector('#btnSaveOnly');
@@ -4424,7 +4424,7 @@ function addProviderUI() {
     const cfg = buildConfig();
     savedManualIds = manualIds.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
     try {
-      const result = await ompDesktop.writeOmpProvider(pid.trim(), cfg);
+      const result = await tiffaDesktop.writeTiffaProvider(pid.trim(), cfg);
       if (result.error) { addNotice('error', '写入失败: ' + result.error); return; }
       addNotice('success', `供应商 ${pid} 已保存，正在获取模型列表...`);
       step = 2;
@@ -4441,7 +4441,7 @@ function addProviderUI() {
   async function onSaveOnly() {
     const cfg = buildConfig();
     try {
-      const result = await ompDesktop.writeOmpProvider(pid.trim(), cfg);
+      const result = await tiffaDesktop.writeTiffaProvider(pid.trim(), cfg);
       if (result.error) { addNotice('error', '写入失败: ' + result.error); return; }
       // 手动 ID 直接入白名单
       const ids = manualIds.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
@@ -4463,7 +4463,7 @@ function addProviderUI() {
 
   function pollModels(providerId, attempt = 0) {
     polling = true;
-    ompDesktop.getModels().then(result => {
+    tiffaDesktop.getModels().then(result => {
       const list = (result && result.models ? result.models : []).filter(m => m.provider === providerId);
       if (list.length > 0) {
         discovered = list;
@@ -4617,7 +4617,7 @@ async function saveModelConfig() {
   });
   try {
     const yaml = serializeModelsYaml(modelsConfigData);
-    const result = await ompDesktop.writeModelsYml(yaml);
+    const result = await tiffaDesktop.writeModelsYml(yaml);
     if (result.success) { if (s) { s.textContent = '已保存'; s.className = 'config-status saved'; } }
     else { if (s) { s.textContent = '保存失败: ' + (result.error || ''); s.className = 'config-status error'; } }
   } catch (err) { if (s) { s.textContent = '保存失败: ' + err.message; s.className = 'config-status error'; } }
@@ -4625,7 +4625,7 @@ async function saveModelConfig() {
 }
 
 function serializeModelsYaml(data) {
-  const lines = ['# omp models.yml', ''];
+  const lines = ['# Tiffa models.yml', ''];
   if (!data || !data.providers) return lines.join('\n');
   lines.push('providers:');
   for (const [k, p] of Object.entries(data.providers)) {

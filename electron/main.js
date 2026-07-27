@@ -1,7 +1,7 @@
 /**
  * Tiffa Desktop - Electron Main Process
  *
- * Manages omp rpc-ui subprocess, IPC communication, and window lifecycle.
+ * Manages Tiffa rpc-ui subprocess, IPC communication, and window lifecycle.
  * Protocol: JSONL over stdin/stdout (one JSON object per line)
  */
 
@@ -25,7 +25,7 @@ if (argRootIdx >= 0 && process.argv[argRootIdx + 1]) {
 }
 const PORTABLE_ROOT = global.PORTABLE_ROOT;
 const BUN_EXE = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin', 'bun.exe');
-const OMP_CLI = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
+const TIFFA_CLI = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
 const EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'claude-mode-extension.ts');
 const DEFAULT_WORKSPACE_DIR = path.join(PORTABLE_ROOT, 'workspace');
 let currentWorkspaceDir = DEFAULT_WORKSPACE_DIR;
@@ -48,7 +48,7 @@ function _killTree(pid, sync = false) {
 }
 
 // ── UTF-8 环境变量注入（治理中文乱码） ──
-// 乱码根因：omp 内部 spawn bash/powershell 执行命令时，Windows 控制台默认
+// 乱码根因：Tiffa 内核 spawn bash/powershell 执行命令时，Windows 控制台默认
 // codepage 为 CP936（GBK），编码不一致 → 中文文件名/输出变成乱码。
 // 策略：尽可能把所有涉及 I/O 编码的运行时环境变量都切到 UTF-8。
 function _utf8Env() {
@@ -67,13 +67,13 @@ function _utf8Env() {
 
 // ── Global State ──
 let mainWindow = null;
-const MAX_INSTANCES = 8; // 最多同时运行的 omp 实例数（项目级 + 对话级共享）
+const MAX_INSTANCES = 8; // 最多同时运行的 Tiffa 实例数（项目级 + 对话级共享）
 
 // ═══════════════════════════════════════════════════════════════
-// OmpInstance: 单个 omp 子进程的完整生命周期管理
+// TiffaInstance: 单个 Tiffa 子进程的完整生命周期管理
 // ═══════════════════════════════════════════════════════════════
 
-class OmpInstance {
+class TiffaInstance {
   constructor(cwd, sessionId = null) {
     this.cwd = cwd;
     this.sessionId = sessionId;  // null = 项目级实例；UUID = 对话级实例
@@ -101,9 +101,9 @@ class OmpInstance {
     delete env.NODE_OPTIONS;
     delete env.ELECTRON_RUN_AS_NODE;
 
-    const args = [OMP_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH];
+    const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH];
 
-    console.log(`[OmpInstance] Starting omp cwd=${this.cwd}`, BUN_EXE, args.join(' '));
+    console.log(`[TiffaInstance] Starting Tiffa cwd=${this.cwd}`, BUN_EXE, args.join(' '));
 
     this.process = spawn(BUN_EXE, args, {
       cwd: this.cwd,
@@ -124,23 +124,23 @@ class OmpInstance {
         const event = JSON.parse(trimmed);
         this._handleEvent(event);
       } catch (e) {
-        console.warn(`[OmpInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
+        console.warn(`[TiffaInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
       }
     });
 
     this.process.stderr.on('data', (chunk) => {
       const text = chunk.toString('utf8').trim();
       if (text) {
-        console.log(`[omp:stderr:${this._shortCwd()}]`, text);
+        console.log(`[tiffa:stderr:${this._shortCwd()}]`, text);
       }
     });
 
     this.process.on('exit', (code, signal) => {
-      console.log(`[OmpInstance:${this._shortCwd()}] 已退出:`, { code, signal });
+      console.log(`[TiffaInstance:${this._shortCwd()}] 已退出:`, { code, signal });
 
       // 拒绝所有待定命令（避免 Promise 永久挂起）
       for (const [id, { reject }] of this.pendingCommands) {
-        reject(new Error(`omp process exited (code=${code}, signal=${signal})`));
+        reject(new Error(`Tiffa process exited (code=${code}, signal=${signal})`));
       }
       this.pendingCommands.clear();
 
@@ -148,12 +148,12 @@ class OmpInstance {
 
       // 通知渲染进程
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('omp:exited', { code, signal, cwd: this.cwd, sessionId: this.sessionId });
+        mainWindow.webContents.send('tiffa:exited', { code, signal, cwd: this.cwd, sessionId: this.sessionId });
       }
     });
 
     this.process.on('error', (err) => {
-      console.error(`[OmpInstance:${this._shortCwd()}] 启动失败:`, err);
+      console.error(`[TiffaInstance:${this._shortCwd()}] 启动失败:`, err);
       this.process = null;
     });
   }
@@ -169,14 +169,14 @@ class OmpInstance {
       this.agentRunning = false;
       return;
     }
-    console.log(`[OmpInstance:${this._shortCwd()}] forceKill (原因: ${reason})`);
+    console.log(`[TiffaInstance:${this._shortCwd()}] forceKill (原因: ${reason})`);
     _killTree(this.process.pid);
   }
 
   sendCommand(frame) {
     return new Promise((resolve, reject) => {
       if (!this.process || !this.process.stdin.writable) {
-        reject(new Error('omp process not running'));
+        reject(new Error('Tiffa process not running'));
         return;
       }
 
@@ -198,7 +198,7 @@ class OmpInstance {
 
   sendRaw(frame) {
     if (!this.process || !this.process.stdin.writable) {
-      console.error(`[OmpInstance:${this._shortCwd()}] omp 未运行，无法发送`);
+      console.error(`[TiffaInstance:${this._shortCwd()}] Tiffa 未运行，无法发送`);
       return;
     }
     const line = JSON.stringify(frame) + '\n';
@@ -213,7 +213,7 @@ class OmpInstance {
     if (event.type === 'ready') {
       this.ready = true;
       this.agentRunning = false;
-      console.log(`[OmpInstance:${this._shortCwd()}] 就绪`);
+      console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
     }
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
@@ -240,7 +240,7 @@ class OmpInstance {
     event._sessionId = this.sessionId;
 
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('omp:event', event);
+      mainWindow.webContents.send('tiffa:event', event);
     }
   }
 
@@ -261,13 +261,13 @@ class OmpInstance {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// OmpInstanceManager: 多实例管理器（懒启动 + LRU 淘汰）
+// TiffaInstanceManager: 多实例管理器（懒启动 + LRU 淘汰）
 // ═══════════════════════════════════════════════════════════════
 
-class OmpInstanceManager {
+class TiffaInstanceManager {
   constructor() {
-    this.instances = new Map(); // key: cwd#sessionId -> OmpInstance
-    this.spawning = new Map(); // key: cwd#sessionId -> Promise<OmpInstance>
+    this.instances = new Map(); // key: cwd#sessionId -> TiffaInstance
+    this.spawning = new Map(); // key: cwd#sessionId -> Promise<TiffaInstance>
     this.activeKey = null;     // 当前活跃实例的 key
     this.activeCwd = null;     // 当前活跃实例的 cwd（向后兼容）
   }
@@ -303,7 +303,7 @@ class OmpInstanceManager {
 
     // 创建新实例
     const spawnPromise = (async () => {
-      const inst = new OmpInstance(normalized, null);
+      const inst = new TiffaInstance(normalized, null);
       this.instances.set(key, inst);
       inst.start();
 
@@ -329,7 +329,7 @@ class OmpInstanceManager {
     }
   }
 
-  // 激活对话级实例（每个对话独立 omp 进程）
+  // 激活对话级实例（每个对话独立 Tiffa 进程）
   async activateSession(cwd, sessionId) {
     const normalized = path.resolve(cwd);
     const key = this._key(cwd, sessionId);
@@ -356,7 +356,7 @@ class OmpInstanceManager {
 
     // 创建新实例（对话级：带 sessionId）
     const spawnPromise = (async () => {
-      const inst = new OmpInstance(normalized, sessionId);
+      const inst = new TiffaInstance(normalized, sessionId);
       this.instances.set(key, inst);
       inst.start();
 
@@ -461,7 +461,7 @@ class OmpInstanceManager {
     }
 
     if (oldest) {
-      console.log(`[OmpManager] LRU 淘汰: ${oldest}`);
+      console.log(`[TiffaManager] LRU 淘汰: ${oldest}`);
       this.closeByKey(oldest);
     }
   }
@@ -485,7 +485,7 @@ class OmpInstanceManager {
 }
 
 // 全局实例管理器
-const ompManager = new OmpInstanceManager();
+const tiffaManager = new TiffaInstanceManager();
 
 // ── Window Creation ──
 
@@ -530,16 +530,16 @@ function createWindow() {
 
 function setupIpc() {
   // ── 多实例感知的辅助函数 ──
-  // 所有 omp 命令都路由到当前活跃实例
+  // 所有 Tiffa 命令都路由到当前活跃实例
 
   function _active() {
-    const inst = ompManager.getActive();
-    if (!inst) throw new Error('No active omp instance');
+    const inst = tiffaManager.getActive();
+    if (!inst) throw new Error('No active Tiffa instance');
     return inst;
   }
 
-  // omp commands
-  ipcMain.handle('omp:send', async (event, message, images) => {
+  // Tiffa commands
+  ipcMain.handle('tiffa:send', async (event, message, images) => {
     // /omfg 命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
     const omfgMatch = typeof message === 'string' && message.match(/^\/omfg\s*(.+)/);
     if (omfgMatch) {
@@ -621,46 +621,46 @@ function setupIpc() {
   });
 
   // 激活对话级实例（每对话独立进程）
-  ipcMain.handle('omp:activateSession', async (event, cwd, sessionId) => {
+  ipcMain.handle('tiffa:activateSession', async (event, cwd, sessionId) => {
     try {
       const normalized = path.resolve(cwd);
       ensureProjectInJson(normalized);
-      const result = await ompManager.activateSession(normalized, sessionId);
-      return { success: true, cwd: ompManager.activeCwd, sessionId, ready: result.ready };
+      const result = await tiffaManager.activateSession(normalized, sessionId);
+      return { success: true, cwd: tiffaManager.activeCwd, sessionId, ready: result.ready };
     } catch (err) {
       return { error: err.message };
     }
   });
 
   // 关闭对话级实例（关闭标签时释放进程）
-  ipcMain.handle('omp:closeSession', async (event, cwd, sessionId) => {
+  ipcMain.handle('tiffa:closeSession', async (event, cwd, sessionId) => {
     try {
-      const key = ompManager._key(cwd, sessionId);
-      ompManager.closeByKey(key);
+      const key = tiffaManager._key(cwd, sessionId);
+      tiffaManager.closeByKey(key);
       return { success: true };
     } catch (err) {
       return { error: err.message };
     }
   });
 
-  ipcMain.handle('omp:abort', async () => {
+  ipcMain.handle('tiffa:abort', async () => {
     _active().sendRaw({ type: 'abort' });
   });
 
-  ipcMain.handle('omp:setModel', async (event, provider, modelId) => {
+  ipcMain.handle('tiffa:setModel', async (event, provider, modelId) => {
     return _active().sendCommand({ type: 'set_model', provider, modelId });
   });
 
-  ipcMain.handle('omp:getModels', async () => {
+  ipcMain.handle('tiffa:getModels', async () => {
     return _active().sendCommand({ type: 'get_available_models' });
   });
 
-  ipcMain.handle('omp:isReady', async () => {
-    const inst = ompManager.getActive();
+  ipcMain.handle('tiffa:isReady', async () => {
+    const inst = tiffaManager.getActive();
     return inst ? inst.ready : false;
   });
 
-  ipcMain.handle('omp:diagnostics', async () => {
+  ipcMain.handle('tiffa:diagnostics', async () => {
     const inst = _active();
     if (!inst) return { error: 'no active instance' };
     return {
@@ -673,15 +673,15 @@ function setupIpc() {
     };
   });
 
-  ipcMain.handle('omp:getState', async () => {
+  ipcMain.handle('tiffa:getState', async () => {
     return _active().sendCommand({ type: 'get_state' });
   });
 
-  ipcMain.handle('omp:steer', async (event, message) => {
+  ipcMain.handle('tiffa:steer', async (event, message) => {
     _active().sendRaw({ type: 'steer', message });
   });
 
-  ipcMain.handle('omp:extensionResponse', async (event, id, value) => {
+  ipcMain.handle('tiffa:extensionResponse', async (event, id, value) => {
     const frame = { type: 'extension_ui_response', id };
     if (value && typeof value === 'object') {
       if ('cancelled' in value) frame.cancelled = true;
@@ -694,30 +694,30 @@ function setupIpc() {
     _active().sendRaw(frame);
   });
 
-  ipcMain.handle('omp:compact', async () => {
+  ipcMain.handle('tiffa:compact', async () => {
     return _active().sendCommand({ type: 'compact' });
   });
 
-  ipcMain.handle('omp:command', async (event, type, payload) => {
+  ipcMain.handle('tiffa:command', async (event, type, payload) => {
     const frame = { type, ...payload };
     return _active().sendCommand(frame);
   });
 
   // ── 多实例管理 IPC ──
-  ipcMain.handle('omp:activate', async (event, cwd) => {
+  ipcMain.handle('tiffa:activate', async (event, cwd) => {
     try {
       const normalized = path.resolve(cwd);
       // 确保项目注册到 projects.json
       ensureProjectInJson(normalized);
-      const result = await ompManager.activate(normalized);
-      return { success: true, cwd: ompManager.activeCwd, ready: result.ready };
+      const result = await tiffaManager.activate(normalized);
+      return { success: true, cwd: tiffaManager.activeCwd, ready: result.ready };
     } catch (err) {
       return { error: err.message };
     }
   });
 
-  ipcMain.handle('omp:instances', async () => {
-    return ompManager.getStatus();
+  ipcMain.handle('tiffa:instances', async () => {
+    return tiffaManager.getStatus();
   });
 
   // File system operations (for sidebar)
@@ -882,12 +882,12 @@ function setupIpc() {
   ipcMain.handle('models:restart', async () => {
     try {
       // 重启所有实例（模型配置变更后）
-      const cwds = [...ompManager.instances.keys()];
-      ompManager.closeAll();
+      const cwds = [...tiffaManager.instances.keys()];
+      tiffaManager.closeAll();
       await new Promise(resolve => setTimeout(resolve, 500));
       // 恢复之前的活跃实例
       for (const cwd of cwds) {
-        await ompManager.activate(cwd);
+        await tiffaManager.activate(cwd);
       }
       return { success: true };
     } catch (err) {
@@ -948,12 +948,12 @@ function setupIpc() {
 
   // ── Config.yml approval mode ──
   const CONFIG_YML = path.join(PORTABLE_ROOT, 'data', 'agent', 'config.yml');
-  // 前端模式名 → omp 配置值
-  const OMP_APPROVAL_MODE_MAP = { normal: 'always-ask', auto: 'write', yolo: 'yolo' };
+  // 前端模式名 → 内核配置值
+  const TIFFA_APPROVAL_MODE_MAP = { normal: 'always-ask', auto: 'write', yolo: 'yolo' };
 
   ipcMain.handle('config:writeApprovalMode', async (event, tiffaMode) => {
     try {
-      const ompMode = OMP_APPROVAL_MODE_MAP[tiffaMode] || 'yolo';
+      const agentMode = TIFFA_APPROVAL_MODE_MAP[tiffaMode] || 'yolo';
       let doc;
       if (fs.existsSync(CONFIG_YML)) {
         const raw = fs.readFileSync(CONFIG_YML, 'utf8');
@@ -962,9 +962,9 @@ function setupIpc() {
         doc = new Document();
       }
       doc.set('tools', doc.get('tools') || doc.createNode({}));
-      doc.get('tools').set('approvalMode', ompMode);
+      doc.get('tools').set('approvalMode', agentMode);
       fs.writeFileSync(CONFIG_YML, doc.toString(), 'utf8');
-      return { success: true, ompMode };
+      return { success: true, agentMode };
     } catch (err) {
       return { error: err.message };
     }
@@ -1014,8 +1014,8 @@ function setupIpc() {
       // 注册到 projects.json
       ensureProjectInJson(resolved);
       // 激活（懒启动或复用）
-      await ompManager.activate(resolved);
-      return { success: true, cwd: ompManager.activeCwd };
+      await tiffaManager.activate(resolved);
+      return { success: true, cwd: tiffaManager.activeCwd };
     } catch (err) {
       return { error: err.message };
     }
@@ -1177,26 +1177,26 @@ function setupIpc() {
     return valid;
   }
 
-  // Encode cwd path to omp session dir name
+  // Encode cwd path to Tiffa session dir name
   function encodeSessionDirName(cwdPath) {
-    // omp 的编码规则 (cli.js WR5/d46):
+    // Tiffa 的编码规则 (cli.js WR5/d46):
     //   path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")
     //   然后首尾加 -- 
-    // G:\oh-my-pi\workspace → --G--oh-my-pi-workspace--
+    // G:\Tiffa\workspace → --G--Tiffa-workspace--
     const resolved = path.resolve(cwdPath);
     const stripped = resolved.replace(/^[/\\]/, '');
     const encoded = stripped.replace(/[/\\:]/g, '-');
     return '--' + encoded + '--';
   }
 
-  // Decode omp session dir name back to cwd path
-  // NOTE: omp 的编码 replace(/[/\\:]/g, "-") 是有损的，
+  // Decode Tiffa session dir name back to cwd path
+  // NOTE: Tiffa 的编码 replace(/[/\\:]/g, "-") 是有损的，
   // 目录名中的 - 和路径分隔符编码后的 - 无法区分。
   // 可靠的 cwd 来源是 JSONL 文件中的 cwd 字段。
   // 此函数仅作为 fallback 使用。
   function decodeSessionDirName(dirName) {
     if (!dirName.startsWith('--') || !dirName.endsWith('--')) return dirName;
-    const inner = dirName.slice(2, -2); // e.g. "G--oh-my-pi-workspace"
+    const inner = dirName.slice(2, -2); // e.g. "G--Tiffa-workspace"
     // Windows 盘符格式: X--rest (X 是盘符，后面两个 - 分别是 : 和 \)
     if (/^[A-Z]--/.test(inner)) {
       const drive = inner[0];
@@ -1304,9 +1304,9 @@ function setupIpc() {
   // 启动时路径迁移：修复换电脑后盘符/路径变化导致的数据丢失
   // ═══════════════════════════════════════════════════════════
   //
-  // 场景：用户把 omp 便携包从 G:\oh-my-pi\ 拷到新电脑的 D:\oh-my-pi\
-  // 问题1: session 目录名编码了旧路径 --G--oh-my-pi-workspace-omp调试--
-  // 问题2: projects.json 中的 cwd 是旧绝对路径 G:\oh-my-pi\workspace\omp调试
+  // 场景：用户把 Tiffa 便携包从 G:\Tiffa\ 拷到新电脑的 D:\Tiffa\
+  // 问题1: session 目录名编码了旧路径 --G--Tiffa-workspace-omp调试--
+  // 问题2: projects.json 中的 cwd 是旧绝对路径 G:\Tiffa\workspace\omp调试
   //
   // 解决：
   // 1. 扫描 sessions 目录找"孤儿"（不在 projects.json 中的旧目录）
@@ -1326,8 +1326,8 @@ function setupIpc() {
     for (const proj of projects) {
       const resolved = path.resolve(proj.cwd);
       // 检查 cwd 是否指向当前 PORTABLE_ROOT 的 workspace
-      // 如果 projects.json 里写的是 G:\oh-my-pi\workspace\xxx，但当前 PORTABLE_ROOT 是 D:\oh-my-pi
-      // 则修正为 D:\oh-my-pi\workspace\xxx
+      // 如果 projects.json 里写的是 G:\Tiffa\workspace\xxx，但当前 PORTABLE_ROOT 是 D:\Tiffa
+      // 则修正为 D:\Tiffa\workspace\xxx
       const workspaceSuffix = extractWorkspaceSuffix(resolved);
       if (workspaceSuffix) {
         const newCwd = path.join(currentWorkspace, workspaceSuffix);
@@ -1423,14 +1423,21 @@ function setupIpc() {
 
   /**
    * 从绝对路径中提取 workspace/ 之后的相对路径后缀。
-   * 例如: G:\oh-my-pi\workspace\omp调试 → omp调试
-   *       E:\oh-my-pi\workspace\ppt制作\sub → ppt制作\sub
-   *       G:\some\other\path → null（不在任何 oh-my-pi/workspace 下）
+   * 品牌无关：优先按当前 PORTABLE_ROOT 下的 workspace 匹配（根目录改名也兼容），
+   * 并兼容旧包曾放到其他盘符的迁移场景（任意 .../workspace/ 都提取后缀）。
+   * 例如: E:\Tiffa\workspace\omp调试 → omp调试
+   *       E:\OldPackage\workspace\ppt制作\sub → ppt制作\sub
+   *       G:\some\other\path → null（不在任何 workspace 下）
    */
   function extractWorkspaceSuffix(absPath) {
     const normalized = absPath.replace(/\\/g, '/');
-    // 匹配任意盘符/根路径下的 oh-my-pi/workspace/... 模式
-    const match = normalized.match(/\/oh-my-pi\/workspace\/(.+)$/i);
+    // 1) 当前 PORTABLE_ROOT 下的 workspace（推荐，根目录叫什么都行）
+    const workspaceRoot = path.join(PORTABLE_ROOT, 'workspace').replace(/\\/g, '/');
+    if (normalized.toLowerCase().startsWith(workspaceRoot.toLowerCase() + '/')) {
+      return normalized.slice(workspaceRoot.length + 1).replace(/\//g, path.sep);
+    }
+    // 2) 兼容迁移：旧包挪到别的盘符，按 .../workspace/ 提取相对后缀
+    const match = normalized.match(/\/workspace\/(.+)$/i);
     if (match) return match[1].replace(/\//g, path.sep);
     return null;
   }
@@ -1769,10 +1776,10 @@ function setupIpc() {
         writeProjectsJson(filtered);
       }
 
-      // 先关闭该项目的 omp 实例（释放文件锁，否则 Windows 上 rmdir 会 EBUSY）
+      // 先关闭该项目的 Tiffa 实例（释放文件锁，否则 Windows 上 rmdir 会 EBUSY）
       if (project && project.cwd) {
         const projectCwd = path.resolve(project.cwd);
-        ompManager.close(projectCwd);
+        tiffaManager.close(projectCwd);
       }
 
       // 物理删除会话目录
@@ -2070,8 +2077,8 @@ function setupIpc() {
 app.whenReady().then(() => {
   setupIpc();
   createWindow();
-  // 懒启动：不在此处启动 omp，等前端 loadProjects 切换项目时再 activate
-  //（此处不再 activate 默认工作区，避免启动时创建两个 omp 实例）
+  // 懒启动：不在此处启动 Tiffa，等前端 loadProjects 切换项目时再 activate
+  //（此处不再 activate 默认工作区，避免启动时创建两个 Tiffa 实例）
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2081,13 +2088,13 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  ompManager.killAll();
+  tiffaManager.killAll();
   app.quit();
 });
 
 app.on('before-quit', () => {
   // 同步杀所有进程（app 退出路径必须同步等进程死透）
-  for (const inst of ompManager.instances.values()) {
+  for (const inst of tiffaManager.instances.values()) {
     if (inst.process) {
       try {
         inst.process.stdin.write(JSON.stringify({ type: 'abort' }) + '\n');
@@ -2097,6 +2104,6 @@ app.on('before-quit', () => {
   }
   // 给 2 秒时间优雅退出
   setTimeout(() => {
-    ompManager.killAll();
+    tiffaManager.killAll();
   }, 2000);
 });

@@ -21,26 +21,26 @@ marked.setOptions({
   gfm: true,
 });
 
-contextBridge.exposeInMainWorld('ompDesktop', {
-  // ── omp 代理命令 ──
-  send: (message, images) => ipcRenderer.invoke('omp:send', message, images),
-  abort: () => ipcRenderer.invoke('omp:abort'),
-  setModel: (provider, modelId) => ipcRenderer.invoke('omp:setModel', provider, modelId),
-  getModels: () => ipcRenderer.invoke('omp:getModels'),
-  getState: () => ipcRenderer.invoke('omp:getState'),
-  isReady: () => ipcRenderer.invoke('omp:isReady'),
-  diagnostics: () => ipcRenderer.invoke('omp:diagnostics'),
-  steer: (message) => ipcRenderer.invoke('omp:steer', message),
-  extensionResponse: (id, value) => ipcRenderer.invoke('omp:extensionResponse', id, value),
-  compact: () => ipcRenderer.invoke('omp:compact'),
-  command: (type, payload) => ipcRenderer.invoke('omp:command', type, payload),
+contextBridge.exposeInMainWorld('tiffaDesktop', {
+  // ── Tiffa 代理命令 ──
+  send: (message, images) => ipcRenderer.invoke('tiffa:send', message, images),
+  abort: () => ipcRenderer.invoke('tiffa:abort'),
+  setModel: (provider, modelId) => ipcRenderer.invoke('tiffa:setModel', provider, modelId),
+  getModels: () => ipcRenderer.invoke('tiffa:getModels'),
+  getState: () => ipcRenderer.invoke('tiffa:getState'),
+  isReady: () => ipcRenderer.invoke('tiffa:isReady'),
+  diagnostics: () => ipcRenderer.invoke('tiffa:diagnostics'),
+  steer: (message) => ipcRenderer.invoke('tiffa:steer', message),
+  extensionResponse: (id, value) => ipcRenderer.invoke('tiffa:extensionResponse', id, value),
+  compact: () => ipcRenderer.invoke('tiffa:compact'),
+  command: (type, payload) => ipcRenderer.invoke('tiffa:command', type, payload),
 
   // ── 事件监听 ──
   onEvent: (callback) => {
-    ipcRenderer.on('omp:event', (event, data) => callback(data));
+    ipcRenderer.on('tiffa:event', (event, data) => callback(data));
   },
   onExited: (callback) => {
-    ipcRenderer.on('omp:exited', (event, data) => callback(data));
+    ipcRenderer.on('tiffa:exited', (event, data) => callback(data));
   },
   // ── 文件系统 ──
   listDir: (dirPath) => ipcRenderer.invoke('fs:listDir', dirPath),
@@ -81,9 +81,9 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   // ── 模型配置 ──
   readModelsYml: () => ipcRenderer.invoke('models:read'),
   writeModelsYml: (content) => ipcRenderer.invoke('models:write', content),
-  restartOmp: () => ipcRenderer.invoke('models:restart'),
-  writeOmpProvider: (providerId, cfg) => ipcRenderer.invoke('models:writeProvider', providerId, cfg),
-  deleteOmpProvider: (providerId) => ipcRenderer.invoke('models:deleteProvider', providerId),
+  restartTiffa: () => ipcRenderer.invoke('models:restart'),
+  writeTiffaProvider: (providerId, cfg) => ipcRenderer.invoke('models:writeProvider', providerId, cfg),
+  deleteTiffaProvider: (providerId) => ipcRenderer.invoke('models:deleteProvider', providerId),
 
   // ── 配置写入 ──
   writeApprovalMode: (tiffaMode) => ipcRenderer.invoke('config:writeApprovalMode', tiffaMode),
@@ -93,10 +93,10 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   changeWorkspace: (newCwd) => ipcRenderer.invoke('workspace:change', newCwd),
 
   // ── 多实例管理 ──
-  activateInstance: (cwd) => ipcRenderer.invoke('omp:activate', cwd),
-  activateSession: (cwd, sessionId) => ipcRenderer.invoke('omp:activateSession', cwd, sessionId),
-  closeSession: (cwd, sessionId) => ipcRenderer.invoke('omp:closeSession', cwd, sessionId),
-  getInstances: () => ipcRenderer.invoke('omp:instances'),
+  activateInstance: (cwd) => ipcRenderer.invoke('tiffa:activate', cwd),
+  activateSession: (cwd, sessionId) => ipcRenderer.invoke('tiffa:activateSession', cwd, sessionId),
+  closeSession: (cwd, sessionId) => ipcRenderer.invoke('tiffa:closeSession', cwd, sessionId),
+  getInstances: () => ipcRenderer.invoke('tiffa:instances'),
 
   // ── XML 翻译开关 ──
   getXmlTranslationStatus: () => ipcRenderer.invoke('xml-translation:status'),

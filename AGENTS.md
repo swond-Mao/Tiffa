@@ -2,16 +2,16 @@
 
 ## 项目概述
 
-oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v4.0) + Electron 桌面前端 (v1.5)。
+Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，搭载 Claude 化扩展 (v4.0) + Electron 桌面前端 (v1.5)。
 
-**v4.0 核心理念**：从"补完 omp"变成"搭 omp 的车"。扩展只保留 omp 原生不覆盖的功能，其余全部交给 omp。
+**v4.0 核心理念**：从"补完内核"变成"搭内核的车"。扩展只保留内核原生不覆盖的功能，其余全部交给内核。
 
 ## 关键路径
 
 | 路径 | 说明 |
 |------|------|
-| `G:\oh-my-pi\` | 便携包根目录 |
-| `npm-global\node_modules\@oh-my-pi\pi-coding-agent\` | omp 核心 (v17.0.7) |
+| `G:\Tiffa\` | 便携包根目录 |
+| `npm-global\node_modules\@oh-my-pi\pi-coding-agent\` | Tiffa 内核 (v17.0.7) |
 | `npm-global\node_modules\bun\bin\bun.exe` | Bun 运行时 (v1.3.14) |
 | `python\python.exe` | Python 解释器 |
 | `node\node.exe` | Node.js 运行时 |
@@ -21,17 +21,17 @@ oh-my-tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助�
 | `plugins\claude-mode-extension.ts` | Claude 化扩展 (v4.0, 482 行) |
 | `skills\` | 专业技能目录 (18 个 skill) |
 | `workspace\` | 工作区根目录 |
-| `omp-desktop.exe` | 桌面启动器 (C# winexe) |
+| `tiffa-desktop.exe` | 桌面启动器 (C# winexe) |
 
 ## 启动方式
 
 | 方式 | 命令/文件 | 说明 |
 |------|---------|------|
-| 桌面启动器 | `omp-desktop.exe` | 双击启动 Electron GUI，无控制台窗口 |
-| VBS 启动器 | `omp-desktop.vbs` | 双击启动 Electron GUI（无编译依赖） |
+| 桌面启动器 | `tiffa-desktop.exe` | 双击启动 Electron GUI，无控制台窗口 |
+| VBS 启动器 | `tiffa-desktop.vbs` | 双击启动 Electron GUI（无编译依赖） |
 | 批处理启动 | `start-desktop.bat` | 带 --portable-root 参数启动 Electron |
-| TUI 模式 | `start-omp.bat --tui` | 终端交互模式 |
-| WebUI 模式 | `start-omp.bat --web` | RPC-UI JSON 事件流 |
+| TUI 模式 | `start-tiffa.bat --tui` | 终端交互模式 |
+| WebUI 模式 | `start-tiffa.bat --web` | RPC-UI JSON 事件流 |
 
 ## 模型配置
 
@@ -159,7 +159,7 @@ Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生�
 
 | 文件 | 说明 |
 |------|------|
-| `electron/main.js` (~1789 行) | 主进程：OmpInstanceManager + IPC handler + 窗口管理 + /omfg 拦截 |
+| `electron/main.js` (~1789 行) | 主进程：TiffaInstanceManager + IPC handler + 窗口管理 + /omfg 拦截 |
 | `electron/preload.js` (~133 行) | contextBridge + marked + hljs + IPC 桥接 |
 | `electron/renderer/index.html` | 主界面 HTML |
 | `electron/renderer/styles.css` (~2846 行) | HSL Token 主题系统 + 全组件样式 |
@@ -173,7 +173,7 @@ Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生�
 - **架构**：`themes.js` 包含预设数据 + 注入引擎，通过 JS 动态写 `<style>` 到 `:root`
 - **颜色格式**：HSL 不带 `hsl()` 包装（如 `210 20% 18%`），CSS 中用 `hsl(var(--bg-200))`
 
-### OmpInstanceManager — 多实例管理
+### TiffaInstanceManager — 多实例管理
 
 | 特性 | 值 |
 |------|---|
@@ -186,7 +186,7 @@ Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生�
 
 ### IPC Handler (37 个)
 
-**Omp 管理 (12)**：omp:send, omp:abort, omp:setModel, omp:getModels, omp:isReady, omp:getState, omp:steer, omp:extensionResponse, omp:compact, omp:command, omp:activate, omp:instances
+**Tiffa 管理 (12)**：tiffa:send, tiffa:abort, tiffa:setModel, tiffa:getModels, tiffa:isReady, tiffa:getState, tiffa:steer, tiffa:extensionResponse, tiffa:compact, tiffa:command, tiffa:activate, tiffa:instances
 
 **文件系统 (4)**：fs:listDir, fs:readFile, fs:writeFile, fs:readImage
 
@@ -207,7 +207,7 @@ Electron 主进程拦截 `/omfg <complaint>` 命令，替换为 TTSR 规则生�
 
 ## Skills（专业技能，18 个）
 
-Skills 目录：`G:\oh-my-pi\skills\`
+Skills 目录：`G:\Tiffa\skills\`
 
 | Skill | 说明 |
 |-------|------|
@@ -241,7 +241,7 @@ Skills 目录：`G:\oh-my-pi\skills\`
 | 写实/场景/静物/自由尺寸 | `klein` | `python comfy.py klein "<提示词>" --size 832x1216 --seed 0 --steps 8 --name klein` |
 | 改图/P图/编辑/换背景 | `edit` | `python comfy.py edit "<本地图片路径>" "<编辑指令>" --name edit` |
 
-- **路径**：`G:\oh-my-pi\skills\comfyui-image-gen\comfy.py`
+- **路径**：`G:\Tiffa\skills\comfyui-image-gen\comfy.py`
 - **提示词扩写**：用户给简短需求后，先扩写成详细中文提示词再传给管线
 - **长宽比**：竖图默认 portrait，横图用 landscape
 - **输出**：命令最后打印 `RESULT:[路径]`，报告纯路径
@@ -289,8 +289,8 @@ Skills 目录：`G:\oh-my-pi\skills\`
 | 确定性注入 | PROJECT.md → before_agent_start hook | 项目级规范/决策，每会话开头 |
 | 断片恢复 | gap-fill → compacting hook 立即注入 | 压缩时提取要点，直接返回 context |
 | 全量积累 | mnemopi global 库 autoRetain | 所有对话语义存储，manual recall 时可跨项目查询 |
-| 全局铁律 | MEMORY.md（omp 原生加载） | 跨项目通用事实，控制在 30 条以内 |
-| 项目规范 | AGENTS.md（omp 原生加载） | 当前项目架构/约束 |
+| 全局铁律 | MEMORY.md（内核原生加载） | 跨项目通用事实，控制在 30 条以内 |
+| 项目规范 | AGENTS.md（内核原生加载） | 当前项目架构/约束 |
 
 ### gap-fill（session.compacting hook）
 

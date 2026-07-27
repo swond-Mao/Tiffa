@@ -1,5 +1,5 @@
 ﻿# Tiffa 一键安装脚本 (v1.0)
-# 安装所有运行时依赖: Bun + omp + Electron
+# 安装所有运行时依赖: Bun + Tiffa 内核 + Electron
 # 双击 install.bat 或直接 powershell -File install.ps1
 
 $ErrorActionPreference = "Stop"
@@ -14,7 +14,7 @@ function Write-HINT($msg)       { Write-Host "    $msg" -ForegroundColor DarkGra
 Write-Host ""
 Write-Host "  ======================================" -ForegroundColor White
 Write-Host "   Tiffa 安装向导" -ForegroundColor White
-Write-Host "   oh-my-pi 便携式 AI 编程助手" -ForegroundColor White
+Write-Host "   Tiffa 便携式 AI 编程助手" -ForegroundColor White
 Write-Host "  ======================================" -ForegroundColor White
 
 # --- Step 1: Node.js ---
@@ -55,23 +55,23 @@ if (Test-Path $bunExe) {
     Pop-Location
 }
 
-# --- Step 3: omp ---
-Write-Step 3 "检查 omp 核心"
-$ompCli = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"
-if (Test-Path $ompCli) {
+# --- Step 3: Tiffa 内核 ---
+Write-Step 3 "检查 Tiffa 内核"
+$tiffaCli = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"
+if (Test-Path $tiffaCli) {
     $pkgJson = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent\package.json"
-    $ompVer = (Get-Content $pkgJson -Raw | ConvertFrom-Json).version
-    Write-OK "@oh-my-pi/pi-coding-agent v$ompVer"
+    $tiffaVer = (Get-Content $pkgJson -Raw | ConvertFrom-Json).version
+    Write-OK "@oh-my-pi/pi-coding-agent v$tiffaVer"
 } else {
-    Write-INFO "omp 核心未安装, 正在安装 ..."
+    Write-INFO "Tiffa 内核未安装, 正在安装 ..."
     $npmGlobalDir = Join-Path $ROOT "npm-global"
     Push-Location $npmGlobalDir
     try {
         & npm install @oh-my-pi/pi-coding-agent --save --loglevel=error 2>&1 | ForEach-Object { if ($_ -match "^(ERR|error)") { Write-Host "    $_" } }
-        if (-not (Test-Path $ompCli)) { throw "omp install failed" }
-        Write-OK "omp 核心安装成功"
+        if (-not (Test-Path $tiffaCli)) { throw "Tiffa 内核 install failed" }
+        Write-OK "Tiffa 内核安装成功"
     } catch {
-        Write-FAIL "omp 核心安装失败, 可能是网络问题"
+        Write-FAIL "Tiffa 内核安装失败, 可能是网络问题"
         Write-HINT "尝试换淘宝镜像: npm config set registry https://registry.npmmirror.com"
         Read-Host "按 Enter 退出"; Pop-Location; exit 1
     }
@@ -115,7 +115,7 @@ if (Test-Path $modelsYml) {
     Copy-Item $modelsExample $modelsYml
     Write-INFO "已从模板创建 models.yml"
 } else {
-    Write-INFO "未找到 models.yml 模板, 首次启动时 omp 会自动创建"
+    Write-INFO "未找到 models.yml 模板, 首次启动时 Tiffa 会自动创建"
 }
 
 $hasKey = $false
@@ -158,7 +158,7 @@ if (-not $hasKey) {
 
 Write-Host ""
 Write-Host "  启动方式:" -ForegroundColor White
-Write-Host "    TUI 终端模式:  双击 start-omp.bat" -ForegroundColor White
+Write-Host "    TUI 终端模式:  双击 start-tiffa.bat" -ForegroundColor White
 Write-Host "    桌面应用模式:  双击 start-desktop.bat" -ForegroundColor White
 Write-Host ""
 Read-Host "按 Enter 退出"

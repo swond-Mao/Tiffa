@@ -1,23 +1,23 @@
 /**
- * claude-mode-extension.ts - omp 扩展 v6.0
+ * claude-mode-extension.ts - Tiffa 扩展 v6.0
  *
- * 精简理念：搭 omp 的车，不造 omp 的轮
+ * 精简理念：搭 Tiffa 的车，不造 Tiffa 的轮
  *
- * 已删除（omp 原生已覆盖 / 不再需要）：
- * - AGENTS.md 注入 -> omp 自动从 CWD 查找注入
+ * 已删除（Tiffa 内核原生已覆盖 / 不再需要）：
+ * - AGENTS.md 注入 -> Tiffa 内核自动从 CWD 查找注入
  * - MEMORY.md 注入 -> Mnemopi autoRecall
  * - PROJECT.md 注入 -> Mnemopi per-project 隔离
  * - 违反检测（4 个检测器） -> TTSR 实时拦截
- * - 权限契约审批 -> omp 内置审批
+ * - 权限契约审批 -> Tiffa 内核内置审批
  * - XML 工具调用纠正 -> TTSR no-xml-toolcall.md
  * - /omfg 命令 -> Electron 主进程已拦截
  * - memory_write 工具 -> Mnemopi 原生 retain
  * - memory_search 工具 -> Mnemopi 原生 recall
- * - skill 工具 -> omp 原生 manage_skill + managed-skills 目录
+ * - skill 工具 -> Tiffa 内核原生 manage_skill + managed-skills 目录
  * - gap-fill 断片补救 -> Mnemopi autoRecall 覆盖
  * - constraints.md 注入 -> TTSR 规则 + AGENTS.md 覆盖
  *
- * 保留（omp 不覆盖）：
+ * 保留（Tiffa 内核不覆盖）：
  * - 危险路径/配置文件/扩展自身 拦截
  * - .env / 密钥文件读取拦截
  * - 堆栈/路径泄露拦截
