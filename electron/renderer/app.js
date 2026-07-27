@@ -1167,6 +1167,31 @@ async function selectProject(dirName) {
       renderSessionTabs();
 
       const doLoad = async () => {
+        // Bug Fix 3: 优先使用缓存（切换项目后能快速恢复对话内容）
+        const cached = state.sessionMessageCache.get(latest.path);
+        if (cached) {
+          dom.messages.innerHTML = cached.html;
+          dom.messages.scrollTop = cached.scrollPos;
+          dom.messages.querySelectorAll('pre').forEach(pre => {
+            pre.dataset.enhanced = '';
+          });
+          enhanceCodeBlocks(dom.messages);
+          lazyHighlightCodeBlocks(dom.messages);
+          // 通知 omp 切换会话上下文
+          ompDesktop.switchSession(latest.path).then(() => {
+            const saved = state.sessionModelMap[latest.path];
+            if (saved && saved.provider && saved.modelId) {
+              try {
+                ompDesktop.setModel(saved.provider, saved.modelId);
+                state.currentModel = saved.modelId;
+                state.currentProvider = saved.provider;
+                dom.currentModel.textContent = saved.modelId;
+              } catch {}
+            }
+          }).catch(() => {});
+          return;
+        }
+
         if (state.agentRunning) {
           // agent 正在跑：加载历史 + 创建接续元素，不 switchSession（避免干扰运行中的任务）
           try {
@@ -1235,7 +1260,7 @@ async function loadSessions(dirName) {
 // ── History Panel (左侧项目栏下方的可折叠历史对话区域) ──
 
 // 事件委托只绑一次
-let _historyPanelBound = false;
+let _historyPanelBound = false;  // 已废弃，保留避免引用错误
 
 function renderHistoryPanel() {
   const container = document.getElementById('historyPanel');
@@ -1288,9 +1313,9 @@ function renderHistoryPanel() {
     });
   }
 
-  // 事件委托只绑一次
-  if (_historyPanelBound) return;
-  _historyPanelBound = true;
+  // 事件绑定（每次重新绑，因为 innerHTML 重建了 container）
+  container.onclick = null;  // 清除旧事件
+  container.oncontextmenu = null;
 
   container.addEventListener('click', async (e) => {
     // 用 closest 查找按钮（SVG 子元素点击时 target 不是 button 本身）
@@ -1364,6 +1389,19 @@ function renderHistoryPanel() {
         switchToSession(sessionPath);
         renderHistoryPanel();
       }
+    }
+  });
+
+  // 历史面板右键菜单
+  container.addEventListener('contextmenu', (e) => {
+    const itemInfo = e.target.closest('.history-item-info');
+    if (!itemInfo) return;
+    e.preventDefault();
+    const sessionPath = itemInfo.dataset.path;
+    if (!sessionPath) return;
+    const session = state.sessions.find(s => s.path === sessionPath);
+    if (session) {
+      showSessionTabContextMenu(e, session);
     }
   });
 }
@@ -2630,6 +2668,24 @@ async function sendMessage() {
   const message = dom.input.value.trim();
   if (!message && state.pendingImages.length === 0) return;
   if (!state.ompReady) { addNotice('warning', 'omp 尚未就绪'); return; }
+
+  // Bug Fix 1: 如果当前没有活动会话，自动创建一个新对话
+  if (!state.activeSessionPath) {
+    const tempPath = '__new__' + Date.now();
+    const newSession = {
+      path: tempPath,
+      title: '新对话',
+      firstMessage: message.substring(0, 30),
+      messageCount: 0,
+    };
+    state.sessions.push(newSession);
+    state.activeSessionPath = tempPath;
+    state.activeSessionPaths.add(tempPath);
+    state.pendingNewSession = true;
+    state._newSessionSwitched = false;
+    renderSessionTabs();
+  }
+
   // Clear welcome screen on first message
   const welcome = dom.messages.querySelector('.welcome-screen');
   if (welcome) welcome.remove();
@@ -3033,6 +3089,9 @@ function showSessionTabContextMenu(e, session) {
   const menu = document.createElement('div');
   menu.className = 'context-menu';
   menu.innerHTML = `
+    <div class="context-menu-item" data-action="rename">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>重命名
+    </div>
     <div class="context-menu-item" data-action="branch">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>分支
     </div>
@@ -3053,7 +3112,7 @@ function showSessionTabContextMenu(e, session) {
   // 定位
   let x = e.clientX;
   let y = e.clientY;
-  const menuWidth = 160, menuHeight = 160;
+  const menuWidth = 160, menuHeight = 220;
   if (x + menuWidth > window.innerWidth) x = window.innerWidth - menuWidth - 4;
   if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 4;
   menu.style.left = x + 'px';
@@ -3065,8 +3124,13 @@ function showSessionTabContextMenu(e, session) {
     const item = ev.target.closest('.context-menu-item');
     if (!item) return;
     const action = item.dataset.action;
+    console.log('[DEBUG] 右键菜单点击:', action, session.path);
     closeContextMenu();
-    if (action === 'branch') await branchSession(session);
+    if (action === 'rename') {
+      console.log('[DEBUG] 调用 renameSession');
+      await renameSession(session);
+    }
+    else if (action === 'branch') await branchSession(session);
     else if (action === 'export-html') await exportSessionHtml(session);
     else if (action === 'archive') await archiveSessionFromTab(session);
     else if (action === 'delete') await deleteSessionFromTab(session);
@@ -3120,6 +3184,35 @@ async function deleteSessionFromTab(session) {
     updateInputState();
   } else {
     addNotice('error', `删除失败: ${result.error || '未知错误'}`);
+  }
+}
+
+async function renameSession(session) {
+  if (!session || !session.path) return;
+  const currentTitle = session.title || session.firstMessage || '新对话';
+  const newTitle = await showModalInput('请输入新的对话名称：', currentTitle);
+  if (newTitle === null) return;  // 用户取消
+  const trimmedTitle = newTitle.trim();
+  if (!trimmedTitle) {
+    addNotice('warning', '对话名称不能为空');
+    return;
+  }
+  // __new__ 临时会话还没写盘，不调用后端
+  if (session.path.startsWith('__new__')) {
+    session.title = trimmedTitle;
+    session.firstMessage = trimmedTitle.substring(0, 30);
+    renderSessionTabs();
+    renderHistoryPanel();
+    return;
+  }
+  const result = await ompDesktop.renameSession(session.path, trimmedTitle);
+  if (result.success) {
+    session.title = trimmedTitle;
+    renderSessionTabs();
+    renderHistoryPanel();
+    addNotice('success', '对话已重命名');
+  } else {
+    addNotice('error', `重命名失败: ${result.error || '未知错误'}`);
   }
 }
 

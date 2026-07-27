@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('ompDesktop', {
   restoreProject: (dirName) => ipcRenderer.invoke('sessions:restoreProject', dirName),
   archiveSession: (sessionPath) => ipcRenderer.invoke('sessions:archiveSession', sessionPath),
   deleteSession: (sessionPath) => ipcRenderer.invoke('sessions:deleteSession', sessionPath),
+  renameSession: (sessionPath, newTitle) => ipcRenderer.invoke('sessions:rename', sessionPath, newTitle),
   listArchivedSessions: (projectDirName) => ipcRenderer.invoke('sessions:listArchivedSessions', projectDirName),
   restoreSession: (sessionPath) => ipcRenderer.invoke('sessions:restoreSession', sessionPath),
   getUserEntries: (sessionPath) => ipcRenderer.invoke('sessions:getUserEntries', sessionPath),

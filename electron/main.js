@@ -1795,6 +1795,37 @@ function setupIpc() {
     }
   });
 
+  // ── 重命名会话：修改 jsonl 文件中的 title ──
+  ipcMain.handle('sessions:rename', async (event, sessionPath, newTitle) => {
+    try {
+      const resolved = path.resolve(sessionPath);
+      if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) {
+        return { error: 'Session file not found' };
+      }
+      const text = fs.readFileSync(resolved, 'utf8');
+      const firstNewline = text.indexOf('\n');
+      if (firstNewline < 0) {
+        return { error: 'Invalid session file' };
+      }
+      const firstLine = text.substring(0, firstNewline);
+      let header;
+      try {
+        header = JSON.parse(firstLine);
+      } catch {
+        return { error: 'Invalid session header JSON' };
+      }
+      header.title = newTitle;
+      const newFirstLine = JSON.stringify(header) + '\n';
+      const newText = newFirstLine + text.substring(firstNewline + 1);
+      fs.writeFileSync(resolved, newText, 'utf8');
+      return { success: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ── 列出归档的会话（单会话级别）
+
   // ── 列出归档的会话（单会话级别） ──
   ipcMain.handle('sessions:listArchivedSessions', async (event, projectDirName) => {
     try {
