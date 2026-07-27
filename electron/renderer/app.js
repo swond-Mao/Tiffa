@@ -422,9 +422,13 @@ function handleEvent(event) {
   // 记录事件时间，用于卡住检测
   state.lastEventTime = Date.now();
 
-  // 新建对话过渡期：忽略所有 message_* 事件，防止旧会话消息残留
-  if (state.pendingNewSession && (event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end')) {
-    console.log('[渲染] 新建对话过渡期，忽略消息事件:', event.type);
+  // 新建对话过渡期：忽略旧会话的残留事件，防止状态混乱
+  if (state.pendingNewSession && (
+    event.type === 'message_start' || event.type === 'message_update' || event.type === 'message_end' ||
+    event.type === 'agent_end' || event.type === 'turn_end' || event.type === 'tool_execution_start' ||
+    event.type === 'tool_execution_update' || event.type === 'tool_execution_end'
+  )) {
+    console.log('[渲染] 新建对话过渡期，忽略事件:', event.type);
     return;
   }
 
@@ -557,10 +561,16 @@ function handleEvent(event) {
           state.sessionMessageCache.delete(newPath);
           // 标记 session_switch 已到达（但不关 pendingNewSession）
           state._newSessionSwitched = true;
-          // 延迟关闭 pendingNewSession，拦截残留的 message_* 事件
+          // 延迟关闭 pendingNewSession，拦截残留事件
+          // 同时强制重置 agentRunning（旧 agent 被 new_session 打断，不会有 agent_end）
           setTimeout(() => {
             if (state.pendingNewSession) {
               state.pendingNewSession = false;
+              state.agentRunning = false;
+              state.instanceAgentRunning.set(state.workspacePath, false);
+              stopStallCheck();
+              stopFirstResponseCheck();
+              updateInputState();
               updateStatus('就绪');
               dom.input.focus();
             }
@@ -1438,8 +1448,19 @@ function setupSessionTabs() {
       }
 
       updateStatus('新建对话...');
-      state.pendingNewSession = true;  // 开启过渡期，忽略旧会话消息事件
+      state.pendingNewSession = true;  // 开启过渡期，忽略旧会话残留事件
       state._newSessionSwitched = false;
+
+      // 如果 agent 正在运行，先强制重置 UI 状态（omp 的 new_session 会打断旧 agent）
+      if (state.agentRunning) {
+        state.agentRunning = false;
+        state.instanceAgentRunning.set(state.workspacePath, false);
+        stopStallCheck();
+        stopFirstResponseCheck();
+        finalizeAssistantMessage();
+        updateInputState();
+      }
+
       // 立即清屏 + 显示欢迎页，不让用户看到加载过程
       dom.messages.innerHTML = '';
       showWelcome();
@@ -1490,12 +1511,22 @@ function setupSessionTabs() {
       setTimeout(() => {
         if (state.pendingNewSession) {
           state.pendingNewSession = false;
+          state.agentRunning = false;
+          state.instanceAgentRunning.set(state.workspacePath, false);
+          stopStallCheck();
+          stopFirstResponseCheck();
+          updateInputState();
           updateStatus('就绪');
           dom.input.focus();
         }
       }, 5000);
     } catch (err) {
       state.pendingNewSession = false;
+      state.agentRunning = false;
+      state.instanceAgentRunning.set(state.workspacePath, false);
+      stopStallCheck();
+      stopFirstResponseCheck();
+      updateInputState();
       addNotice('error', `新建对话失败: ${err.message}`);
       updateStatus('就绪');
     }
@@ -2668,7 +2699,7 @@ async function sendMessage() {
   const message = dom.input.value.trim();
   if (!message && state.pendingImages.length === 0) return;
   if (!state.ompReady) { addNotice('warning', 'omp 尚未就绪'); return; }
-
+  if (state.agentRunning) { addNotice('warning', '当前对话正在运行中，请先停止或新建对话'); return; }
   // Bug Fix 1: 如果当前没有活动会话，自动创建一个新对话
   if (!state.activeSessionPath) {
     const tempPath = '__new__' + Date.now();
