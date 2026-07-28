@@ -1,0 +1,61 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: master
+nodes_managed: true
+exported_at: "2026-07-28T16:55:28Z"
+modules:
+    "":
+        dir_name: Tiffa 便携 AI 助手（根项目）
+        title: Tiffa 便携 AI 助手（根项目）
+        scope:
+            - README.md
+            - AGENTS.md
+            - .gitignore
+            - .gitattributes
+            - install.bat
+            - install.ps1
+            - start-desktop.bat
+            - start-tiffa.bat
+            - test_embed.js
+            - minimap-density-scrollbar.md
+        source_files: []
+        children:
+            - electron_app
+            - per_user_data
+            - skills_library
+        depends_on: []
+        related_to: []
+    electron_app:
+        dir_name: Tiffa 桌面端 Electron 应用（主进程 + 渲染进程）
+        title: Tiffa 桌面端 Electron 应用（主进程 + 渲染进程）
+        scope:
+            - electron/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: per_user_data
+            - path: skills_library
+    per_user_data:
+        dir_name: 用户数据与 Agent 持久化存储
+        title: 用户数据与 Agent 持久化存储
+        scope:
+            - data/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: electron_app
+            - path: skills_library
+    skills_library:
+        dir_name: 技能库（Skills Library）
+        title: 技能库（Skills Library）
+        scope:
+            - skills/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: electron_app
+            - path: per_user_data

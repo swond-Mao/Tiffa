@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: electron_app
+title: Tiffa 桌面端 Electron 应用（主进程 + 渲染进程）
+scope:
+    - electron/
+source_files: []
+depends_on: []
+related_to:
+    - path: per_user_data
+    - path: skills_library
