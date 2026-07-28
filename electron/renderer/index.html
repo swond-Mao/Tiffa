@@ -15,6 +15,7 @@
     <div class="startup-logo">Tiffa</div>
     <div class="startup-title">与万物对弈，共时间同行</div>
     <div class="startup-spinner"></div>
+    <div class="startup-status" id="startupStatus">正在加载…</div>
   </div>
 
   <div id="app">
@@ -91,6 +92,11 @@
               </svg>
               <span>拖放图片上传</span>
             </div>
+            <div id="pendingQueueBar" class="pending-queue-bar hidden">
+              <span class="pending-queue-text" id="pendingQueueText"></span>
+              <button class="pending-queue-steer" id="pendingQueueSteerBtn" title="立即引导，跳过剩余工具">⟳ 引导</button>
+              <button class="pending-queue-cancel" id="pendingQueueCancelBtn" title="取消">✕</button>
+            </div>
             <div class="input-wrapper">
               <textarea id="messageInput" placeholder="输入消息，Enter 发送，Shift+Enter 换行..." rows="1" autofocus></textarea>
               <div class="input-actions">
@@ -113,6 +119,9 @@
               <div class="sidebar-section-header">
                 <span>文件</span>
                 <div class="sidebar-section-actions">
+                  <button class="sidebar-btn" id="btnCollapseTree" title="折叠文件树">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                  </button>
                   <button class="sidebar-btn" id="btnRefreshFiles" title="刷新">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                   </button>
@@ -123,17 +132,21 @@
               </div>
               <div id="fileTree" class="file-tree"></div>
             </div>
-            <div class="sidebar-preview-divider" id="previewDivider"></div>
             <div class="sidebar-todo-section" id="sidebarTodo">
               <div class="sidebar-section-header">
                 <span>Todo</span>
-                <span class="todo-count" id="todoCount"></span>
+                <div class="sidebar-section-actions">
+                  <span class="todo-count" id="todoCount"></span>
+                  <button class="sidebar-btn" id="btnCollapseTodo" title="折叠 Todo">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                  </button>
+                </div>
               </div>
               <div class="todo-list" id="todoList">
                 <div class="todo-empty">暂无待办</div>
               </div>
             </div>
-            <div class="sidebar-preview-divider" id="previewDivider2"></div>
+            <div class="sidebar-preview-divider" id="previewDivider"></div>
             <div class="sidebar-preview-section" id="sidebarPreview">
               <div class="sidebar-section-header">
                 <span>预览</span>
@@ -193,17 +206,6 @@
             <div id="themePresetList" class="theme-preset-list"></div>
             <div class="theme-mode-label">日夜模式</div>
             <div id="themeModeSelector" class="theme-mode-selector"></div>
-          </div>
-          <div class="settings-section">
-            <div class="settings-section-title">输入行为</div>
-            <div class="settings-section-desc">生成中途按 Enter 的默认行为</div>
-            <div class="settings-toggle-row" id="inputBehaviorToggle">
-              <button class="settings-toggle-btn" data-value="guide">引导</button>
-              <button class="settings-toggle-btn" data-value="queue">排队</button>
-            </div>
-            <div class="settings-toggle-hint" id="inputBehaviorHint">
-              引导：当前工具完成后立即按新方向继续，跳过剩余工具
-            </div>
           </div>
           <div class="settings-section">
             <div class="settings-section-title">约束规则</div>

@@ -11,6 +11,6 @@ Unified CLI `comfy.py` drives a remote ComfyUI server. Three subcommands, routed
 
 ## Server
 - Base URL: `http://47.108.197.247:8188` (override `COMFY_URL`)
-- Output dir: `E:\workspace\comfyui_out` (override `COMFY_OUT`)
+- Output dir: **craftman 调用时自动设为项目目录**，独立调用时默认 `$env:PORTABLE_ROOT/workspace/comfyui_out`，可通过 `COMFY_OUT` 环境变量或 `--output` 参数覆盖
 
 ## Routing rules (pick BEFORE calling)
