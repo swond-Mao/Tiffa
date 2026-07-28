@@ -88,6 +88,7 @@ class TiffaInstance {
     this.crashCount = 0;        // 连续崩溃次数
     this.maxCrashRestart = 3;   // 最多自动重启 3 次
     this._restartTimer = null;
+    this.isPrewarming = false;  // embedding 预热中，过滤噪音事件
   }
 
   start() {
@@ -200,6 +201,7 @@ class TiffaInstance {
     }
     console.log(`[TiffaInstance:${this._shortCwd()}] forceKill (原因: ${reason})`);
     _killTree(this.process.pid);
+    this._cleanup();
   }
 
   sendCommand(frame) {
@@ -211,17 +213,24 @@ class TiffaInstance {
 
       const id = `cmd_${++this.commandId}`;
       frame.id = id;
-      this.pendingCommands.set(id, { resolve, reject });
 
-      const line = JSON.stringify(frame) + '\n';
-      this.process.stdin.write(line, 'utf8');
-
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pendingCommands.has(id)) {
           this.pendingCommands.delete(id);
           reject(new Error('Command timeout'));
         }
-      }, 5 * 60 * 1000); // 5 分钟：本地大上下文 prefill 可能需 60-90 秒
+      }, 5 * 60 * 1000);
+
+      this.pendingCommands.set(id, { resolve, reject, timer });
+
+      const line = JSON.stringify(frame) + '\n';
+      try {
+        this.process.stdin.write(line, 'utf8');
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingCommands.delete(id);
+        reject(err);
+      }
     });
   }
 
@@ -231,7 +240,11 @@ class TiffaInstance {
       return;
     }
     const line = JSON.stringify(frame) + '\n';
-    this.process.stdin.write(line, 'utf8');
+    try {
+      this.process.stdin.write(line, 'utf8');
+    } catch (err) {
+      console.error(`[TiffaInstance:${this._shortCwd()}] stdin.write 失败:`, err.message);
+    }
   }
 
   // ── 事件处理 ──
@@ -244,6 +257,17 @@ class TiffaInstance {
       this.agentRunning = false;
       this.crashCount = 0; // 成功启动后重置崩溃计数
       console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
+      // 延迟 3 秒后预热 embedding（fastembed onnx 模型 ~93MB），
+      // 避免首次发送消息时 embedding 冷加载导致超时/失败。
+      // 用 /memory rebuild 触发 mnemopi retain->embed 路径加载模型。
+      setTimeout(() => {
+        // 如果用户已在交互（agent 正在运行），跳过预热避免阻塞用户事件
+        if (this.agentRunning) return;
+        this.isPrewarming = true;
+        this.sendRaw({ type: 'prompt', message: '/memory rebuild' });
+        // 30 秒兜底：若 agent_end 未正常到达（进程异常），强制解除过滤
+        setTimeout(() => { this.isPrewarming = false; }, 30000);
+      }, 3000);
     }
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
@@ -252,11 +276,14 @@ class TiffaInstance {
       this.agentRunning = true;
     } else if (event.type === 'agent_end') {
       this.agentRunning = false;
+      // 预热 agent 结束 → 立即解除事件过滤（不再等 30 秒兜底）
+      this.isPrewarming = false;
     }
 
     // Handle command responses
     if (event.type === 'response' && event.id && this.pendingCommands.has(event.id)) {
-      const { resolve, reject } = this.pendingCommands.get(event.id);
+      const { resolve, reject, timer } = this.pendingCommands.get(event.id);
+      clearTimeout(timer);
       this.pendingCommands.delete(event.id);
       if (event.success) {
         resolve(event.data);
@@ -268,6 +295,11 @@ class TiffaInstance {
     // Forward all events to renderer (带 cwd + sessionId 标记)
     event._cwd = this.cwd;
     event._sessionId = this.sessionId;
+
+    // embedding 预热期间过滤掉 /memory rebuild 产生的噪音事件
+    if (this.isPrewarming) {
+      return;
+    }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('tiffa:event', event);
@@ -334,6 +366,8 @@ class TiffaInstanceManager {
     // 创建新实例
     const spawnPromise = (async () => {
       const inst = new TiffaInstance(normalized, null);
+      // 立即注册到 instances map，防止竞态条件：
+      // activate() 等待 ready 期间，getActive() 能返回该实例
       this.instances.set(key, inst);
       inst.start();
 
@@ -341,13 +375,18 @@ class TiffaInstanceManager {
         let checks = 0;
         const check = setInterval(() => {
           checks++;
-          if (inst.ready || checks > 300) {
-            clearInterval(check);
-            resolve();
-          }
+          if (inst.ready || checks > 300) { clearInterval(check); resolve(); }
         }, 100);
+        // 进程提前退出 -> 立即结束轮询
+        if (inst.process) {
+          inst.process.once('exit', () => { clearInterval(check); resolve(); });
+        }
       });
 
+      // 进程已退出则移除占位条目
+      if (!inst.process || inst.process.exitCode !== null) {
+        this.instances.delete(key);
+      }
       return { inst, ready: inst.ready };
     })();
 
@@ -360,12 +399,10 @@ class TiffaInstanceManager {
   }
 
   // 激活对话级实例（每个对话独立 Tiffa 进程）
+  // 注意：不再修改 activeKey/activeCwd，避免 fire-and-forget 调用竞态覆盖活跃实例
   async activateSession(cwd, sessionId) {
     const normalized = path.resolve(cwd);
     const key = this._key(cwd, sessionId);
-    this.activeKey = key;
-    this.activeCwd = normalized;
-    currentWorkspaceDir = normalized;
 
     // 已存在实例 -> 直接复用
     if (this.instances.has(key)) {
@@ -387,6 +424,7 @@ class TiffaInstanceManager {
     // 创建新实例（对话级：带 sessionId）
     const spawnPromise = (async () => {
       const inst = new TiffaInstance(normalized, sessionId);
+      // 立即注册到 instances map，防止竞态条件
       this.instances.set(key, inst);
       inst.start();
 
@@ -394,13 +432,17 @@ class TiffaInstanceManager {
         let checks = 0;
         const check = setInterval(() => {
           checks++;
-          if (inst.ready || checks > 300) {
-            clearInterval(check);
-            resolve();
-          }
+          if (inst.ready || checks > 300) { clearInterval(check); resolve(); }
         }, 100);
+        if (inst.process) {
+          inst.process.once('exit', () => { clearInterval(check); resolve(); });
+        }
       });
 
+      // 进程已退出则移除占位条目
+      if (!inst.process || inst.process.exitCode !== null) {
+        this.instances.delete(key);
+      }
       return { inst, ready: inst.ready };
     })();
 
@@ -416,6 +458,18 @@ class TiffaInstanceManager {
   getActive() {
     if (!this.activeKey) return null;
     return this.instances.get(this.activeKey) || null;
+  }
+
+  // 按 sessionId 精确查找实例（不依赖 activeKey）
+  getBySessionId(cwd, sessionId) {
+    if (!cwd || !sessionId) return null;
+    const key = this._key(cwd, sessionId);
+    return this.instances.get(key) || null;
+  }
+
+  // 按 sessionId 查找，回退到 activeKey
+  resolve(cwd, sessionId) {
+    return this.getBySessionId(cwd, sessionId) || this.getActive();
   }
 
   // 关闭某个 key 的实例
@@ -574,9 +628,9 @@ function setupIpc() {
   }
 
   // Tiffa commands
-  ipcMain.handle('tiffa:send', async (event, message, images) => {
-    // /omfg 命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
-    const omfgMatch = typeof message === 'string' && message.match(/^\/omfg\s*(.+)/);
+  ipcMain.handle('tiffa:send', async (event, message, images, sessionId) => {
+    // /omfg（或 /吐槽）命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
+    const omfgMatch = typeof message === 'string' && message.match(/^\/(?:omfg|吐槽)\s*(.+)/);
     if (omfgMatch) {
       const complaint = omfgMatch[1].trim();
       const ruleDir = path.join(PORTABLE_ROOT, 'data', 'agent', 'rules');
@@ -646,22 +700,35 @@ function setupIpc() {
       ].join('\n');
 
       message = omfgPrompt;
-      console.log(`[/omfg] intercepted: complaint="${complaint}"`);
+      console.log(`[/omfg|/吐槽] intercepted: complaint="${complaint}"`);
     }
     const frame = { type: 'prompt', message };
     if (images && images.length > 0) {
       frame.images = images;
     }
-    return _active().sendCommand(frame);
+    let inst = tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+    if (!inst && sessionId) {
+      // 会话级实例不存在（启动恢复/竞态）→ 先激活再发送，不回退到项目级实例
+      // （项目级实例 _sessionId=null 的事件会被渲染层严格路由过滤，导致无输出）
+      await tiffaManager.activateSession(tiffaManager.activeCwd, sessionId);
+      inst = tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+    }
+    if (!inst) inst = tiffaManager.getActive(); // 无 sessionId 时用项目级
+    if (!inst) throw new Error('No active Tiffa instance');
+    return inst.sendCommand(frame);
   });
 
-  // 激活对话级实例（每对话独立进程）
+  // 激活对话级实例（每对话独立进程）——显式设置 activeKey
   ipcMain.handle('tiffa:activateSession', async (event, cwd, sessionId) => {
     try {
       const normalized = path.resolve(cwd);
       ensureProjectInJson(normalized);
+      // 显式激活：设置 activeKey（用户主动切换对话时才调用）
+      tiffaManager.activeKey = tiffaManager._key(normalized, sessionId);
+      tiffaManager.activeCwd = normalized;
+      currentWorkspaceDir = normalized;
       const result = await tiffaManager.activateSession(normalized, sessionId);
-      return { success: true, cwd: tiffaManager.activeCwd, sessionId, ready: result.ready };
+      return { success: true, cwd: normalized, sessionId, ready: result.ready };
     } catch (err) {
       return { error: err.message };
     }
@@ -678,12 +745,15 @@ function setupIpc() {
     }
   });
 
-  ipcMain.handle('tiffa:abort', async () => {
-    _active().sendRaw({ type: 'abort' });
+  ipcMain.handle('tiffa:abort', async (event, sessionId) => {
+    const inst = tiffaManager.resolve(tiffaManager.activeCwd, sessionId);
+    if (inst) inst.sendRaw({ type: 'abort' });
   });
 
-  ipcMain.handle('tiffa:setModel', async (event, provider, modelId) => {
-    return _active().sendCommand({ type: 'set_model', provider, modelId });
+  ipcMain.handle('tiffa:setModel', async (event, provider, modelId, sessionId) => {
+    const inst = tiffaManager.resolve(tiffaManager.activeCwd, sessionId);
+    if (!inst) throw new Error('No active Tiffa instance');
+    return inst.sendCommand({ type: 'set_model', provider, modelId });
   });
 
   ipcMain.handle('tiffa:getModels', async () => {
@@ -712,14 +782,14 @@ function setupIpc() {
     return _active().sendCommand({ type: 'get_state' });
   });
 
-  ipcMain.handle('tiffa:steer', async (event, message) => {
-    const inst = tiffaManager.getActive();
+  ipcMain.handle('tiffa:steer', async (event, message, sessionId) => {
+    const inst = tiffaManager.resolve(tiffaManager.activeCwd, sessionId);
     if (!inst) throw new Error('no active process');
     inst.sendRaw({ type: 'steer', message });
   });
 
-  ipcMain.handle('tiffa:followUp', async (event, message) => {
-    const inst = tiffaManager.getActive();
+  ipcMain.handle('tiffa:followUp', async (event, message, sessionId) => {
+    const inst = tiffaManager.resolve(tiffaManager.activeCwd, sessionId);
     if (!inst) throw new Error('no active process');
     inst.sendRaw({ type: 'follow_up', message });
   });
@@ -925,10 +995,10 @@ function setupIpc() {
   ipcMain.handle('models:restart', async () => {
     try {
       // 重启所有实例（模型配置变更后）
-      const cwds = [...tiffaManager.instances.keys()];
+      // 取纯 cwd（去重，keys() 含 #sessionId 后缀不能直接用于 activate）
+      const cwds = [...new Set([...tiffaManager.instances.values()].map(i => i.cwd))];
       tiffaManager.closeAll();
       await new Promise(resolve => setTimeout(resolve, 500));
-      // 恢复之前的活跃实例
       for (const cwd of cwds) {
         await tiffaManager.activate(cwd);
       }
@@ -1264,10 +1334,14 @@ function setupIpc() {
         const stat = fs.statSync(filePath);
         const headSize = Math.min(4096, stat.size);
         const fd = fs.openSync(filePath, 'r');
-        const buf = Buffer.alloc(headSize);
-        fs.readSync(fd, buf, 0, headSize, 0);
-        fs.closeSync(fd);
-        const text = buf.toString('utf8');
+        let text;
+        try {
+          const buf = Buffer.alloc(headSize);
+          fs.readSync(fd, buf, 0, headSize, 0);
+          text = buf.toString('utf8');
+        } finally {
+          fs.closeSync(fd);
+        }
         const lines = text.split('\n').filter(l => l.trim());
         for (const line of lines) {
           try {
@@ -1278,6 +1352,17 @@ function setupIpc() {
       }
     } catch {}
     return null;
+  }
+
+  // 判断 session 目录是否为空（无任何文件或子目录）
+  // 空孤儿目录静默清理，不打 warn 日志
+  function isEmptySessionDir(dirPath) {
+    try {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      return entries.length === 0;
+    } catch {
+      return false;
+    }
   }
 
   // Extract session display name from cwd
@@ -1298,7 +1383,13 @@ function setupIpc() {
         // 优先从 JSONL 文件中读取 cwd（可靠）
         const dirPath = path.join(SESSIONS_DIR, dir.name);
         let cwd = extractCwdFromSessionDir(dirPath);
-        
+
+        // 空孤儿目录（无任何会话文件）静默清理，不打 warn 日志
+        if (!cwd && isEmptySessionDir(dirPath)) {
+          try { fs.rmdirSync(dirPath); } catch {}
+          continue;
+        }
+
         // 如果 JSONL 为空或无 cwd 字段，用 decode 做最佳猜测
         if (!cwd) {
           cwd = decodeSessionDirName(dir.name);
@@ -1407,7 +1498,12 @@ function setupIpc() {
       // 从 JSONL 文件中提取旧 cwd
       const oldCwd = extractCwdFromSessionDir(dirPath);
       if (!oldCwd) {
-        console.log(`[migrate-path] 无法提取 cwd: ${dir.name}`);
+        // 空孤儿目录静默清理；非空但无法提取 cwd 才打 warn
+        if (isEmptySessionDir(dirPath)) {
+          try { fs.rmdirSync(dirPath); } catch {}
+        } else {
+          console.log(`[migrate-path] 无法提取 cwd: ${dir.name}`);
+        }
         continue;
       }
 
@@ -1513,10 +1609,14 @@ function setupIpc() {
       const stat = fs.statSync(filePath);
       const headSize = Math.min(65536, stat.size); // 64KB（从 4KB 升级）
       const fd = fs.openSync(filePath, 'r');
-      const buf = Buffer.alloc(headSize);
-      fs.readSync(fd, buf, 0, headSize, 0);
-      fs.closeSync(fd);
-      const text = buf.toString('utf8');
+      let text;
+      try {
+        const buf = Buffer.alloc(headSize);
+        fs.readSync(fd, buf, 0, headSize, 0);
+        text = buf.toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
       const lines = text.split('\n').filter(l => l.trim());
 
       let title = null;
@@ -1671,10 +1771,14 @@ function setupIpc() {
       if (stat.size > 20 * 1024 * 1024) {
         // 超过 20MB 的文件只读最后 10MB
         const fd = fs.openSync(resolvedPath, 'r');
-        const buf = Buffer.alloc(10 * 1024 * 1024);
-        fs.readSync(fd, buf, 0, 10 * 1024 * 1024, stat.size - 10 * 1024 * 1024);
-        fs.closeSync(fd);
-        var text = buf.toString('utf8');
+        let text;
+        try {
+          const buf = Buffer.alloc(10 * 1024 * 1024);
+          fs.readSync(fd, buf, 0, 10 * 1024 * 1024, stat.size - 10 * 1024 * 1024);
+          text = buf.toString('utf8');
+        } finally {
+          fs.closeSync(fd);
+        }
         // 跳过第一行（可能是不完整的 JSON）
         const firstNewline = text.indexOf('\n');
         if (firstNewline >= 0) text = text.substring(firstNewline + 1);

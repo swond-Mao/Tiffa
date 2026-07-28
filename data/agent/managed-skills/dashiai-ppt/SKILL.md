@@ -41,7 +41,7 @@ npm --prefix <skill-root>/project run preview:https -- <完整输出目录> <端
 
 例如：
 ```powershell
-npm --prefix D:\AI\Opencode\data\config\opencode\skills\dashiai-ppt\project run preview:https -- E:/workspace/output/my-deck/ppt 4178
+npm --prefix "$env:PORTABLE_ROOT/skills/dashiai-ppt/project" run preview:https -- E:/workspace/output/my-deck/ppt 4178
 ```
 
 这个命令不阻塞（detached 后台进程），运行后直接给用户 URL：`http://127.0.0.1:4178/`

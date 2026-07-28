@@ -11,7 +11,7 @@ description: "长期记忆管理。当用户希望「记住」某事实（长期
 - **memory_search**(query, max_results) — 搜索记忆
 - **memory_get**(file) — 读取记忆文件
 
-记忆文件存储在 `data/config/opencode/.opencode/memory/` 目录（2026-07-20 合一后与 hooks plugin 同库）：
+记忆文件存储在 `$env:PORTABLE_ROOT/data/memory/` 目录：
 - `USER.md` — 用户指定的长期偏好和身份信息
 - `MEMORY.md` — 系统推断的核心事实记忆
 - `daily-log/YYYY-MM-DD.md` — 每日日志，按日期组织

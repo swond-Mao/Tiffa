@@ -1,13 +1,13 @@
 ---
 name: history-query
-description: 跨会话历史检索。用户问「之前讨论过什么」「搜一下历史对话」「查一下以前的记录」时启用。用 Python sqlite3 直读 opencode 数据库。
+description: 跨会话历史检索。用户问「之前讨论过什么」「搜一下历史对话」「查一下以前的记录」时启用。用 Python sqlite3 直读 Tiffa 数据库。
 ---
 
 # 历史对话检索
 
-openmode 会话数据库：
+Tiffa 会话数据库（先执行 `echo $env:PORTABLE_ROOT` 获取根路径）：
 ```
-D:\AI\Opencode\data\share\opencode\opencode.db
+$env:PORTABLE_ROOT/data/agent/history.db
 ```
 
 ## 方法
@@ -17,10 +17,10 @@ D:\AI\Opencode\data\share\opencode\opencode.db
 ### 搜索关键词
 
 ```python
-import sqlite3, json, sys
+import sqlite3, json, sys, os
 
 KEYWORD = sys.argv[1]  # 从命令行传参
-db = sqlite3.connect(r"D:\AI\Opencode\data\share\opencode\opencode.db")
+db = sqlite3.connect(os.path.join(os.environ['PORTABLE_ROOT'], 'data', 'agent', 'history.db'))
 cur = db.execute("""
     SELECT s.id, s.title, m.time_created,
            json_extract(m.data, '$.role') as role,
@@ -47,10 +47,10 @@ db.close()
 ### 查看完整会话
 
 ```python
-import sqlite3, json, sys
+import sqlite3, json, sys, os
 
 SID = sys.argv[1]
-db = sqlite3.connect(r"D:\AI\Opencode\data\share\opencode\opencode.db")
+db = sqlite3.connect(os.path.join(os.environ['PORTABLE_ROOT'], 'data', 'agent', 'history.db'))
 cur = db.execute("""
     SELECT m.time_created, json_extract(m.data, '$.role') as role,
            json_extract(p.data, '$.text') as text

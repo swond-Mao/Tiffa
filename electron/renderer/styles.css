@@ -762,11 +762,24 @@ body {
 
 /* ── 文件树 ── */
 .sidebar-tree-section {
-  flex: 1 1 50%;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  min-height: 80px;
+  min-height: 60px;
   overflow: hidden;
+}
+
+.sidebar-tree-section.tree-collapsed {
+  flex: 0 0 auto !important;
+  min-height: 0;
+}
+
+.sidebar-tree-section.tree-collapsed .file-tree {
+  display: none;
+}
+
+.sidebar-tree-section.tree-collapsed .sidebar-section-header {
+  border-bottom: none;
 }
 
 .file-tree {
@@ -851,9 +864,9 @@ body {
 
 /* ── 预览区分隔线（上下拖拽） ── */
 .sidebar-preview-divider {
-  height: 4px;
+  height: 5px;
   cursor: row-resize;
-  background: transparent;
+  background: hsl(var(--border-200));
   flex-shrink: 0;
   transition: background 0.15s;
 }
@@ -866,12 +879,11 @@ body {
 
 /* ── 预览区 ── */
 .sidebar-preview-section {
-  flex: 1 1 50%;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 80px;
   overflow: hidden;
-  border-top: 1px solid hsl(var(--border-200));
 }
 
 .preview-tab-bar {
@@ -1331,6 +1343,53 @@ body {
   opacity: 0.9;
 }
 
+/* ── 生成中排队栏 ── */
+.pending-queue-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: hsl(var(--bg-200));
+  border: 1px solid hsl(var(--border-200));
+  font-size: 13px;
+}
+.pending-queue-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--text-200));
+}
+.pending-queue-steer {
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid hsl(35 90% 55% / 0.5);
+  background: hsl(35 90% 55% / 0.12);
+  color: hsl(35 80% 50%);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.pending-queue-steer:hover {
+  background: hsl(35 90% 55% / 0.25);
+}
+.pending-queue-cancel {
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  color: hsl(var(--text-400));
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 4px;
+}
+.pending-queue-cancel:hover {
+  color: hsl(var(--text-200));
+  background: hsl(var(--bg-300));
+}
+
 .hidden { display: none !important; }
 
 /* ── 输入区图片预览（缩略图） ── */
@@ -1650,6 +1709,13 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.startup-status {
+  margin-top: 14px;
+  font-size: 12px;
+  color: hsl(var(--text-400));
+  letter-spacing: 0.5px;
+}
+
 /* 新建对话过渡遮罩 */
 .new-session-overlay {
   position: fixed;
@@ -1739,39 +1805,6 @@ body {
   font-size: 12px;
   color: hsl(var(--text-400));
   margin-bottom: 12px;
-}
-
-/* ── 输入行为切换开关（苹果风胶囊） ── */
-.settings-toggle-row {
-  display: flex;
-  gap: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid hsl(var(--border-200));
-}
-.settings-toggle-btn {
-  flex: 1;
-  padding: 8px 16px;
-  border: none;
-  cursor: pointer;
-  background: hsl(var(--bg-200));
-  color: hsl(var(--text-200));
-  font-size: 13px;
-  transition: all 0.2s;
-}
-.settings-toggle-btn:focus-visible {
-  outline: 2px solid hsl(var(--accent-main-000));
-  outline-offset: 2px;
-  z-index: 1;
-}
-.settings-toggle-btn.active {
-  background: hsl(var(--accent-main-000));
-  color: white;
-}
-.settings-toggle-hint {
-  font-size: 12px;
-  color: hsl(var(--text-400));
-  margin-top: 6px;
 }
 
 /* ── 供应商筛选 ── */
@@ -3372,19 +3405,24 @@ body {
   background: hsl(var(--accent-main-000) / 0.06);
 }
 
-/* ── Todo 面板 ── */
+/* ── Todo 面板（固定高度、可折叠、内滚动） ── */
 .sidebar-todo-section {
-  flex-shrink: 0;
-  max-height: 200px;
+  flex: 0 0 auto;
+  height: 160px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border-top: 1px solid hsl(var(--border-200));
+  transition: height 0.15s ease;
 }
-.todo-panel {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+.sidebar-todo-section.todo-collapsed {
+  height: auto;
+}
+.sidebar-todo-section.todo-collapsed .todo-list {
+  display: none;
+}
+.sidebar-todo-section.todo-collapsed .sidebar-section-header {
+  border-bottom: none;
 }
 .todo-list {
   flex: 1;

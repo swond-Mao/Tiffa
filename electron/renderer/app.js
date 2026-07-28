@@ -421,21 +421,27 @@ async function init() {
   });
 
   tiffaDesktop.onEvent((event) => {
-    // 多对话实例事件路由
-    if (event._sessionId != null && state.activeSessionId != null) {
+    // ── 多对话实例事件路由（严格模式） ──
+    if (state.activeSessionId != null) {
+      // 用户在会话 tab 中：只接受当前活跃会话实例的事件
       if (event._sessionId !== state.activeSessionId) {
-        // 非当前活跃对话：仅同步后台状态（agent_start/agent_end），不渲染
-        if (event.type === 'agent_start' || event.type === 'prompt_result') {
-          const bgPath = findSessionPathById(event._sessionId);
-          if (bgPath) state.sessionAgentRunning.set(bgPath, true);
-        } else if (event.type === 'agent_end') {
-          const bgPath = findSessionPathById(event._sessionId);
-          if (bgPath) state.sessionAgentRunning.set(bgPath, false);
+        // 非当前对话（含项目级 _sessionId=null）：仅同步后台状态，不渲染
+        if (event._sessionId != null) {
+          if (event.type === 'agent_start' || event.type === 'prompt_result') {
+            const bgPath = findSessionPathById(event._sessionId);
+            if (bgPath) state.sessionAgentRunning.set(bgPath, true);
+          } else if (event.type === 'agent_end') {
+            const bgPath = findSessionPathById(event._sessionId);
+            if (bgPath) state.sessionAgentRunning.set(bgPath, false);
+          }
         }
         return;
       }
-    } else if (event._cwd && state.workspacePath && event._cwd !== state.workspacePath) {
-      return; // fallback：项目级实例按 cwd 过滤
+    } else {
+      // 无活跃会话（刚切项目未选对话）：按 cwd 过滤，只接受项目级事件
+      if (event._cwd && state.workspacePath && event._cwd !== state.workspacePath) {
+        return;
+      }
     }
     handleEvent(event);
   });
@@ -469,9 +475,29 @@ async function init() {
     fetchCurrentModel();
   }
 
-  // 全部加载完成，淡出启动遮罩
+  // 等待后端就绪再淡出遮罩，避免用户在预热期间提前发送消息
   const overlay = document.getElementById('startupOverlay');
+  const statusEl = document.getElementById('startupStatus');
   if (overlay) {
+    if (!state.tiffaReady) {
+      if (statusEl) statusEl.textContent = '正在启动 AI 引擎…';
+      const maxWait = 20000; // 最多等 20 秒
+      const start = Date.now();
+      while (!state.tiffaReady && Date.now() - start < maxWait) {
+        await new Promise(r => setTimeout(r, 300));
+        const r = await tiffaDesktop.isReady();
+        if (r) {
+          state.tiffaReady = true;
+          updateStatus('就绪');
+          fetchCurrentModel();
+        }
+      }
+      if (!state.tiffaReady) {
+        // 超时兜底：仍然允许进入，但提示未就绪
+        if (statusEl) statusEl.textContent = '引擎启动较慢，可稍后发送消息';
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    }
     overlay.classList.add('fade-out');
     setTimeout(() => { overlay.remove(); }, 400);
   }
@@ -598,8 +624,9 @@ function handleEvent(event) {
       break;
     case 'session_switch':
       // 多对话实例模式下，session_switch 来自当前对话进程内部
-      // 更新 sessionPath 映射（__new__ -> 真实路径）
-      if (event.sessionPath) {
+      // 安全校验：只在用户主动等待会话分配时（__new__ tab）才处理，
+      // 避免后台实例的内部切换事件意外篡改当前视图状态
+      if (event.sessionPath && state.activeSessionPath && state.activeSessionPath.startsWith('__new__')) {
         const newPath = event.sessionPath;
         const oldPath = state.activeSessionPath;
 
@@ -701,11 +728,12 @@ function markFirstResponseReceived() {
 }
 
 function handleExited(data) {
-  // 多实例：按 sessionId 过滤，避免后台对话退出影响当前活跃对话
-  if (data.sessionId && state.activeSessionId) {
+  // 多实例：严格按 sessionId 过滤，避免后台/项目级实例退出影响当前活跃对话
+  if (state.activeSessionId) {
+    // 用户在会话 tab 中：只响应当前会话实例的退出
     if (data.sessionId !== state.activeSessionId) return;
   } else if (data.cwd && state.workspacePath && data.cwd !== state.workspacePath) {
-    return; // fallback：无 sessionId 时按 cwd 过滤
+    return; // 无活跃会话时按 cwd 过滤
   }
 
   // 进程正在自动重启，不重置 UI 状态，等重启结果
@@ -1249,7 +1277,7 @@ async function selectProject(dirName) {
           tiffaDesktop.activateSession(state.workspacePath, targetSid).then(() => {
             const saved = state.sessionModelMap[targetPath];
             if (saved && saved.provider && saved.modelId) {
-              restoreModelIfAvailable(saved.provider, saved.modelId, targetSid).catch(() => {});
+              restoreModelIfAvailable(saved.provider, saved.modelId, targetSid, targetPath).catch(() => {});
             }
           }).catch(() => {});
         }
@@ -1276,7 +1304,7 @@ async function selectProject(dirName) {
           tiffaDesktop.activateSession(state.workspacePath, targetSid2).then(() => {
             const saved = state.sessionModelMap[targetPath];
             if (saved && saved.provider && saved.modelId) {
-              restoreModelIfAvailable(saved.provider, saved.modelId, targetSid2).catch(() => {});
+              restoreModelIfAvailable(saved.provider, saved.modelId, targetSid2, targetPath).catch(() => {});
             }
           }).catch(() => {});
         }
@@ -1390,6 +1418,7 @@ function renderHistoryPanel() {
             } else {
               dom.messages.innerHTML = '';
               showWelcome();
+              setTimeout(() => dom.input.focus(), 50);
             }
           }
           await loadSessions(state.activeProjectDirName);
@@ -1406,7 +1435,7 @@ function renderHistoryPanel() {
       e.stopPropagation();
       const sessionPath = deleteBtn.dataset.path;
       if (sessionPath) {
-        if (!confirm('确定要删除这个对话吗？删除后无法恢复。')) return;
+        if (!(await showModalConfirm('删除对话', '确定要删除这个对话吗？删除后无法恢复。'))) return;
         const result = await tiffaDesktop.deleteSession(sessionPath);
         if (result.success) {
           addNotice('info', '对话已删除');
@@ -1420,6 +1449,7 @@ function renderHistoryPanel() {
             } else {
               dom.messages.innerHTML = '';
               showWelcome();
+              setTimeout(() => dom.input.focus(), 50);
             }
           }
           await loadSessions(state.activeProjectDirName);
@@ -1625,6 +1655,7 @@ function renderSessionTabs() {
           } else {
             dom.messages.innerHTML = '';
             showWelcome();
+            setTimeout(() => dom.input.focus(), 50);
           }
         }
         renderSessionTabs();
@@ -1702,7 +1733,7 @@ async function switchToSession(sessionPath) {
           state.tiffaReady = result.ready !== false;
           const saved = state.sessionModelMap[sessionPath];
           if (saved && saved.provider && saved.modelId) {
-            try { await restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId); } catch {}
+            try { await restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId, sessionPath); } catch {}
           }
           updateInputState();
         }
@@ -1751,17 +1782,23 @@ async function switchToSession(sessionPath) {
   }
 
   // 激活对话级实例（独立进程，切换不干扰其他对话）
+  // 使用 await 确保实例就绪后再允许用户发送消息，避免发给未 ready 的进程
   if (targetSessionId) {
-    tiffaDesktop.activateSession(state.workspacePath, targetSessionId).then((result) => {
+    state.tiffaReady = false;
+    updateInputState();
+    try {
+      const result = await tiffaDesktop.activateSession(state.workspacePath, targetSessionId);
+      // 竞态防护：等待期间用户可能又切走了，此时放弃后续操作
+      if (state.activeSessionPath !== sessionPath) return;
       if (!result.error) {
         state.tiffaReady = result.ready !== false;
         const saved = state.sessionModelMap[sessionPath];
         if (saved && saved.provider && saved.modelId) {
-          restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId).catch(() => {});
+          await restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId, sessionPath);
         }
-        updateInputState();
       }
-    }).catch(() => {});
+    } catch { /* 激活失败不阻塞切换流程 */ }
+    updateInputState();
   }
   saveOpenTabs();
   renderHistoryPanel();
@@ -3461,6 +3498,7 @@ async function archiveSessionFromTab(session) {
       } else {
         dom.messages.innerHTML = '';
         showWelcome();
+        setTimeout(() => dom.input.focus(), 50);
       }
     }
     await loadSessions(state.activeProjectDirName);
@@ -3472,7 +3510,7 @@ async function archiveSessionFromTab(session) {
 
 async function deleteSessionFromTab(session) {
   const title = session.title || session.firstMessage || '新对话';
-  if (!confirm(`确定要删除对话「${title}」吗？删除后无法恢复。`)) return;
+  if (!(await showModalConfirm('删除对话', `确定要删除对话「${title}」吗？删除后无法恢复。`))) return;
   const result = await tiffaDesktop.deleteSession(session.path);
   if (result.success) {
     addNotice('info', '对话已删除');
@@ -3485,6 +3523,7 @@ async function deleteSessionFromTab(session) {
       } else {
         dom.messages.innerHTML = '';
         showWelcome();
+        setTimeout(() => dom.input.focus(), 50);
       }
     }
     await loadSessions(state.activeProjectDirName);
@@ -4040,8 +4079,9 @@ function renderModelList(models) {
 // 带校验的模型恢复：检查 provider/modelId 是否在当前可用模型列表中
 // 避免 sessionModelMap 中的残留（如已删除的模型）导致恢复失败
 let _availableModelSet = null; // 缓存可用模型集合
+let _availableModelSetTime = 0; // 缓存时间戳（5 分钟 TTL）
 async function getAvailableModelSet() {
-  if (_availableModelSet) return _availableModelSet;
+  if (_availableModelSet && Date.now() - _availableModelSetTime < 5 * 60 * 1000) return _availableModelSet;
   try {
     const result = await tiffaDesktop.getModels();
     if (result && result.models) {
@@ -4049,13 +4089,15 @@ async function getAvailableModelSet() {
       for (const m of result.models) {
         if (m.provider && m.id) _availableModelSet.add(`${m.provider}/${m.id}`);
       }
+      _availableModelSetTime = Date.now();
     }
   } catch {}
   return _availableModelSet;
 }
 
 // 校验并恢复会话模型：若模型不在可用列表中则跳过
-async function restoreModelIfAvailable(provider, modelId, sessionId) {
+// expectedSessionPath: 可选，传入时会在异步操作后校验当前会话是否仍是同一个，避免快速切换时旧回调覆盖新会话的模型显示
+async function restoreModelIfAvailable(provider, modelId, sessionId, expectedSessionPath) {
   const availableSet = await getAvailableModelSet();
   if (availableSet && !availableSet.has(`${provider}/${modelId}`)) {
     console.warn(`[restoreModel] 模型 "${provider}/${modelId}" 不在可用列表中，跳过恢复`);
@@ -4063,6 +4105,10 @@ async function restoreModelIfAvailable(provider, modelId, sessionId) {
   }
   try {
     await tiffaDesktop.setModel(provider, modelId, sessionId);
+    // 竞态防护：异步期间用户可能已切走，后端命令已发出（实例模型正确），但不更新全局 UI
+    if (expectedSessionPath && state.activeSessionPath !== expectedSessionPath) {
+      return true;
+    }
     state.currentModel = modelId;
     state.currentProvider = provider;
     dom.currentModel.textContent = modelId;
@@ -4109,6 +4155,7 @@ async function fetchCurrentModel() {
       for (const m of result.models) {
         if (m.provider && m.id) _availableModelSet.add(`${m.provider}/${m.id}`);
       }
+      _availableModelSetTime = Date.now();
       // lastModel 兜底恢复：仅在当前会话无 sessionModelMap 记录时才使用全局 lastModel
       // 避免 lastModel 覆盖 selectProject/switchToSession 已恢复的每会话模型
       try {
@@ -4372,8 +4419,11 @@ function createProviderCard(provKey, provVal) {
     confirmAddBtn.addEventListener('click', async () => {
       const toAdd = [...checked.entries()].filter(([,v]) => v).map(([id]) => id);
       if (!modelsConfigData.providers[provKey].models) modelsConfigData.providers[provKey].models = [];
+      const newModelMap = new Map(newModels.map(x => [x.id, x]));
       for (const id of toAdd) {
-        modelsConfigData.providers[provKey].models.push({ id, name: id, reasoning: false, input: ['text'], supportsTools: true, contextWindow: 128000, maxTokens: 8192, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+        const src = newModelMap.get(id);
+        const reasoning = (src && src.reasoning) || false;
+        modelsConfigData.providers[provKey].models.push({ id, name: id, reasoning, input: ['text'], supportsTools: true, contextWindow: 128000, maxTokens: 8192, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
       }
       fetchListDiv.style.display = 'none'; fetchStatusDiv.style.display = 'none';
       await saveModelConfig();
@@ -4403,7 +4453,8 @@ function addModelDialog(provKey, onDone) {
     <label style="font-size:12px;color:var(--text-muted);">上下文长度</label>
     <input id="dlgModelCtx" type="number" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" value="128000">
     <label style="font-size:12px;color:var(--text-muted);">最大输出</label>
-    <input id="dlgModelMax" type="number" style="width:100%;padding:6px 10px;margin:4px 0 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" value="8192">
+    <input id="dlgModelMax" type="number" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" value="8192">
+    <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin:4px 0 16px;cursor:pointer;"><input id="dlgModelReasoning" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);"> 启用思考模式（推理模型回答前会先思考）</label>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="dlgCancel" style="padding:6px 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;">取消</button>
       <button id="dlgOk" style="padding:6px 16px;border:none;border-radius:4px;background:var(--accent);color:white;cursor:pointer;">添加</button>
@@ -4424,8 +4475,9 @@ function addModelDialog(provKey, onDone) {
     const name = box.querySelector('#dlgModelName').value.trim() || id;
     const ctx = parseInt(box.querySelector('#dlgModelCtx').value) || 128000;
     const max = parseInt(box.querySelector('#dlgModelMax').value) || 8192;
+    const reasoning = box.querySelector('#dlgModelReasoning').checked;
     if (!modelsConfigData.providers[provKey].models) modelsConfigData.providers[provKey].models = [];
-    modelsConfigData.providers[provKey].models.push({ id, name, reasoning: false, input: ['text'], supportsTools: true, contextWindow: ctx, maxTokens: max, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+    modelsConfigData.providers[provKey].models.push({ id, name, reasoning, input: ['text'], supportsTools: true, contextWindow: ctx, maxTokens: max, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
     close();
     onDone();
     await saveModelConfig();
@@ -4444,7 +4496,8 @@ function createConfigField(key, label, value, placeholder) {
 
 function createModelEntry(provKey, idx, model) {
   const div = document.createElement('div'); div.className = 'model-entry';
-  div.innerHTML = `<span class="model-entry-id">${escapeHtml(model.id || '')}</span><span class="model-entry-meta">${escapeHtml(model.name || '')} | ${model.contextWindow || '?'}ctx</span>`;
+  const thinkBadge = model.reasoning ? ' | 思考' : '';
+  div.innerHTML = `<span class="model-entry-id">${escapeHtml(model.id || '')}</span><span class="model-entry-meta">${escapeHtml(model.name || '')} | ${model.contextWindow || '?'}ctx${thinkBadge}</span>`;
   const del = document.createElement('button'); del.className = 'model-entry-delete'; del.textContent = 'x';
   del.addEventListener('click', (e) => { e.stopPropagation(); if (confirm(`确定删除模型 "${model.id}"？`)) { modelsConfigData.providers[provKey].models.splice(idx, 1); document.getElementById('modelConfig').innerHTML = ''; renderModelConfig(); } });
   div.appendChild(del);
@@ -4465,13 +4518,20 @@ function editModelInline(container, provKey, idx, model, onDone) {
     { key: 'name', label: '名称', value: model.name || '' },
     { key: 'contextWindow', label: '上下文', value: String(model.contextWindow || 128000), type: 'number' },
     { key: 'maxTokens', label: '最大输出', value: String(model.maxTokens || 8192), type: 'number' },
+    { key: 'reasoning', label: '思考模式', checked: !!model.reasoning, type: 'checkbox' },
   ];
   const inputs = {};
   for (const f of fields) {
     const row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:6px;';
     row.innerHTML = `<label style="width:60px;font-size:11px;color:var(--text-muted);flex-shrink:0;">${escapeHtml(f.label)}</label>`;
-    const inp = document.createElement('input'); inp.type = f.type === 'number' ? 'number' : 'text'; inp.value = f.value;
-    inp.style.cssText = 'flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px;';
+    let inp;
+    if (f.type === 'checkbox') {
+      inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = f.checked;
+      inp.style.cssText = 'width:16px;height:16px;accent-color:var(--accent);cursor:pointer;';
+    } else {
+      inp = document.createElement('input'); inp.type = f.type === 'number' ? 'number' : 'text'; inp.value = f.value;
+      inp.style.cssText = 'flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px;';
+    }
     inputs[f.key] = inp; row.appendChild(inp); container.appendChild(row);
   }
   const btnRow = document.createElement('div'); btnRow.style.cssText = 'display:flex;gap:6px;margin-top:4px;';
@@ -4483,6 +4543,7 @@ function editModelInline(container, provKey, idx, model, onDone) {
     m.id = inputs.id.value; m.name = inputs.name.value;
     m.contextWindow = parseInt(inputs.contextWindow.value) || 128000;
     m.maxTokens = parseInt(inputs.maxTokens.value) || 8192;
+    m.reasoning = !!inputs.reasoning.checked;
     if (onDone) onDone();
     document.getElementById('modelConfig').innerHTML = ''; renderModelConfig();
     await saveModelConfig();

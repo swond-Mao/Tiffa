@@ -72,7 +72,7 @@ gen --branch <t2i|ernie|klein|zimage|edit> --prompt "..." [options]
 3. `--with-colleague` 必须同时传 `--confirm-colleague`（同事 LoRA 强制二次确认）
 
 ### 调用注意事项
-- 路径已注入：`E:\Opencode\scripts\` 在 PATH 里，直接 `gen` 即可
+- Tiffa 便携包没有 `gen` 包装器，**不要调用 `gen`**，直接调 `comfy.py`
 - 即使 LLM 完全不知道这个 skill，直接 `gen --prompt "..."` 也会被强制路由提示
 - 永远不要调用 `python comfy.py ...` 直接形式——会绕过所有安全规则
 
@@ -106,8 +106,8 @@ gen --branch <t2i|ernie|klein|zimage|edit> --prompt "..." [options]
 
 ```powershell
 $env:PYTHONIOENCODING="utf-8"
-& "E:\Opencode\python\python.exe" `
-  "E:\Opencode\data\config\opencode\skills\comfyui-image-gen\comfy.py" `
+& "$env:PORTABLE_ROOT/python/python.exe" `
+  "$env:PORTABLE_ROOT/skills/comfyui-image-gen/comfy.py" `
   <t2i|ernie|klein|zimage|edit> <args...> --name "<job>" --timeout 300
 ```
 

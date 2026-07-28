@@ -480,16 +480,6 @@ async function handlePassThrough(model: any, context: any, options: any, stream:
   const tools = buildOpenAITools(context)
 
   const body: Record<string, unknown> = {
-
-// ── 从 model / context / options 获取请求参数 ──
-  // 从 provider 配置缓存获取 baseUrl/apiKey（Tiffa 内核不一定会合并到 model 对象上）
-  const provCfg = model.provider ? _providerConfigs.get(model.provider) : undefined
-  const baseUrl = model.baseUrl || provCfg?.baseUrl || options?.baseUrl || process.env.LLM_BASE_URL || "http://127.0.0.1:11434/v1"
-  const url = baseUrl.replace(/\/+$/, "") + "/chat/completions"
-  const messages = buildOpenAIMessages(context)
-  const tools = buildOpenAITools(context)
-
-  const body: Record<string, unknown> = {
     model: model.requestModelId || model.id,
     messages,
     stream: true,

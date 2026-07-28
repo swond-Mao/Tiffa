@@ -9,7 +9,7 @@ description_cn: "评估用户需求，设计多 skill 协作方案，询问用�
 
 ## 核心原则
 
-**规划由 AI（opencode）完成，craftman 只做执行和合并。** 不依赖外部 LLM 服务。
+**规划由 AI（Tiffa）完成，craftman 只做执行和合并。** 不依赖外部 LLM 服务。
 
 AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传给 craftman → craftman 依次调用子 skill → 合并输出。
 
@@ -28,41 +28,49 @@ AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传
 | `comfyui` | CLI | AI 生图（调用 `comfy.py`，需要本地 ComfyUI 服务） |
 | `canvas-design` | LLM | AI 在对话中生成 HTML+CSS+SVG 设计，通过 `html_content` 或 `html_file` 参数传入 |
 
-## AI 用法（opencode agent 调用 craftman）
+## AI 用法（必读，严格按步骤执行）
 
-AI 先规划 JSON 方案，再通过 `--plan-json` 传入 craftman 执行：
+> **核心原则**：规划由 AI 完成，craftman 只做执行和合并。不依赖外部 LLM。
 
-```powershell
-# 规划 JSON 格式
+### 执行食谱（每次必须按此顺序）
+
+1. **写内容文件**：用 Write 工具把 content.json / cover.html 写到 `<cwd>/.craftman/` 目录
+2. **写方案文件**：用 Write 工具把 plan.json 写到 `<cwd>/.craftman/plan.json`
+3. **执行**：`python "<craftman.py绝对路径>" --plan-file "<cwd>/.craftman/plan.json" --no-confirm`
+
+ craftman.py 的绝对路径在本文件末尾的 **[系统注入]** 块中给出（读 skill:// 后自动追加）。**禁止自己拼路径。**
+
+### plan.json 格式
+
+```json
 {
   "analysis": "需求分析",
   "plan": [
     {
       "step": 1,
-      "skill": "pptgen|comfyui|canvas-design",
-      "reason": "为什么用这个技能",
-      "prompt": "传给该技能的详细提示词",
+      "skill": "pptgen",
+      "prompt": "传给技能的提示词",
       "required": true,
-      "params": {
-        "style": "magazine",
-        "pages": 8
-      }
+      "params": {"style": "magazine", "pages": 8, "content_file": "<cwd>/.craftman/content.json"}
     }
   ],
-  "merge_instruction": "如何合并各步骤输出"
+  "merge_instruction": "如何合并"
 }
-
-# AI 将 JSON 方案传给 craftman 执行
-python craftman.py --plan-json '{...}' --no-confirm
 ```
+
+### 路径约定
+
+- **craftman.py**：与本 SKILL.md 同目录，绝对路径由系统注入提供
+- **临时文件**：写在当前工作目录（cwd）下的 `.craftman/` 子目录。**禁止写 workspace 根目录**
+- **输出**：自动输出到 craftman.py 同目录的 `output/`
 
 ### canvas-design 特殊说明
 
-canvas-design 是"LLM 型"技能——AI 先用 Write 工具生成 HTML 文件到固定路径，craftman 负责复制到输出目录做合并并输出链接。
+canvas-design 是"LLM 型"技能--AI 先用 Write 工具生成 HTML 文件到项目目录下，craftman 负责复制到输出目录做合并并输出链接。
 
 **craftman 流程：**
-1. AI 用 Write 工具创建 HTML 文件（如 `E:\Opencode\workspace\.craftman\cover.html`）
-2. AI 写 plan JSON，params 通过 `html_file` 引用
+1. AI 用 Write 工具创建 HTML 文件到 `<项目目录>/.craftman/cover.html`
+2. AI 写 plan JSON，params 通过 `html_file` 引用该路径
 3. craftman 复制到输出目录，自动输出链接
 
 ```json
@@ -70,7 +78,7 @@ canvas-design 是"LLM 型"技能——AI 先用 Write 工具生成 HTML 文件�
   "step": 1,
   "skill": "canvas-design",
   "prompt": "民航史封面",
-  "params": {"html_file": "E:\Opencode\workspace\.craftman\cover.html"}
+  "params": {"html_file": "<项目目录>/.craftman/cover.html"}
 }
 ```
 
@@ -79,20 +87,20 @@ canvas-design 是"LLM 型"技能——AI 先用 Write 工具生成 HTML 文件�
 pptgen 默认调外部 LLM 失败（医院内网 22023/22024 便携包不可达）。**正确做法：AI 预生成内容 JSON，craftman 用 `--cache` 跳过 LLM**。
 
 **craftman 流程：**
-1. AI 用 Write 工具写出符合 pptgen schema 的内容 JSON（`{"title":..., "slides":[{layout, title, content, items, ...}]}`）
-2. AI 写 plan JSON，plan 的 params 中通过 `content_file` 引用该路径
-3. AI 调用 `craftman --plan-file plan.json --no-confirm`
+1. AI 用 Write 工具写出符合 pptgen schema 的内容 JSON 到 `<项目目录>/.craftman/content.json`
+2. AI 写 plan JSON 到 `<项目目录>/.craftman/plan.json`，plan 的 params 中通过 `content_file` 引用 content.json
+3. AI 调用 `python "<craftman.py绝对路径>" --plan-file "<cwd>/.craftman/plan.json" --no-confirm`
 4. craftman 调 pptgen --cache content.json --no-image，跳过 LLM 和生图
 
 ```json
 {
   "step": 1,
   "skill": "pptgen",
-      "prompt": "民航史交互式网页",
+  "prompt": "民航史交互式网页",
   "params": {
     "style": "magazine",
     "pages": 8,
-    "content_file": "E:\Opencode\workspace\.craftman\content.json"
+    "content_file": "<项目目录>/.craftman/content.json"
   }
 }
 ```
@@ -105,10 +113,10 @@ pptgen 默认调外部 LLM 失败（医院内网 22023/22024 便携包不可达�
 {
   "plan": [
     {"step": 1, "skill": "canvas-design", "prompt": "封面",
-     "params": {"html_file": "E:\Opencode\workspace\.craftman\cover.html"}},
+     "params": {"html_file": "<项目目录>/.craftman/cover.html"}},
     {"step": 2, "skill": "pptgen", "prompt": "内容",
      "params": {"style": "magazine", "pages": 8,
-                "content_file": "E:\Opencode\workspace\.craftman\content.json"}}
+                "content_file": "<项目目录>/.craftman/content.json"}}
   ],
   "merge_instruction": "canvas 嵌入 pptgen 网页演示首位"
 }
@@ -130,19 +138,19 @@ pptgen 默认调外部 LLM 失败（医院内网 22023/22024 便携包不可达�
 
 任何阶段 AI 都不替用户做决定。
 
+
 ## 用法示例
 
 ```powershell
 # 列出可用技能
-python craftman.py --list-skills
+python "<craftman.py绝对路径>" --list-skills
 
-# AI 传入方案直接执行（跳过确认）
-python craftman.py --plan-json '{"analysis":"...","plan":[...],"merge_instruction":"..."}' --no-confirm
-
-# 从文件加载方案
-python craftman.py --plan-file plan.json --no-confirm
+# 从文件加载方案执行（推荐，避免 JSON 引号问题）
+python "<craftman.py绝对路径>" --plan-file "<cwd>/.craftman/plan.json" --no-confirm
 ```
+
+> `<craftman.py绝对路径>` 替换为本文件末尾 [系统注入] 中给出的实际路径。
 
 ## 输出
 
-所有输出在 `craftman/output/` 目录下。
+所有输出在 craftman.py 同目录的 `output/` 下。

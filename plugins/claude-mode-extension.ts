@@ -1,12 +1,11 @@
 /**
- * claude-mode-extension.ts - Tiffa 扩展 v6.0
+ * claude-mode-extension.ts - Tiffa 扩展 v6.2
  *
  * 精简理念：搭 Tiffa 的车，不造 Tiffa 的轮
  *
  * 已删除（Tiffa 内核原生已覆盖 / 不再需要）：
  * - AGENTS.md 注入 -> Tiffa 内核自动从 CWD 查找注入
  * - MEMORY.md 注入 -> Mnemopi autoRecall
- * - PROJECT.md 注入 -> Mnemopi per-project 隔离
  * - 违反检测（4 个检测器） -> TTSR 实时拦截
  * - 权限契约审批 -> Tiffa 内核内置审批
  * - XML 工具调用纠正 -> TTSR no-xml-toolcall.md
@@ -25,6 +24,7 @@
  * - 审计日志
  * - error 续行（一次制 + 5 秒延迟）
  * - hub 工具移除
+ * - PROJECT.md 生成 + 确定性注入（before_agent_start：项目根目录首次对话自动生成脚手架，每会话开头注入 system prompt）
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
@@ -77,23 +77,20 @@ function isDangerousPath(fp: string): boolean {
 function isSecretFilePath(fp: string): boolean {
   const norm = String(fp).replace(/\//g, "\\").toLowerCase()
   // .env 系列文件（支持绝对路径和相对路径）
-  // 匹配：\.env 或 .env 开头（相对路径）
   if (/(?:^|[\\/])\.env(\.|$|[\\/])/i.test(norm)) return true
   if (/^\.env$/i.test(norm)) return true
   // 证书/密钥文件
   if (/\.(pem|key|crt|p12|pfx|ovpn)$/i.test(norm)) return true
-  // 含敏感词的文件名（password.txt / secret.json / token.dat 等）
+  // 含敏感词的文件名
   if (/(?:^|[\\/])(password|secret|token|api[_-]?key|credentials|passwd|pwd)\.[a-zA-Z0-9]{1,10}$/i.test(norm)) return true
   return false
 }
 
 // ── 堆栈/路径泄露检测 ──
-// 只匹配真正的堆栈跟踪（多个 at 行），不匹配单个错误类型名
 const STACK_TRACE_AT_LINE = /^\s+at\s+[A-Za-z_$][\w$]*\s+\(.+?:\d+:\d+\)/m
 
 function hasStackLeak(text: string): boolean {
   if (!text || text.length < 20) return false
-  // 需要至少 2 行 "at foo (file:line:col)" 才判定为堆栈泄露
   const atLines = text.match(/^\s+at\s+[A-Za-z_$][\w$]*\s+\(.+?:\d+:\d+\)/gm)
   if (atLines && atLines.length >= 2) return true
   return false
@@ -139,46 +136,150 @@ export default async function (pi: any) {
   let silentToolCallCount = 0
   const SILENT_TOOL_CALL_THRESHOLD = 3
 
+  // ── 技能强制机制：弱模型不读 SKILL.md 就调脚本 -> block ──
+  // 每轮 agent turn 重置；read skill:// 标记已加载，ask 标记已问用户
+  let skillLoadedThisTurn = new Set<string>()
+  let askCountThisTurn = 0
+  let lastSkillRead = "" // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
+
+  // 技能脚本绝对路径提示（弱模型不会拼路径，直接告诉它）
+  const SKILL_PATH_HINTS: Record<string, string> = {
+    "craftman": [
+      "\n\n---\n[系统注入 · 禁止自行拼接路径]",
+      `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
+      `craftman.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "craftman", "craftman.py")}`,
+      `调用示例: python "${join(PORTABLE_ROOT, "skills", "craftman", "craftman.py")}" --plan-file <plan.json> --no-confirm`,
+    ].join("\n"),
+    "comfyui-image-gen": [
+      "\n\n---\n[系统注入 · 禁止自行拼接路径]",
+      `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
+      `comfy.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "comfyui-image-gen", "comfy.py")}`,
+    ].join("\n"),
+  }
+
+  // 技能脚本 -> 对应 skill 名 + 是否必须先问用户
+  const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean }> = [
+    { pattern: /comfy\.py\b/, skill: "comfyui-image-gen", requireAsk: true },
+    { pattern: /craftman\.py\b/, skill: "craftman", requireAsk: true },
+  ]
+
   log("init", [
-    "=== claude-mode extension loaded (v6.1.1) ===",
+    "=== claude-mode extension loaded (v6.2) ===",
     `pid: ${process.pid}`,
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
 
-  // ── 0. session_start ── 移除无用工具
-  pi.on("session_start", async () => {
+  // ── 工具清理：移除 eval/hub，确保记忆工具可用 ──
+  // 内核可能在 compacting 后重新注册全部工具，故需在 session_start + before_agent_start 都调用
+  async function sanitizeTools(tag: string) {
     try {
       const all = pi.getActiveTools()
       const removed = ["eval", "hub"]
-      const filtered = all.filter(t => !removed.includes(t))
-      if (filtered.length < all.length) {
+      // 记忆工具：recall/retain/reflect/memory_edit，loadMode 为 discoverable，
+      // 需显式加入活跃列表，否则 LLM 看不到这些工具
+      const memoryTools = ["recall", "retain", "reflect", "memory_edit"]
+      let filtered = all.filter((t: string) => !removed.includes(t))
+      const missing = memoryTools.filter((t: string) => !filtered.includes(t))
+      if (missing.length > 0) {
+        filtered = [...filtered, ...missing]
+        log(tag, `ensured memory tools: [${missing.join(", ")}]`)
+      }
+      if (filtered.length !== all.length || missing.length > 0) {
         await pi.setActiveTools(filtered)
-        const gone = all.filter(t => !filtered.includes(t))
-        log("session_start", `removed [${gone.join(", ")}] (${all.length} -> ${filtered.length})`)
+        const gone = all.filter((t: string) => !filtered.includes(t))
+        log(tag, `tools updated (${all.length} -> ${filtered.length})` + (gone.length ? ` removed [${gone.join(", ")}]` : ""))
       }
     } catch (err: any) {
-      log("session_start.error", err?.message || String(err))
+      log(`${tag}.error`, err?.message || String(err))
     }
+  }
+
+  // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用
+  pi.on("session_start", async () => {
+    await sanitizeTools("session_start")
   })
 
-  // ── 1. before_agent_start ── 注入行为约束 + 重置计数
+  // ── 1. before_agent_start ── 注入行为约束 + 项目 PROJECT.md 生成/注入
   pi.on("before_agent_start", async (event: any) => {
     try {
       agentTurnCount++
       silentToolCallCount = 0
+      skillLoadedThisTurn = new Set()
+      askCountThisTurn = 0
+      lastSkillRead = ""
+      await sanitizeTools("before_agent_start")
 
-      // 注入行为约束：返回 systemPrompt 数组（OMP 会链式合并多个扩展的返回值）
+      const injected: string[] = []
+
+      // (a) 行为约束：constraints-inject.md
       const injectPath = join(MEMORY_DIR, "constraints-inject.md")
       if (existsSync(injectPath)) {
         try {
           const injectContent = readFileSync(injectPath, "utf8").trim()
-          if (injectContent) {
-            log("before_agent_start.inject", `injecting ${injectContent.split("\n").length} lines from constraints-inject.md`)
-            return { systemPrompt: [injectContent] }
-          }
+          if (injectContent) injected.push(injectContent)
         } catch (err: any) {
           log("before_agent_start.inject.error", err?.message || String(err))
         }
+      }
+
+      // (b) 项目级 PROJECT.md：项目根目录首次对话自动生成脚手架，并确定性注入 system prompt
+      try {
+        const projectDir = process.cwd()
+        const projectMd = join(projectDir, "PROJECT.md")
+        if (!existsSync(projectMd)) {
+          const dirName = projectDir.split(/[\\/]/).pop() || "project"
+          const today = new Date().toISOString().split("T")[0]
+          const scaffold = [
+            `# PROJECT.md — ${dirName}`,
+            "",
+            `> 由 Tiffa 于 ${today} 首次对话时自动生成。本文件记录本项目的关键规范、决策与约定，每会话开头确定性注入 system prompt。`,
+            `> 由 agent 在会话中持续维护：发现需长期记住的项目级事实 / 决策 / 坑时，用 write 工具更新本文件对应章节。`,
+            "",
+            "## 项目概述",
+            "",
+            "（项目目标、技术栈、关键路径）",
+            "",
+            "## 关键决策 / 架构约定",
+            "",
+            "## 注意事项 / 踩坑记录",
+            "",
+            "## 外部服务 / 端口",
+            "",
+            "（如 ComfyUI: http://host:port 等，写入真实地址可避免弱模型幻觉成错误端口）",
+            "",
+          ].join("\n")
+          try {
+            writeFileSync(projectMd, scaffold, "utf8")
+            log("before_agent_start.project_md", `created ${projectMd}`)
+          } catch (e: any) {
+            log("before_agent_start.project_md.error", e?.message || String(e))
+          }
+        }
+        if (existsSync(projectMd)) {
+          const pm = readFileSync(projectMd, "utf8").trim()
+          if (pm) injected.push(`# 项目记忆（PROJECT.md · ${projectDir}）\n\n${pm}`)
+        }
+      } catch (err: any) {
+        log("before_agent_start.project_md.error", err?.message || String(err))
+      }
+
+      // (c) 记忆工具提示：recall 可用于跨项目语义检索历史记忆
+      // autoRecall 关闭时，agent 不会自动召回，但可按需手动调用 recall
+      injected.push([
+        "# 记忆工具（Mnemopi）",
+        "",
+        "你可以使用以下记忆工具：",
+        "- `recall`：语义检索历史记忆（跨项目）。当用户提到「之前/上次/其他项目做过」等，或需要查找历史决策时调用。参数：`{ query: \"检索关键词\" }`",
+        "- `retain`：主动记住重要事实/决策，供未来 recall 检索。当前已开启自动 retain（每 2 轮），一般无需手动调用。",
+        "- `memory_edit`：按 ID 更新/删除已召回的记忆。",
+        "",
+        "**使用时机**：用户要求检索记忆、提到历史任务、或你不确定某事是否之前做过时，优先调用 `recall` 而非手动查数据库。",
+      ].join("\n"))
+
+      if (injected.length > 0) {
+        const lineCount = injected.reduce((n, s) => n + s.split("\n").length, 0)
+        log("before_agent_start.inject", `injecting ${lineCount} lines (constraints + project.md)`)
+        return { systemPrompt: injected }
       }
     } catch (err: any) {
       log("before_agent_start.error", err?.message || String(err))
@@ -240,6 +341,15 @@ export default async function (pi: any) {
         let readPath = ""
         if (tool === "read") {
           readPath = String(input.filePath || input.path || "")
+          // 跟踪 read skill://<name> 调用
+          if (readPath.startsWith("skill://")) {
+            const skillName = readPath.slice("skill://".length).split("/")[0].split("?")[0]
+            if (skillName) {
+              skillLoadedThisTurn.add(skillName)
+              lastSkillRead = skillName
+              log("tool_call.skill_loaded", `skill://${skillName}`)
+            }
+          }
         } else {
           // bash/shell: 提取 cat/type/Get-Content 等读取命令的目标文件
           const cmd = String(input.command || input.content || "")
@@ -269,6 +379,37 @@ export default async function (pi: any) {
                 return { block: true, reason: `[claude-mode] 禁止在 workspace 下新建项目目录 "${firstDir}"。` }
               }
             }
+          }
+        }
+      }
+
+      // ── 技能强制：跟踪 ask 工具调用（模型问了用户）──
+      if (tool === "ask") {
+        askCountThisTurn++
+        log("tool_call.ask", `ask count this turn: ${askCountThisTurn}`)
+      }
+
+      // ── 技能强制：调技能脚本前必须先 read skill:// 和 ask 用户 ──
+      if (tool === "bash" || tool === "shell") {
+        const cmd = String(input.command || input.content || "")
+        for (const rule of SKILL_SCRIPT_RULES) {
+          if (rule.pattern.test(cmd)) {
+            if (!skillLoadedThisTurn.has(rule.skill)) {
+              log("tool_call.blocked", `${rule.skill} script called without reading SKILL.md`)
+              return {
+                block: true,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但本轮尚未加载技能步骤。必须先执行 \`read skill://${rule.skill}\` 读取完整步骤规则，再按规则执行。不读就做 = 跳步骤。`,
+              }
+            }
+            if (rule.requireAsk && askCountThisTurn < 1) {
+              log("tool_call.blocked", `${rule.skill} script called without asking user first`)
+              return {
+                block: true,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但本轮尚未询问用户。SKILL.md 要求：执行前必须先用 ask 工具询问用户（如“要不要生图”“选哪种管线”等）。请先问用户，再执行。`,
+              }
+            }
+            // ask >= 1 表示模型已问过用户，现在尝试执行——放行
+            break
           }
         }
       }
@@ -436,12 +577,23 @@ export default async function (pi: any) {
     }
   })
 
-  // ── 5. tool_result ── 审计日志 + 堆栈/路径泄露拦截
+  // ── 5. tool_result ── 审计日志 + 堆栈/路径泄露拦截 + 技能路径注入
   pi.on("tool_result", async (event: any) => {
     try {
       const tool = event.toolName || "unknown"
       auditLog({ event: "tool_result", tool, isError: event.isError || false })
       log("tool_result", `tool=${tool}`)
+
+      // 技能路径注入：读取 skill:// 后追加绝对路径提示（弱模型不会自己拼）
+      if (tool === "read" && lastSkillRead && SKILL_PATH_HINTS[lastSkillRead] && !event.isError) {
+        const hint = SKILL_PATH_HINTS[lastSkillRead]
+        lastSkillRead = "" // 消费一次后清空
+        const existing = Array.isArray(event.content) ? event.content : []
+        return {
+          content: [...existing, { type: "text", text: hint }],
+        }
+      }
+      lastSkillRead = "" // 非技能读取时也清空
 
       // 检查错误结果是否泄露堆栈/路径
       if (event.isError) {
@@ -470,5 +622,5 @@ export default async function (pi: any) {
     }
   })
 
-  log("init", "=== claude-mode extension v6.1.1 ready ===")
+  log("init", "=== claude-mode extension v6.2 ready ===")
 }
