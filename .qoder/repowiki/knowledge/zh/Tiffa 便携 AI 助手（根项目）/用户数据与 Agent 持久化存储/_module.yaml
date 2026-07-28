@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: per_user_data
+title: 用户数据与 Agent 持久化存储
+scope:
+    - data/
+source_files: []
+depends_on: []
+related_to:
+    - path: electron_app
+    - path: skills_library
