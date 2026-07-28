@@ -246,14 +246,16 @@ def cmd_edit(args):
 
     wf = load_wf(WF_EDIT)
 
+    # edit workflow: seed=102(RandomNoise.noise_seed), steps=109(Flux2Scheduler),
+    #              image=76(LoadImage), prompt=117(CR Text)
     if args.seed and args.seed > 0:
-        wf["73"]["inputs"]["seed"] = args.seed
+        wf["102"]["inputs"]["noise_seed"] = args.seed
     if args.steps and args.steps > 0:
-        wf["3"]["inputs"]["steps"] = args.steps
+        wf["109"]["inputs"]["steps"] = args.steps
 
     img_name = upload_image(args.image)
-    wf["96"]["inputs"]["value"] = img_name
-    wf["102"]["inputs"]["value"] = args.prompt
+    wf["76"]["inputs"]["image"] = img_name
+    wf["117"]["inputs"]["text"] = args.prompt
 
     print("[comfy] edit: %s" % args.prompt[:60], flush=True)
     return submit_and_wait(wf, args.timeout)
