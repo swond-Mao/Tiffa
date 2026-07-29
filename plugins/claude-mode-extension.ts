@@ -194,9 +194,21 @@ export default async function (pi: any) {
     }
   }
 
-  // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用
+  // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用 + 解除标题禁用
   pi.on("session_start", async () => {
     await sanitizeTools("session_start")
+    // 内核在 rpc-ui/rpc/acp 模式下设置 PI_NO_TITLE=1，完全禁用 AI 标题生成。
+    // 桌面端用 rpc-ui 模式，需要标题生成功能，在此解除禁用。
+    // 必须在 session_start（内核启动后、首次对话前）执行，早于内核的 title 生成检查。
+    try {
+      if (process.env.PI_NO_TITLE || (globalThis as any).Bun?.env?.PI_NO_TITLE) {
+        delete process.env.PI_NO_TITLE
+        if (typeof Bun !== "undefined" && (Bun as any).env) delete (Bun as any).env.PI_NO_TITLE
+        log("session_start.title_enable", "PI_NO_TITLE cleared, AI title generation enabled")
+      }
+    } catch (e: any) {
+      log("session_start.title_enable.error", e?.message || String(e))
+    }
   })
 
   // ── 1. before_agent_start ── 注入行为约束 + 项目 PROJECT.md 生成/注入
@@ -223,36 +235,86 @@ export default async function (pi: any) {
       }
 
       // (b) 项目级 PROJECT.md：项目根目录首次对话自动生成脚手架，并确定性注入 system prompt
+      // 模板版本号：检测到旧版本时自动升级头部模板（保留用户正文内容）
       try {
         const projectDir = process.cwd()
         const projectMd = join(projectDir, "PROJECT.md")
-        if (!existsSync(projectMd)) {
-          const dirName = projectDir.split(/[\\/]/).pop() || "project"
-          const today = new Date().toISOString().split("T")[0]
-          const scaffold = [
-            `# PROJECT.md — ${dirName}`,
+        const SCAFFOLD_VERSION = "v2"
+        const VERSION_MARKER = `<!-- scaffold:${SCAFFOLD_VERSION} -->`
+
+        // 生成脚手架头部模板（版本标记 + 标题 + 元信息 + 路径约定）
+        function buildScaffoldHeader(dirName: string, today: string): string {
+          return [
+            `<!-- scaffold:${SCAFFOLD_VERSION} -->`,
+            `# PROJECT.md - ${dirName}`,
             "",
-            `> 由 Tiffa 于 ${today} 首次对话时自动生成。本文件记录本项目的关键规范、决策与约定，每会话开头确定性注入 system prompt。`,
-            `> 由 agent 在会话中持续维护：发现需长期记住的项目级事实 / 决策 / 坑时，用 write 工具更新本文件对应章节。`,
+            `> 由 Tiffa 自动维护，记录项目规范、决策与踩坑，每会话开头注入 system prompt。`,
+            "- **项目名称**：" + dirName,
+            "- **项目目标**：暂未确定",
+            "- **创建时间**：" + today,
             "",
             "## 项目概述",
             "",
             "（项目目标、技术栈、关键路径）",
             "",
-            "## 关键决策 / 架构约定",
+            "**安装方式：移动硬盘便携安装**。Tiffa 安装在移动硬盘上（盘符不固定，可能 E:、F:、G: 等），所有路径必须用相对于 `PORTABLE_ROOT` 的自包含路径，**禁止硬编码盘符**。",
             "",
-            "## 注意事项 / 踩坑记录",
+            "### 路径约定",
             "",
-            "## 外部服务 / 端口",
-            "",
-            "（如 ComfyUI: http://host:port 等，写入真实地址可避免弱模型幻觉成错误端口）",
+            "- `PORTABLE_ROOT`：Tiffa 安装根目录，启动时自动解析（`--portable-root` CLI 参数 / `PORTABLE_ROOT` 环境变量 / `__dirname/..`），代码中始终用 `path.join(PORTABLE_ROOT, ...)` 拼接",
+            "- 文档中记录路径时用 `$ROOT/...` 表示相对于 `PORTABLE_ROOT` 的路径（如 `$ROOT/data/agent/`、`$ROOT/skills/`、`$ROOT/workspace/`）",
+            "- 内核环境变量也基于 `PORTABLE_ROOT`：`PI_CODING_AGENT_DIR=$ROOT/data/agent`，`HOME=$ROOT/home`，`BUN_INSTALL=$ROOT`",
+            "- `projects.json` 中的 cwd 在启动时会自动迁移盘符（`extractWorkspaceSuffix` 提取 `workspace/` 后缀，重新拼接到当前 `PORTABLE_ROOT`），所以历史记录不怕盘符变化",
             "",
           ].join("\n")
+        }
+
+        // 脚手架尾部模板（章节标题 + 外部服务提示）
+        const SCAFFOLD_TAIL = [
+          "## 关键决策 / 架构约定",
+          "",
+          "## 注意事项 / 踩坑记录",
+          "",
+          "## 外部服务 / 端口",
+          "",
+          "（如 ComfyUI: http://host:port 等，写入真实地址可避免弱模型幻觉成错误端口）",
+          "",
+        ].join("\n")
+
+        if (!existsSync(projectMd)) {
+          // 首次生成
+          const dirName = projectDir.split(/[\\/]/).pop() || "project"
+          const today = new Date().toISOString().split("T")[0]
+          const scaffold = buildScaffoldHeader(dirName, today) + SCAFFOLD_TAIL
           try {
             writeFileSync(projectMd, scaffold, "utf8")
             log("before_agent_start.project_md", `created ${projectMd}`)
           } catch (e: any) {
             log("before_agent_start.project_md.error", e?.message || String(e))
+          }
+        } else {
+          // 已存在：检测旧版本，自动升级头部模板
+          try {
+            const existing = readFileSync(projectMd, "utf8")
+            if (!existing.includes(VERSION_MARKER)) {
+              // 旧版或无版本标记 -> 升级
+              const dirName = projectDir.split(/[\\/]/).pop() || "project"
+              const today = new Date().toISOString().split("T")[0]
+              const newHeader = buildScaffoldHeader(dirName, today)
+
+              // 尝试提取用户已写的正文（跳过旧头部，从第一个 ## 章节标题开始保留）
+              const sectionMatch = existing.match(/\n## /)
+              let userBody = ""
+              if (sectionMatch && sectionMatch.index !== undefined) {
+                userBody = existing.substring(sectionMatch.index + 1) // 保留从 ## 开始的内容
+              }
+
+              const upgraded = newHeader + (userBody || SCAFFOLD_TAIL)
+              writeFileSync(projectMd, upgraded, "utf8")
+              log("before_agent_start.project_md", `upgraded to ${SCAFFOLD_VERSION} ${projectMd}`)
+            }
+          } catch (e: any) {
+            log("before_agent_start.project_md.upgrade.error", e?.message || String(e))
           }
         }
         if (existsSync(projectMd)) {
