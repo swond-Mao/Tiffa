@@ -47,6 +47,13 @@ function _killTree(pid, sync = false) {
   } catch (e) { /* ignore */ }
 }
 
+// ── 会话 ID 工具：从 sessionPath 提取 UUID（与 renderer extractSessionId 一致） ──
+function _extractSessionIdFromPath(sessionPath) {
+  if (!sessionPath) return null;
+  const match = String(sessionPath).match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  return match ? match[1] : null;
+}
+
 // ── UTF-8 环境变量注入（治理中文乱码） ──
 // 乱码根因：Tiffa 内核 spawn bash/powershell 执行命令时，Windows 控制台默认
 // codepage 为 CP936（GBK），编码不一致 → 中文文件名/输出变成乱码。
@@ -102,6 +109,15 @@ class TiffaInstance {
       HOME: path.join(PORTABLE_ROOT, 'home'),
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
       BUN_INSTALL: PORTABLE_ROOT,
+      // 将便携 python/node 前置到 PATH，确保子进程能直接用 python/node 命令
+      // 否则 Windows 系统 PATH 中的 Store 占位符 python.exe 会被命中（exit 49 弹窗）
+      PATH: [
+        path.join(PORTABLE_ROOT, 'python'),
+        path.join(PORTABLE_ROOT, 'python', 'Scripts'),
+        path.join(PORTABLE_ROOT, 'node'),
+        path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin'),
+        process.env.PATH || '',
+      ].join(path.delimiter),
     };
 
     delete env.NODE_OPTIONS;
@@ -152,8 +168,10 @@ class TiffaInstance {
 
       this._cleanup();
 
-      // 崩溃自动重启：非用户主动 kill、非零退出码、未超出重启上限
-      const shouldRestart = !this.userKilled && code !== 0 && this.crashCount < this.maxCrashRestart;
+      // 崩溃自动重启：非用户主动 kill、未超出重启上限
+      // 注：常驻 CLI 不应自行退出；切换会话/项目时若 CLI 异常 clean exit(code===0) 也应重启，
+      // 否则实例被 ready 轮询 delete 后静默消失（用户感知为"静默崩溃不重启"）
+      const shouldRestart = !this.userKilled && this.crashCount < this.maxCrashRestart;
       if (shouldRestart) {
         this.crashCount++;
         console.log(`[TiffaInstance:${this._shortCwd()}] 3秒后自动重启 (第${this.crashCount}次)`);
@@ -211,6 +229,13 @@ class TiffaInstance {
         return;
       }
 
+      // 用户交互立即取消预热过滤：避免用户消息的响应事件被预热过滤器吞掉
+      // （预热仅服务于 /memory rebuild 的 embedding 冷加载，用户交互优先级更高）
+      if (this.isPrewarming) {
+        this.isPrewarming = false;
+        console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消预热过滤`);
+      }
+
       const id = `cmd_${++this.commandId}`;
       frame.id = id;
 
@@ -238,6 +263,11 @@ class TiffaInstance {
     if (!this.process || !this.process.stdin.writable) {
       console.error(`[TiffaInstance:${this._shortCwd()}] Tiffa 未运行，无法发送`);
       return;
+    }
+    // 用户交互（steer/follow_up/prompt）立即取消预热过滤
+    if (this.isPrewarming && (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up')) {
+      this.isPrewarming = false;
+      console.log(`[TiffaInstance:${this._shortCwd()}] 用户 raw 命令(${frame.type})到达，取消预热过滤`);
     }
     const line = JSON.stringify(frame) + '\n';
     try {
@@ -291,6 +321,19 @@ class TiffaInstance {
         reject(new Error(event.error || 'Command failed'));
       }
       return;
+    }
+
+    // 拦截 session_switch：CLI 分配真实 sessionId 后，同步更新实例的 sessionId 与 map key。
+    // 否则 renderer 用 realSessionId 切回时 _key(cwd, realSessionId) 查不到 → spawn 新进程 →
+    // CLI 进程内存里的对话上下文随旧进程死亡丢失（用户感知为“找不到上下文”）。
+    // 注意：预热期间的 session_switch 来自 /memory rebuild，不应迁移实例 key，
+    // 否则后续用户消息的 session_switch 无法正确匹配。
+    if (event.type === 'session_switch' && event.sessionPath && !this.isPrewarming) {
+      const realSessionId = _extractSessionIdFromPath(event.sessionPath);
+      if (realSessionId && realSessionId !== this.sessionId) {
+        tiffaManager.migrateSessionId(this.cwd, this.sessionId, realSessionId);
+        this.sessionId = realSessionId; // 更新实例自身 sessionId，后续事件标记用新值
+      }
     }
     // Forward all events to renderer (带 cwd + sessionId 标记)
     event._cwd = this.cwd;
@@ -346,11 +389,25 @@ class TiffaInstanceManager {
     this.activeCwd = normalized;
     currentWorkspaceDir = normalized;
 
-    // 已存在实例 -> 直接复用
+    // 已存在实例 -> 复用；若正处崩溃重启中则等待 ready
     if (this.instances.has(key)) {
       const inst = this.instances.get(key);
       inst.lastActiveTime = Date.now();
-      return inst;
+      // 实例可能在崩溃重启中（process 已退出、_restartTimer 排队）：
+      // 不等待会让调用方拿到 process=null 的实例，sendCommand 立即失败
+      if (!inst.ready && (!inst.process || inst.process.exitCode !== null)) {
+        await new Promise((resolve) => {
+          let checks = 0;
+          const check = setInterval(() => {
+            checks++;
+            // ready 成功 / 等待超 10s / 重启计时器已清且仍无 process(重启放弃) -> 结束等待
+            if (inst.ready || checks > 100 || (!inst._restartTimer && !inst.process)) {
+              clearInterval(check); resolve();
+            }
+          }, 100);
+        });
+      }
+      return { inst, ready: inst.ready };
     }
 
     // 正在 spawn 中 -> 复用同一个 Promise
@@ -383,9 +440,10 @@ class TiffaInstanceManager {
         }
       });
 
-      // 进程已退出则移除占位条目
+      // 进程已退出：若 exit handler 已安排重启则保留实例占位，避免重启进程脱离 map 变孤儿
       if (!inst.process || inst.process.exitCode !== null) {
-        this.instances.delete(key);
+        const willRestart = !inst.userKilled && inst.crashCount < inst.maxCrashRestart;
+        if (!willRestart) this.instances.delete(key);
       }
       return { inst, ready: inst.ready };
     })();
@@ -404,11 +462,25 @@ class TiffaInstanceManager {
     const normalized = path.resolve(cwd);
     const key = this._key(cwd, sessionId);
 
-    // 已存在实例 -> 直接复用
+    // 已存在实例 -> 复用；若正处崩溃重启中则等待 ready
     if (this.instances.has(key)) {
       const inst = this.instances.get(key);
       inst.lastActiveTime = Date.now();
-      return inst;
+      // 实例可能在崩溃重启中（process 已退出、_restartTimer 排队）：
+      // 不等待会让调用方拿到 process=null 的实例，sendCommand 立即失败
+      if (!inst.ready && (!inst.process || inst.process.exitCode !== null)) {
+        await new Promise((resolve) => {
+          let checks = 0;
+          const check = setInterval(() => {
+            checks++;
+            // ready 成功 / 等待超 10s / 重启计时器已清且仍无 process(重启放弃) -> 结束等待
+            if (inst.ready || checks > 100 || (!inst._restartTimer && !inst.process)) {
+              clearInterval(check); resolve();
+            }
+          }, 100);
+        });
+      }
+      return { inst, ready: inst.ready };
     }
 
     // 正在 spawn 中 -> 复用同一个 Promise
@@ -439,9 +511,10 @@ class TiffaInstanceManager {
         }
       });
 
-      // 进程已退出则移除占位条目
+      // 进程已退出：若 exit handler 已安排重启则保留实例占位，避免重启进程脱离 map 变孤儿
       if (!inst.process || inst.process.exitCode !== null) {
-        this.instances.delete(key);
+        const willRestart = !inst.userKilled && inst.crashCount < inst.maxCrashRestart;
+        if (!willRestart) this.instances.delete(key);
       }
       return { inst, ready: inst.ready };
     })();
@@ -465,6 +538,33 @@ class TiffaInstanceManager {
     if (!cwd || !sessionId) return null;
     const key = this._key(cwd, sessionId);
     return this.instances.get(key) || null;
+  }
+
+  // 迁移实例的 sessionId：CLI 分配真实 sessionId 后，把实例从旧 key(tempSessionId)
+  // 迁到新 key(realSessionId)，避免切回时查不到 → spawn 新进程 → 丢上下文。
+  migrateSessionId(cwd, oldSessionId, newSessionId) {
+    if (!cwd || !oldSessionId || !newSessionId || oldSessionId === newSessionId) return false;
+    const oldKey = this._key(cwd, oldSessionId);
+    const newKey = this._key(cwd, newSessionId);
+    const inst = this.instances.get(oldKey);
+    if (!inst) return false; // 实例不存在（可能已被 LRU 淘汰或 closeByKey）
+    if (this.instances.has(newKey)) {
+      // 目标 key 已有实例（异常情况）：保留已有实例，不覆盖，仅删旧 key
+      console.log(`[TiffaManager] migrateSessionId: 目标 key 已存在，仅删旧 key ${oldKey}`);
+      this.instances.delete(oldKey);
+      return false;
+    }
+    this.instances.delete(oldKey);
+    this.instances.set(newKey, inst);
+    // activeKey 也要同步（如果当前活跃实例正是被迁移的）
+    if (this.activeKey === oldKey) this.activeKey = newKey;
+    // spawning Map 同步（极端情况：迁移时还在 spawn 轮询 ready）
+    if (this.spawning.has(oldKey)) {
+      this.spawning.set(newKey, this.spawning.get(oldKey));
+      this.spawning.delete(oldKey);
+    }
+    console.log(`[TiffaManager] sessionId 迁移: ${oldSessionId} -> ${newSessionId} (key: ${oldKey} -> ${newKey})`);
+    return true;
   }
 
   // 按 sessionId 查找，回退到 activeKey
@@ -543,6 +643,8 @@ class TiffaInstanceManager {
 
     for (const [key, inst] of this.instances) {
       if (key === this.activeKey) continue;
+      // 运行中的实例跳过：强杀会丢失未写盘的对话片段（taskkill /F /T 不等 flush）
+      if (inst.agentRunning) continue;
       if (inst.lastActiveTime < oldestTime) {
         oldestTime = inst.lastActiveTime;
         oldest = key;
@@ -613,6 +715,22 @@ function createWindow() {
   if (process.argv.includes('--dev') || process.argv.includes('--verbose')) {
     mainWindow.webContents.openDevTools();
   }
+
+  // ── 兜底：防止外部链接在 app 窗口内导航导致页面卡死 ──
+  // 即使前端漏拦截，这里也会把 http/https 导航重定向到系统浏览器
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (/^https?:\/\//.test(url)) {
+      e.preventDefault();
+      shell.openExternal(url);
+    }
+  });
 }
 
 // ── IPC Handlers ──
@@ -715,7 +833,19 @@ function setupIpc() {
     }
     if (!inst) inst = tiffaManager.getActive(); // 无 sessionId 时用项目级
     if (!inst) throw new Error('No active Tiffa instance');
-    return inst.sendCommand(frame);
+    // 发送重试：进程可能在重启中（process=null 但 restartTimer 排队），等待一次再试
+    try {
+      return await inst.sendCommand(frame);
+    } catch (err) {
+      if (inst._restartTimer || (!inst.process && inst.crashCount < inst.maxCrashRestart)) {
+        console.log(`[主进程] 发送失败，实例可能在重启中，等待 4 秒后重试…`);
+        await new Promise(r => setTimeout(r, 4000));
+        if (inst.ready && inst.process) {
+          return inst.sendCommand(frame);
+        }
+      }
+      throw err;
+    }
   });
 
   // 激活对话级实例（每对话独立进程）——显式设置 activeKey
@@ -751,7 +881,18 @@ function setupIpc() {
   });
 
   ipcMain.handle('tiffa:setModel', async (event, provider, modelId, sessionId) => {
-    const inst = tiffaManager.resolve(tiffaManager.activeCwd, sessionId);
+    // 指定 sessionId 时精确匹配对话实例，不回退到项目级（避免模型设到错误实例）
+    let inst;
+    if (sessionId) {
+      inst = tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+      if (!inst) {
+        // 实例不存在 -> 先激活再设置（与 send 路径一致）
+        await tiffaManager.activateSession(tiffaManager.activeCwd, sessionId);
+        inst = tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+      }
+    } else {
+      inst = tiffaManager.getActive();
+    }
     if (!inst) throw new Error('No active Tiffa instance');
     return inst.sendCommand({ type: 'set_model', provider, modelId });
   });
@@ -794,7 +935,7 @@ function setupIpc() {
     inst.sendRaw({ type: 'follow_up', message });
   });
 
-  ipcMain.handle('tiffa:extensionResponse', async (event, id, value) => {
+  ipcMain.handle('tiffa:extensionResponse', async (event, id, value, sessionId) => {
     const frame = { type: 'extension_ui_response', id };
     if (value && typeof value === 'object') {
       if ('cancelled' in value) frame.cancelled = true;
@@ -804,7 +945,11 @@ function setupIpc() {
     } else {
       frame.value = value;
     }
-    _active().sendRaw(frame);
+    // 按 sessionId 路由到发请求的实例，而非 _active()（当前活跃实例可能已切换）
+    const inst = sessionId
+      ? (tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId) || tiffaManager.getActive())
+      : tiffaManager.getActive();
+    if (inst) inst.sendRaw(frame);
   });
 
   ipcMain.handle('tiffa:compact', async () => {
@@ -1636,6 +1781,8 @@ function setupIpc() {
           if (obj.id && !sessionId && obj.version) {
             sessionId = obj.id;
             cwd = obj.cwd;
+            // 手动重命名写入 header.title，作为 title 事件的 fallback
+            if (obj.title && !title) title = obj.title;
           }
           if (obj.message) {
             messageCount++;
