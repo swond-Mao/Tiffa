@@ -23,16 +23,16 @@ marked.setOptions({
 
 contextBridge.exposeInMainWorld('tiffaDesktop', {
   // ── Tiffa 代理命令 ──
-  send: (message, images) => ipcRenderer.invoke('tiffa:send', message, images),
-  abort: () => ipcRenderer.invoke('tiffa:abort'),
-  setModel: (provider, modelId) => ipcRenderer.invoke('tiffa:setModel', provider, modelId),
+  send: (message, images, sessionId) => ipcRenderer.invoke('tiffa:send', message, images, sessionId),
+  abort: (sessionId) => ipcRenderer.invoke('tiffa:abort', sessionId),
+  setModel: (provider, modelId, sessionId) => ipcRenderer.invoke('tiffa:setModel', provider, modelId, sessionId),
   getModels: () => ipcRenderer.invoke('tiffa:getModels'),
   getState: () => ipcRenderer.invoke('tiffa:getState'),
   isReady: () => ipcRenderer.invoke('tiffa:isReady'),
   diagnostics: () => ipcRenderer.invoke('tiffa:diagnostics'),
-  steer: (message) => ipcRenderer.invoke('tiffa:steer', message),
-  followUp: (message) => ipcRenderer.invoke('tiffa:followUp', message),
-  extensionResponse: (id, value) => ipcRenderer.invoke('tiffa:extensionResponse', id, value),
+  steer: (message, sessionId) => ipcRenderer.invoke('tiffa:steer', message, sessionId),
+  followUp: (message, sessionId) => ipcRenderer.invoke('tiffa:followUp', message, sessionId),
+  extensionResponse: (id, value, sessionId) => ipcRenderer.invoke('tiffa:extensionResponse', id, value, sessionId),
   compact: () => ipcRenderer.invoke('tiffa:compact'),
   command: (type, payload) => ipcRenderer.invoke('tiffa:command', type, payload),
 
@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   restoreSession: (sessionPath) => ipcRenderer.invoke('sessions:restoreSession', sessionPath),
   getUserEntries: (sessionPath) => ipcRenderer.invoke('sessions:getUserEntries', sessionPath),
   exportSessionHtml: (sessionPath) => ipcRenderer.invoke('sessions:exportHtml', sessionPath),
+  recallMemory: (query) => ipcRenderer.invoke('memory:recall', query),
   getRemovedCwds: () => ipcRenderer.invoke('sessions:getRemovedCwds'),
   addRemovedCwd: (cwd) => ipcRenderer.invoke('sessions:addRemovedCwd', cwd),
   removeRemovedCwd: (cwd) => ipcRenderer.invoke('sessions:removeRemovedCwd', cwd),

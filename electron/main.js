@@ -2366,6 +2366,84 @@ function setupIpc() {
     writeRemovedCwds(list.filter(c => c !== normalized));
     return { success: true };
   });
+
+  // ── 全局记忆召回：直接查询 mnemopi SQLite FTS，不经过内核 ──
+  ipcMain.handle('memory:recall', async (event, query) => {
+    const q = (query || '').trim();
+    if (!q) return { results: [], error: '空查询' };
+    try {
+      const pythonExe = path.join(PORTABLE_ROOT, 'python', 'python.exe');
+      const banksDir = path.join(AGENT_DIR, 'memories', 'mnemopi', 'banks');
+      const script = `
+import sqlite3, os, glob, json, sys
+
+query = sys.argv[1]
+banks_dir = sys.argv[2]
+results = []
+
+for db_path in glob.glob(os.path.join(banks_dir, '*', 'mnemopi.db')):
+    bank = os.path.basename(os.path.dirname(db_path))
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        fts_ok = False
+        try:
+            cur.execute(
+                "SELECT wm.id, wm.content, wm.source, wm.timestamp, wm.session_id "
+                "FROM fts_working JOIN working_memory wm ON fts_working.id = wm.id "
+                "WHERE fts_working MATCH ? ORDER BY rank LIMIT 20",
+                (query,)
+            )
+            for row in cur.fetchall():
+                results.append({
+                    'id': row['id'],
+                    'content': row['content'][:500],
+                    'source': row['source'] or '',
+                    'timestamp': row['timestamp'] or '',
+                    'session_id': row['session_id'] or '',
+                    'bank': bank,
+                    'score': 1.0,
+                })
+            fts_ok = True
+        except Exception:
+            pass
+        if not fts_ok:
+            cur.execute(
+                "SELECT id, content, source, timestamp, session_id "
+                "FROM working_memory WHERE content LIKE ? "
+                "ORDER BY timestamp DESC LIMIT 20",
+                (f'%{query}%',)
+            )
+            for row in cur.fetchall():
+                results.append({
+                    'id': row['id'],
+                    'content': row['content'][:500],
+                    'source': row['source'] or '',
+                    'timestamp': row['timestamp'] or '',
+                    'session_id': row['session_id'] or '',
+                    'bank': bank,
+                    'score': 0.5,
+                })
+        conn.close()
+    except Exception:
+        pass
+
+results.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+print(json.dumps({'results': results[:30]}, ensure_ascii=False))
+`;
+      const { execFileSync } = require('child_process');
+      const output = execFileSync(pythonExe, ['-c', script, q, banksDir], {
+        encoding: 'utf8',
+        timeout: 10000,
+        maxBuffer: 5 * 1024 * 1024,
+      });
+      return JSON.parse(output.trim());
+    } catch (err) {
+      console.error('[memory:recall] error:', err.message);
+      return { results: [], error: err.message };
+    }
+  });
 }
 
 // ── App Lifecycle ──
