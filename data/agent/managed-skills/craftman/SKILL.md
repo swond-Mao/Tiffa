@@ -105,6 +105,63 @@ pptgen 默认调外部 LLM 失败（医院内网 22023/22024 便携包不可达�
 }
 ```
 
+### content.json 格式（pptgen --cache 必须严格匹配）
+
+content.json 必须包含 `slides` 数组，每个 slide 必须有 `layout` 和 `title`。完整 schema：
+
+```json
+{
+  "title": "演示标题",
+  "subtitle": "副标题",
+  "author": "作者",
+  "date": "2026-07-30",
+  "style": "magazine",
+  "slides": [
+    {
+      "layout": "cover",
+      "title": "封面标题",
+      "content": "副标题或描述",
+      "image": null,
+      "detail": null
+    },
+    {
+      "layout": "section",
+      "title": "第一章 起源",
+      "content": "",
+      "image": null,
+      "detail": null
+    },
+    {
+      "layout": "content",
+      "title": "标题",
+      "content": "正文内容，支持\\n换行\\n- 列表项",
+      "items": ["条目1", "条目2"],
+      "image": null,
+      "detail": {
+        "title": "展开详情标题",
+        "type": "text",
+        "data": {"text": "详细说明文字"}
+      }
+    },
+    {
+      "layout": "data",
+      "title": "12,847",
+      "content": "数据说明",
+      "image": null,
+      "detail": null
+    }
+  ]
+}
+```
+
+**layout 可选值**：cover / section / content / content-left / content-right / two-column / quote / data / image-full
+
+**关键规则**：
+- `slides` 数组不能为空，否则 pptgen 报 `no slides in response` 退出
+- `--no-image` 模式下 `image` 字段可忽略（设为 null）
+- `detail` 字段提供"点击展开"交互，type 可选 text/table/card/bar
+- `style` 必须是有效风格名（见 pptgen STYLES 列表）
+
 ### canvas-design + pptgen 组合
 
 封面用 canvas-design（AI 写自定义 HTML），内容页用 pptgen（AI 写 JSON 内容），最后 craftman 自动把 canvas 嵌入网页演示首位：

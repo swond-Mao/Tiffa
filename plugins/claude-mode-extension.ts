@@ -137,10 +137,30 @@ export default async function (pi: any) {
   const SILENT_TOOL_CALL_THRESHOLD = 3
 
   // ── 技能强制机制：弱模型不读 SKILL.md 就调脚本 -> block ──
-  // 每轮 agent turn 重置；read skill:// 标记已加载，ask 标记已问用户
-  let skillLoadedThisTurn = new Set<string>()
-  let askCountThisTurn = 0
-  let lastSkillRead = "" // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
+  // 会话级持久 + 超时重置（10 分钟）。craftman 等多轮工作流中，
+  // 规划阶段 read skill:// + ask 过后，执行阶段（跨轮）不应再要求重来。
+  // 超时后或 session_start 时重置，防止用户切换任务后旧状态残留。
+  const SKILL_STATE_TTL_MS = 10 * 60 * 1000 // 10 分钟
+  let skillLoadedMap = new Map<string, number>() // skill名 -> 加载时间戳
+  let askTimestamp = 0                          // 最近一次 ask 的时间戳
+  let lastSkillRead = ""                        // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
+
+  function isSkillFresh(skill: string): boolean {
+    const ts = skillLoadedMap.get(skill)
+    if (!ts) return false
+    return Date.now() - ts < SKILL_STATE_TTL_MS
+  }
+
+  function isAskFresh(): boolean {
+    if (!askTimestamp) return false
+    return Date.now() - askTimestamp < SKILL_STATE_TTL_MS
+  }
+
+  function resetSkillState() {
+    skillLoadedMap = new Map()
+    askTimestamp = 0
+    lastSkillRead = ""
+  }
 
   // 技能脚本绝对路径提示（弱模型不会拼路径，直接告诉它）
   const SKILL_PATH_HINTS: Record<string, string> = {
@@ -196,6 +216,7 @@ export default async function (pi: any) {
 
   // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用 + 解除标题禁用
   pi.on("session_start", async () => {
+    resetSkillState()
     await sanitizeTools("session_start")
     // 内核在 rpc-ui/rpc/acp 模式下设置 PI_NO_TITLE=1，完全禁用 AI 标题生成。
     // 桌面端用 rpc-ui 模式，需要标题生成功能，在此解除禁用。
@@ -216,9 +237,13 @@ export default async function (pi: any) {
     try {
       agentTurnCount++
       silentToolCallCount = 0
-      skillLoadedThisTurn = new Set()
-      askCountThisTurn = 0
-      lastSkillRead = ""
+      // skill/ask 状态已改为会话级持久+超时重置，不在此处清零。
+      // 仅清理过期的 skill 状态（超过 TTL 的条目）
+      const now = Date.now()
+      for (const [skill, ts] of skillLoadedMap) {
+        if (now - ts >= SKILL_STATE_TTL_MS) skillLoadedMap.delete(skill)
+      }
+      if (askTimestamp && now - askTimestamp >= SKILL_STATE_TTL_MS) askTimestamp = 0
       await sanitizeTools("before_agent_start")
 
       const injected: string[] = []
@@ -407,7 +432,7 @@ export default async function (pi: any) {
           if (readPath.startsWith("skill://")) {
             const skillName = readPath.slice("skill://".length).split("/")[0].split("?")[0]
             if (skillName) {
-              skillLoadedThisTurn.add(skillName)
+              skillLoadedMap.set(skillName, Date.now())
               lastSkillRead = skillName
               log("tool_call.skill_loaded", `skill://${skillName}`)
             }
@@ -447,8 +472,8 @@ export default async function (pi: any) {
 
       // ── 技能强制：跟踪 ask 工具调用（模型问了用户）──
       if (tool === "ask") {
-        askCountThisTurn++
-        log("tool_call.ask", `ask count this turn: ${askCountThisTurn}`)
+        askTimestamp = Date.now()
+        log("tool_call.ask", `ask recorded at ${askTimestamp}`)
       }
 
       // ── 技能强制：调技能脚本前必须先 read skill:// 和 ask 用户 ──
@@ -456,18 +481,18 @@ export default async function (pi: any) {
         const cmd = String(input.command || input.content || "")
         for (const rule of SKILL_SCRIPT_RULES) {
           if (rule.pattern.test(cmd)) {
-            if (!skillLoadedThisTurn.has(rule.skill)) {
-              log("tool_call.blocked", `${rule.skill} script called without reading SKILL.md`)
+            if (!isSkillFresh(rule.skill)) {
+              log("tool_call.blocked", `${rule.skill} script called without fresh SKILL.md read`)
               return {
                 block: true,
-                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但本轮尚未加载技能步骤。必须先执行 \`read skill://${rule.skill}\` 读取完整步骤规则，再按规则执行。不读就做 = 跳步骤。`,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未加载技能步骤（或已过期）。必须先执行 \`read skill://${rule.skill}\` 读取完整步骤规则，再按规则执行。不读就做 = 跳步骤。`,
               }
             }
-            if (rule.requireAsk && askCountThisTurn < 1) {
-              log("tool_call.blocked", `${rule.skill} script called without asking user first`)
+            if (rule.requireAsk && !isAskFresh()) {
+              log("tool_call.blocked", `${rule.skill} script called without fresh ask`)
               return {
                 block: true,
-                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但本轮尚未询问用户。SKILL.md 要求：执行前必须先用 ask 工具询问用户（如“要不要生图”“选哪种管线”等）。请先问用户，再执行。`,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未询问用户（或询问已过期）。SKILL.md 要求：执行前必须先用 ask 工具询问用户（如"要不要生图""选哪种管线"等）。请先问用户，再执行。`,
               }
             }
             // ask >= 1 表示模型已问过用户，现在尝试执行——放行

@@ -7,7 +7,7 @@ import time
 
 COMFY = os.environ.get("COMFY_URL", "http://47.108.197.247:8188").rstrip("/")
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
-_OUT_DIR_DEFAULT = os.path.join(os.environ.get("PORTABLE_ROOT", os.path.dirname(os.path.dirname(SKILL_DIR))), "workspace", "comfyui_out")
+_OUT_DIR_DEFAULT = os.path.join(os.getcwd(), "comfyui_out")
 
 def resolve_out_dir(args_out_dir=None):
     """Resolve output directory: CLI arg > COMFY_OUT env > hardcoded default."""
@@ -392,7 +392,7 @@ def main():
                     help="主角 LoRA 开关：liuyifei（默认）或 kopiu。自动切换 LoRA strength 并在提示词前加 trigger 词")
     k2.add_argument("--name", default="krea2")
     k2.add_argument("--timeout", type=int, default=600)
-    k2.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
+    k2.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     k2.set_defaults(func=cmd_krea2)
 
     e = sub.add_parser("edit", help="edit an image by instruction")
@@ -402,7 +402,7 @@ def main():
     e.add_argument("--steps", type=int, default=0)
     e.add_argument("--name", default="edit")
     e.add_argument("--timeout", type=int, default=600)
-    e.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
+    e.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     e.set_defaults(func=cmd_edit)
 
     n = sub.add_parser("ernie", help="Ernie-Image-Turbo (good text rendering, multi-line prompt)")
@@ -412,7 +412,7 @@ def main():
     n.add_argument("--size", default="", help="WxH override, e.g. 768x1280")
     n.add_argument("--name", default="ernie")
     n.add_argument("--timeout", type=int, default=600)
-    n.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
+    n.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     n.set_defaults(func=cmd_ernie)
 
     z = sub.add_parser("zimage", help="Z-image turbo (distilled, 9 steps, cfg=1, multi-line prompt)")
@@ -422,10 +422,10 @@ def main():
     z.add_argument("--size", default="1920x1080", help="WxH, e.g. 1920x1080 or 1080x1080")
     z.add_argument("--lora-person", default="", help="path to a person LoRA to insert between 68 and KSampler (rare use)")
     z.add_argument("--lora-strength", type=float, default=0.8)
-    z.add_argument("--with-colleague", action="store_true", help="enable the baked-in colleague LoRA (kopiu-Z) — only for the colleague's face")
+    z.add_argument("--with-colleague", action="store_true", help="enable the baked-in colleague LoRA (kopiu-Z) - only for the colleague's face")
     z.add_argument("--name", default="zimage")
     z.add_argument("--timeout", type=int, default=600)
-    z.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
+    z.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     z.set_defaults(func=cmd_zimage)
 
     k = sub.add_parser("klein", help="Flux2-Klein standalone (free size, high realism, multi-line prompt)")
@@ -438,7 +438,7 @@ def main():
     k.add_argument("--sampler", default="", help="sampler name override, e.g. euler, dpmpp_2m")
     k.add_argument("--name", default="klein")
     k.add_argument("--timeout", type=int, default=600)
-    k.add_argument("--output", default="", help="图片输出目录（默认 E:\\workspace\\comfyui_out）")
+    k.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     k.set_defaults(func=cmd_klein)
 
     a = ap.parse_args()
