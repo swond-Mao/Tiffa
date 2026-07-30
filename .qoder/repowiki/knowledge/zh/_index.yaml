@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-07-28T16:55:28Z"
+exported_at: "2026-07-30T16:23:43Z"
 modules:
     "":
-        dir_name: Tiffa 便携 AI 助手（根项目）
-        title: Tiffa 便携 AI 助手（根项目）
+        dir_name: Tiffa 便携 AI 工作台（根装配层）
+        title: Tiffa 便携 AI 工作台（根装配层）
         scope:
             - README.md
             - AGENTS.md
@@ -27,35 +27,29 @@ modules:
         depends_on: []
         related_to: []
     electron_app:
-        dir_name: Tiffa 桌面端 Electron 应用（主进程 + 渲染进程）
-        title: Tiffa 桌面端 Electron 应用（主进程 + 渲染进程）
+        dir_name: Tiffa Electron 桌面客户端
+        title: Tiffa Electron 桌面客户端
         scope:
             - electron/
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: per_user_data
-            - path: skills_library
+        related_to: []
     per_user_data:
-        dir_name: 用户数据与 Agent 持久化存储
-        title: 用户数据与 Agent 持久化存储
+        dir_name: 按用户_工作空间隔离的 Agent 运行时持久化存储
+        title: 按用户/工作空间隔离的 Agent 运行时持久化存储
         scope:
             - data/
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: electron_app
-            - path: skills_library
+        related_to: []
     skills_library:
-        dir_name: 技能库（Skills Library）
-        title: 技能库（Skills Library）
+        dir_name: AI Agent 可插拔技能库（Skills Library）
+        title: AI Agent 可插拔技能库（Skills Library）
         scope:
             - skills/
         source_files: []
         children: []
         depends_on: []
-        related_to:
-            - path: electron_app
-            - path: per_user_data
+        related_to: []

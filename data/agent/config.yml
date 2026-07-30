@@ -17,13 +17,13 @@ modelRoles:
 # mnemopi: 全局 RAG，跨项目语义检索 + 压缩断片恢复
 memory:
   backend: mnemopi
-  mnemopi:
-    embeddingModel: "fast-bge-small-zh-v1.5"
-    scoping: "global"
-    autoRecall: false
-    autoRetain: true
-    retainEveryNTurns: 2
-    recallLimit: 10
-    injectionTokenLimit: 2000
+mnemopi:
+  embeddingModel: "BAAI/bge-small-zh-v1.5"
+  scoping: "per-project-tagged" # 双层召回：项目bank + 全局bank
+  autoRecall: true # 每次会话首条消息自动召回相关记忆
+  autoRetain: true
+  retainEveryNTurns: 2
+  recallLimit: 10
+  injectionTokenLimit: 2000
 tools:
   approvalMode: yolo

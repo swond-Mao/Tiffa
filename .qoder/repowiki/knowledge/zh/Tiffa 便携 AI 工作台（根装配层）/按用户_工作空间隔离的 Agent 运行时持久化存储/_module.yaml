@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: per_user_data
+title: 按用户/工作空间隔离的 Agent 运行时持久化存储
+scope:
+    - data/
+source_files: []
+depends_on: []
+related_to: []

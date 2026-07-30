@@ -56,64 +56,42 @@ description_cn: "AI 生图（ComfyUI）：真实感照片、人物、场景、�
 
 `edit` 分支不需要扩写，直接用用户指令。
 
-## 第三步：调用 wrapper（gen）
+## 第三步：调用出图（Tiffa 直接调 `comfy.py`）
 
-**唯一推荐入口：`gen` 命令**（已通过 `shell-wrapper.cmd` 注入 PATH，
-任何 shell 直接 `gen ...` 即可）。它强制执行路由+安全规则——任何 LLM agent
-（无论是否加载本 skill），只要走 `gen` 出图，都不可能跳过路由选择。
-
-```powershell
-gen --branch <t2i|ernie|klein|zimage|edit> --prompt "..." [options]
-```
-
-### Wrapper 强制的规则（OS 层，LLM 绕不过）
-1. 缺 `--branch` 直接拒绝并打印路由表（防止 LLM 偷懒直接 `python comfy.py ...`）
-2. `zimage` 时 `--steps < 8` 被拒绝（1 步发灰发软）
-3. `--with-colleague` 必须同时传 `--confirm-colleague`（同事 LoRA 强制二次确认）
-
-### 调用注意事项
-- Tiffa 便携包没有 `gen` 包装器，**不要调用 `gen`**，直接调 `comfy.py`
-- 即使 LLM 完全不知道这个 skill，直接 `gen --prompt "..."` 也会被强制路由提示
-- 永远不要调用 `python comfy.py ...` 直接形式——会绕过所有安全规则
-
-### Wrapper 调用格式
-
-- **t2i**：`gen --branch t2i --prompt "..." --custom 16:9`（横屏）或 `--custom 9:16`（竖屏）或 `--custom 1:1`
-  - ⚠️ 长宽比必须用纯数字 `16:9`，**禁止用 `--custom "16:9 (电影宽屏)"`**（会 400）
-  - 输出两张：Flux2-Klein + Z-image
-  - **支持批量提示词**（多行文本，每行生成一组图）
-- **ernie**：`gen --branch ernie --prompt "..." --size 1920x1080`（横屏）或 `--size 768x1280`（竖屏默认）
-  - **支持批量提示词**（多行文本，每行生成一张图）
-- **klein**：`gen --branch klein --prompt "..." --size 1920x1080` 或 `--size 832x1216`
-  - 支持 `--negative`、`--steps`、`--cfg`、`--sampler`
-  - **支持批量提示词**（多行文本，每行生成一张图）
-- **zimage**：`gen --branch zimage --prompt "..." --size 1080x1920`
-  - 默认 **9 步**（workflow 内置），cfg=1.0
-  - **默认不挂人物 LoRA**。需要同事 LoRA：`--with-colleague --confirm-colleague`。其他人物 LoRA：`--lora-person <path>`
-  - **支持批量提示词**（多行文本，每行生成一张图）
-- **krea2**：`gen --branch krea2 --prompt "..." --size 1080x1920`
-  - **支持批量提示词**（多行文本，每行生成一张图）
-  - **双主角 LoRA 开关**：`--protagonist liuyifei`（默认）| `--protagonist kopiu`
-  - 触发词自动注入：选 liuyifei 时提示词前加 `liuyifei`，选 kopiu 时加 `kopiu`（用户已写则不重复）
-  - **仅当用户明确说"用 kopiu / 生成 kopi-u 的 XXX"时才传 `--protagonist kopiu`**，否则默认 liuyifei
-- **edit**：`gen --branch edit <LOCAL_IMAGE> <INSTRUCTION>`
-
-每个命令结束打印 `RESULT:<json array of png paths>`，把路径报告给用户。
-
-### 直接调用底层 `comfy.py`（不推荐）
-
-如果某个场景确实需要绕过 wrapper：
+⚠️ **Tiffa 便携包没有 `gen` 包装器**（那是 OpenCode 环境专有命令，本包不存在），**不要调用 `gen`**。
+正确入口是**直接调 `comfy.py`**：
 
 ```powershell
 $env:PYTHONIOENCODING="utf-8"
-& "$env:PORTABLE_ROOT/python/python.exe" `
-  "$env:PORTABLE_ROOT/skills/comfyui-image-gen/comfy.py" `
-  <t2i|ernie|klein|zimage|edit> <args...> --name "<job>" --timeout 300
+& "$env:PORTABLE_ROOT/python/python.exe" "$env:PORTABLE_ROOT/skills/comfyui-image-gen/comfy.py" `
+  <krea2|edit|ernie|zimage|klein> --prompt "..." [--size WxH] [options]
 ```
 
-⚠️ 绕过 wrapper 后所有路由+安全规则失效。
+- 调用**必须**先走第一步的路由选择（选分支 + 画幅）：分支名 = `comfy.py` 的子命令，缺子命令等于跳过路由。
+- `comfy.py` 默认连 `http://47.108.197.247:8188`，**禁止改成 localhost**（弱模型易幻觉成 localhost:8188 出厂默认）。
+- 每个命令结束打印 `RESULT:<json array of png paths>`，把路径报告给用户。
 
-## 注意
+### 子命令与参数速查
+
+- **t2i**：⚠️ `comfy.py` 无单一 `t2i` 子命令，它等于**并行调 `klein` + `zimage` 各一次**（分别用各自 `--size`）。
+- **ernie**：`comfy.py ernie --prompt "..." --size 1920x1080`（横屏）或 `--size 768x1280`（竖屏默认）
+  - **支持批量提示词**（多行文本，每行生成一张图）
+- **klein**：`comfy.py klein --prompt "..." --size 1920x1080` 或 `--size 832x1216`
+  - 支持 `--negative`、`--steps`、`--cfg`、`--sampler`
+  - **支持批量提示词**（多行文本，每行生成一张图）
+- **zimage**：`comfy.py zimage --prompt "..." --size 1080x1920`
+  - 默认 **9 步**（workflow 内置），cfg=1.0
+  - **默认不挂人物 LoRA**。需要同事 LoRA 用 `--with-colleague`（仅同事脸）。其他人物 LoRA：`--lora-person <path>`
+  - **支持批量提示词**（多行文本，每行生成一张图）
+- **krea2**：`comfy.py krea2 --prompt "..." --size 1080x1920`
+  - **支持批量提示词**（多行文本，每行生成一张图）
+  - **双主角 LoRA 开关**：`--protagonist liuyifei`（默认）| `--protagonist kopiu`
+  - 触发词自动注入：选 liuyifei 时提示词前加 `liuyifei`，选 kopiu 时加 `kopiu`
+  - **仅当用户明确说"用 kopiu"时才传 `--protagonist kopiu`**，否则默认 liuyifei
+- **edit**：`comfy.py edit <LOCAL_IMAGE> <INSTRUCTION>`
+
+### 注意
 
 - 出图约 10-30s，脚本阻塞直到完成。
 - 若返回 HTTP 400，说明 workflow API 节点字段过期，需 `/object_info/<class_type>` 重探。
+- 尺寸用 `--size WxH`（如 `1920x1080`）；`gen` 的 `--custom 16:9` 写法在 Tiffa 不适用。

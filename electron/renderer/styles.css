@@ -1998,7 +1998,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 20px;
-  transition: opacity 0.4s ease;
+  transition: opacity 1s ease;
 }
 
 .startup-overlay.fade-out {
@@ -2011,25 +2011,65 @@ body {
   font-weight: 700;
   color: hsl(var(--accent));
   letter-spacing: 2px;
+  animation: logoReveal 2.2s ease-out both;
+}
+
+@keyframes logoReveal {
+  0% { opacity: 0; filter: blur(10px); letter-spacing: 16px; }
+  100% { opacity: 1; filter: blur(0); letter-spacing: 2px; }
 }
 
 .startup-title {
   font-size: 16px;
   color: hsl(var(--text-200));
-  opacity: 0.7;
+  opacity: 0;
+  animation: titleReveal 1.6s ease-out 1.2s both;
 }
 
-.startup-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid hsl(var(--border-200));
-  border-top-color: hsl(var(--accent));
+@keyframes titleReveal {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 0.7; transform: translateY(0); }
+}
+
+/* 墨晕涟漪动画 */
+.startup-ripple {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 8px 0;
+}
+
+.ripple-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 1px solid hsl(var(--accent) / 0.5);
   border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  animation: rippleExpand 3.6s ease-out infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.ripple-ring.r2 { animation-delay: 1.2s; }
+.ripple-ring.r3 { animation-delay: 2.4s; }
+
+@keyframes rippleExpand {
+  0% { transform: scale(0.15); opacity: 0.7; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+
+.ripple-core {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: hsl(var(--accent));
+  animation: coreBreathe 3.6s ease-in-out infinite;
+}
+
+@keyframes coreBreathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; box-shadow: 0 0 0 0 hsl(var(--accent) / 0.4); }
+  50% { transform: scale(1.4); opacity: 1; box-shadow: 0 0 24px 6px hsl(var(--accent) / 0.3); }
 }
 
 .startup-status {
@@ -2037,6 +2077,12 @@ body {
   font-size: 12px;
   color: hsl(var(--text-400));
   letter-spacing: 0.5px;
+  animation: statusPulse 3s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
 }
 
 /* 新建对话过渡遮罩 */

@@ -16,6 +16,7 @@ REM ── 环境变量重定向到便携包 ──
 set "PI_CODING_AGENT_DIR=%ROOT%\data\agent"
 set "HOME=%ROOT%\home"
 set "USERPROFILE=%ROOT%\home"
+set "MNEMOPI_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5"
 
 REM ── Bun 运行时路径 ──
 set "BUN_EXE=%ROOT%\npm-global\node_modules\bun\bin\bun.exe"
@@ -24,6 +25,8 @@ set "TIFFA_CLI=%ROOT%\npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli
 REM ── 工作目录 ──
 set "TIFFA_WORKSPACE=%ROOT%\workspace"
 if not exist "%TIFFA_WORKSPACE%" mkdir "%TIFFA_WORKSPACE%"
+REM ── 将便携 Python 前置到 PATH（避免命中系统 Store 占位符 python.exe）──
+set "PATH=%ROOT%\python;%ROOT%\python\Scripts;%ROOT%\node;%ROOT%\npm-global\node_modules\bun\bin;%PATH%"
 
 REM ── 确保必要目录存在 ──
 if not exist "%PI_CODING_AGENT_DIR%" mkdir "%PI_CODING_AGENT_DIR%"
