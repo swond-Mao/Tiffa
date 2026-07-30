@@ -15,7 +15,7 @@ TEMPLATES_DIR = SKILL_DIR / "templates"
 DEFAULT_CONFIG = SKILL_DIR / "config.yaml"
 
 OUT_DIR_DEFAULT = SKILL_DIR / "output"
-COMFY_OUT = Path(os.environ.get("COMFY_OUT", r"E:\workspace\comfyui_out"))
+COMFY_OUT = Path(os.environ.get("COMFY_OUT", os.path.join(os.getcwd(), "comfyui_out")))
 COMFY_SCRIPT = SKILL_DIR.parent / "comfyui-image-gen" / "comfy.py"
 
 LAYOUTS = ["cover", "section", "content", "content-left", "content-right",

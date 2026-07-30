@@ -182,7 +182,8 @@ def exec_comfyui(prompt, params, out_dir):
 
 def exec_canvas(prompt, params, out_dir):
     """canvas-design: AI 先用 Write 工具生成 HTML 文件，
-    craftman 将其复制到输出目录。"""
+    craftman 将其复制到输出目录。同时扫描 HTML 中引用的本地图片，
+    一并复制到输出目录并重写路径，避免移动后图片 404。"""
     src_file = params.get("html_file", "")
 
     if not src_file:
@@ -196,7 +197,34 @@ def exec_canvas(prompt, params, out_dir):
 
     safe_name = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]", "_", prompt)[:20] or "canvas"
     out_path = out_dir / f"{safe_name}.html"
-    shutil.copy2(src_path, out_path)
+
+    # 读取 HTML，扫描并复制引用的本地图片到 out_dir，重写路径为相对路径
+    html_content = src_path.read_text(encoding="utf-8")
+    src_dir = src_path.parent
+    # 匹配 src="..." 和 url(...) 中的本地路径（不含 http:// 或 data:）
+    img_pattern = re.compile(r'''(src=|url\()["']?((?!https?://|data:|//)[^"')\s]+)["']?''')
+
+    def copy_asset(m):
+        prefix = m.group(1)  # "src=" 或 "url("
+        ref = m.group(2)     # 图片路径
+        # 跳过绝对路径（C:\... 或 /usr/...）
+        if re.match(r'^[A-Za-z]:[\\/]', ref) or ref.startswith('/'):
+            return m.group(0)
+        asset_src = (src_dir / ref).resolve()
+        if asset_src.is_file():
+            asset_dst = out_dir / asset_src.name
+            if asset_dst.resolve() != asset_src:
+                try:
+                    shutil.copy2(asset_src, asset_dst)
+                    eprint(f"[craftman]  复制资源: {asset_src.name}")
+                except Exception as e:
+                    eprint(f"[craftman]  复制资源失败 {asset_src.name}: {e}")
+            # 重写为相对于 out_dir 的文件名
+            return f'{prefix}"{asset_src.name}"'
+        return m.group(0)
+
+    html_content = img_pattern.sub(copy_asset, html_content)
+    out_path.write_text(html_content, encoding="utf-8")
     eprint(f"[craftman]  canvas done: {out_path}")
     return str(out_path)
 
@@ -236,17 +264,20 @@ def merge(plan_data, results, out_dir):
         except Exception as e:
             eprint(f"[craftman]  合并失败: {e}")
 
-    if pptgen_out:
-        ppt_dir = Path(pptgen_out).parent
-        for step in plan:
-            if step.get("skill") == "comfyui":
-                src = results.get("comfyui")
-                if src and os.path.isfile(src):
-                    try:
-                        shutil.copy2(src, ppt_dir / os.path.basename(src))
-                        eprint(f"[craftman]  图片已复制到PPT目录")
-                    except Exception as e:
-                        eprint(f"[craftman]  复制图片失败: {e}")
+    # comfyui 图片复制到 pptgen 目录和/或 canvas-design 目录
+    comfyui_out = results.get("comfyui")
+    if comfyui_out and os.path.isfile(comfyui_out):
+        copy_targets = []
+        if pptgen_out:
+            copy_targets.append(Path(pptgen_out).parent)
+        if canvas_out:
+            copy_targets.append(Path(canvas_out).parent)
+        for target_dir in copy_targets:
+            try:
+                shutil.copy2(comfyui_out, target_dir / os.path.basename(comfyui_out))
+                eprint(f"[craftman]  图片已复制到 {target_dir.name}")
+            except Exception as e:
+                eprint(f"[craftman]  复制图片到 {target_dir.name} 失败: {e}")
 
     print("\n" + "=" * 60)
     print("输出汇总")
