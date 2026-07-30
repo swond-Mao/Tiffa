@@ -115,50 +115,62 @@
 
         <aside id="sidebar" class="collapsed">
           <div class="sidebar-inner">
-            <div class="sidebar-tree-section">
-              <div class="sidebar-section-header">
-                <span>文件</span>
-                <div class="sidebar-section-actions">
-                  <button class="sidebar-btn" id="btnCollapseTree" title="折叠文件树">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-                  </button>
-                  <button class="sidebar-btn" id="btnRefreshFiles" title="刷新">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                  </button>
-                  <button class="sidebar-btn" id="btnCloseSidebar" title="关闭面板">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  </button>
-                </div>
-              </div>
-              <div id="fileTree" class="file-tree"></div>
-            </div>
-            <div class="sidebar-todo-section" id="sidebarTodo">
-              <div class="sidebar-section-header">
-                <span>Todo</span>
-                <div class="sidebar-section-actions">
-                  <span class="todo-count" id="todoCount"></span>
-                  <button class="sidebar-btn" id="btnCollapseTodo" title="折叠 Todo">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                  </button>
-                </div>
-              </div>
-              <div class="todo-list" id="todoList">
-                <div class="todo-empty">暂无待办</div>
-              </div>
-            </div>
-            <div class="sidebar-preview-divider" id="previewDivider"></div>
-            <div class="sidebar-preview-section" id="sidebarPreview">
-              <div class="sidebar-section-header">
-                <span>预览</span>
-                <button class="sidebar-btn" id="btnClosePreview" title="关闭预览">
+            <!-- Tab 栏 -->
+            <div class="sidebar-tab-bar">
+              <button class="sidebar-tab active" data-tab="overview">概要</button>
+              <button class="sidebar-tab" data-tab="files">文件</button>
+              <div class="sidebar-tab-actions">
+                <button class="sidebar-btn view-toggle" id="btnViewList" title="列表视图">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                </button>
+                <button class="sidebar-btn view-toggle" id="btnViewGrid" title="缩略图视图">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                </button>
+                <button class="sidebar-btn" id="btnRefreshFiles" title="刷新">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                </button>
+                <button class="sidebar-btn" id="btnCloseSidebar" title="关闭面板">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
-              <div class="preview-tab-bar" id="previewTabs"></div>
-              <div class="preview-content" id="previewContent">
-                <div class="preview-empty">点击左侧文件预览</div>
+            </div>
+
+            <!-- Tab1: 概要 -->
+            <div class="sidebar-panel" id="panelOverview">
+              <div class="overview-todo-section">
+                <div class="overview-section-title">Todo <span class="todo-count" id="todoCount"></span></div>
+                <div class="todo-list" id="todoList">
+                  <div class="todo-empty">暂无待办</div>
+                </div>
+              </div>
+              <div class="overview-memory-section">
+                <div class="overview-section-title">
+                  <span>项目记忆</span>
+                  <input type="text" class="memory-search" id="memorySearch" placeholder="搜索记忆…" />
+                  <button class="memory-recall-btn" id="btnMemoryRecall" title="全局记忆召回">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </button>
+                </div>
+                <div class="memory-content" id="memoryContent">暂无记忆</div>
               </div>
             </div>
+
+            <!-- Tab2: 文件 -->
+            <div class="sidebar-panel hidden" id="panelFiles">
+              <div id="fileTree" class="file-tree"></div>
+            </div>
+          </div>
+
+          <!-- 抽屉预览（滑动动画，左侧留间隙） -->
+          <div class="drawer-gap" id="drawerGap"></div>
+          <div class="file-drawer" id="fileDrawer">
+            <div class="drawer-header">
+              <span class="drawer-title" id="drawerTitle"></span>
+              <button class="sidebar-btn" id="btnCloseDrawer" title="关闭预览">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y1="18"/><line x1="6" y1="6" x2="18" y1="18"/></svg>
+              </button>
+            </div>
+            <div class="drawer-body" id="drawerBody"></div>
           </div>
         </aside>
       </div>

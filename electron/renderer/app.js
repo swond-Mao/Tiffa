@@ -104,9 +104,9 @@ const state = {
   currentThinkingEl: null,
   currentTextBuffer: '',
   currentToolCalls: new Map(),
-  previewTabs: [],
-  activePreviewIndex: -1,
   sidebarCollapsed: true,
+  fileTreeRoot: null,  // 文件树当前根目录（null = workspace）
+  fileViewMode: localStorage.getItem('tiffa-fileViewMode') || 'list',
   // Project/Session
   projects: [],
   activeProjectDirName: null,
@@ -151,6 +151,12 @@ const state = {
   _newSessionSwitched: false,  // session_switch 是否已到达
   // 待发送图片列表：{ data: base64string, mimeType: string, name: string }
   pendingImages: [],
+  // ── 鲁棒性状态 ──
+  sessionSwitching: false,       // 会话切换进行中，禁止发送和重叠切换
+  modelSwitching: false,         // 模型切换进行中，短暂禁止发送
+  lastSwitchTime: 0,             // 上次切换时间戳（防抖用）
+  // ── 记忆召回模式 ──
+  recallMode: false,             // 全局记忆召回模式（侧边栏搜索框切换）
 };
 
 // 从 sessionPath 提取 sessionId（UUID）
@@ -234,18 +240,21 @@ const dom = {
   fileInput: document.getElementById('fileInput'),
   sidebar: document.getElementById('sidebar'),
   sidebarResizeHandle: document.getElementById('sidebarResizeHandle'),
-  previewDivider: document.getElementById('previewDivider'),
-  btnCollapseTodo: document.getElementById('btnCollapseTodo'),
-  sidebarPreview: document.getElementById('sidebarPreview'),
-  sidebarTreeSection: null,
-  sidebarTodo: document.getElementById('sidebarTodo'),
+  panelOverview: document.getElementById('panelOverview'),
+  panelFiles: document.getElementById('panelFiles'),
+  fileDrawer: document.getElementById('fileDrawer'),
+  drawerGap: document.getElementById('drawerGap'),
+  drawerTitle: document.getElementById('drawerTitle'),
+  drawerBody: document.getElementById('drawerBody'),
+  btnCloseDrawer: document.getElementById('btnCloseDrawer'),
+  memoryContent: document.getElementById('memoryContent'),
+  memorySearch: document.getElementById('memorySearch'),
+  btnMemoryRecall: document.getElementById('btnMemoryRecall'),
   fileTree: document.getElementById('fileTree'),
   btnRefreshFiles: document.getElementById('btnRefreshFiles'),
   btnCloseSidebar: document.getElementById('btnCloseSidebar'),
-  btnCollapseTree: document.getElementById('btnCollapseTree'),
-  previewTabs: document.getElementById('previewTabs'),
-  previewContent: document.getElementById('previewContent'),
-  btnClosePreview: document.getElementById('btnClosePreview'),
+  btnViewList: document.getElementById('btnViewList'),
+  btnViewGrid: document.getElementById('btnViewGrid'),
   settingsOverlay: document.getElementById('settingsOverlay'),
   btnCloseSettings: document.getElementById('btnCloseSettings'),
   modelList: document.getElementById('modelList'),
@@ -377,7 +386,6 @@ const minimap = {
 // ── Initialize ──
 async function init() {
   state.workspacePath = await tiffaDesktop.getWorkspacePath();
-  dom.sidebarTreeSection = dom.sidebar.querySelector('.sidebar-tree-section');
   minimap.init();
 
   // 拦截本地文件路径链接点击，用 shell.openPath 打开
@@ -408,6 +416,12 @@ async function init() {
       tiffaDesktop.openPath(href);
       return;
     }
+    // 外部 http/https 链接：用系统默认浏览器打开，防止在 app 内导航导致页面卡死
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      e.preventDefault();
+      tiffaDesktop.openExternal(href);
+      return;
+    }
   });
 
   // 事件委托：工具卡片头部点击折叠/展开（支持从缓存恢复的 HTML）
@@ -423,16 +437,19 @@ async function init() {
   tiffaDesktop.onEvent((event) => {
     // ── 多对话实例事件路由（严格模式） ──
     if (state.activeSessionId != null) {
-      // 用户在会话 tab 中：只接受当前活跃会话实例的事件
-      if (event._sessionId !== state.activeSessionId) {
+      // session_switch 必须透传：CLI 分配真实 sessionId 后，_sessionId 已更新为真实值，
+      // 与渲染层的临时 sessionId 不匹配，但此事件是迁移 __new__ tab 的唯一途径，不能过滤
+      if (event._sessionId !== state.activeSessionId && event.type !== 'session_switch') {
         // 非当前对话（含项目级 _sessionId=null）：仅同步后台状态，不渲染
         if (event._sessionId != null) {
           if (event.type === 'agent_start' || event.type === 'prompt_result') {
             const bgPath = findSessionPathById(event._sessionId);
             if (bgPath) state.sessionAgentRunning.set(bgPath, true);
+            renderSessionTabs();
           } else if (event.type === 'agent_end') {
             const bgPath = findSessionPathById(event._sessionId);
             if (bgPath) state.sessionAgentRunning.set(bgPath, false);
+            renderSessionTabs();
           }
         }
         return;
@@ -451,9 +468,7 @@ async function init() {
   setupProjectPanel();
   setupSessionTabs();
   setupSidebar();
-  setupPreview();
   setupSidebarResize();
-  setupPreviewDivider();
 
   setupCopyBtnDelegation();
   setupSettings();
@@ -503,6 +518,8 @@ async function init() {
   }
   // 如果没有恢复到历史会话，显示欢迎页
   if (dom.messages.children.length === 0) showWelcome();
+  // 启动时尝试恢复 lastModel（仅当有活跃对话且无 sessionModelMap 记录时）
+  if (state.tiffaReady) restoreLastModelIfNeeded();
   dom.input.focus();
 }
 
@@ -511,13 +528,45 @@ function handleEvent(event) {
   // 记录事件时间，用于卡住检测
   state.lastEventTime = Date.now();
 
-  // 多对话实例模式下，事件按 sessionId 路由，不再需要 pendingNewSession 过滤
+  // 多实例事件路由：对话级实例(_sessionId 非空)的事件按 sessionId 路由。
+  // 非当前活跃对话的后台实例事件，只更新该对话的 sessionAgentRunning 映射，
+  // 不污染全局 state.agentRunning / 不渲染到当前 DOM（切回时从 JSONL 补全内容）。
+  // 例外 1：extension_ui_request 是阻塞型审批请求，丢弃会导致后台实例死等卡死，
+  // 必须透传给 handleExtensionUI 处理（响应时带 sessionId 路由回原实例）。
+  // 例外 2：session_switch 是 __new__ tab 迁移的唯一途径，必须透传。
+  if (event._sessionId && state.activeSessionId && event._sessionId !== state.activeSessionId
+      && event.type !== 'session_switch') {
+    const bgPath = findSessionPathById(event._sessionId);
+    if (event.type === 'agent_start' || (event.type === 'prompt_result' && event.agentInvoked)) {
+      if (bgPath) state.sessionAgentRunning.set(bgPath, true);
+      renderSessionTabs();
+      return;
+    } else if (event.type === 'agent_end') {
+      if (bgPath) state.sessionAgentRunning.set(bgPath, false);
+      renderSessionTabs();
+      return;
+    } else if (event.type !== 'extension_ui_request') {
+      // 其他后台事件（message_*/tool_* 等）：不渲染、不改全局状态
+      return;
+    }
+    // extension_ui_request 透传：阻塞型审批请求丢弃会导致后台实例死等卡死，
+    // 必须交给下方 handleExtensionUI 处理（响应时带 _sessionId 路由回原实例）
+  }
 
   switch (event.type) {
     case 'ready':
       state.tiffaReady = true;
       updateStatus('就绪');
-      fetchCurrentModel();
+      // 模型恢复优先于 fetchCurrentModel：避免 fetchCurrentModel 读到 CLI 默认模型覆盖 UI
+      {
+        const savedModel = state.activeSessionPath ? state.sessionModelMap[state.activeSessionPath] : null;
+        if (savedModel && savedModel.provider && savedModel.modelId) {
+          restoreModelIfAvailable(savedModel.provider, savedModel.modelId, state.activeSessionId, state.activeSessionPath);
+        } else {
+          fetchCurrentModel();
+        }
+      }
+      restoreTodoPhases();  // 进程重启后恢复 Todo 面板
       break;
     case 'prompt_result':
       if (event.agentInvoked) {
@@ -533,6 +582,7 @@ function handleEvent(event) {
       state.agentRunning = true;
       state.instanceAgentRunning.set(state.workspacePath, true);
       state.sessionAgentRunning.set(state.activeSessionPath, true);
+      renderSessionTabs();
       markFirstResponseReceived();
       startStallCheck();
       updateInputState();
@@ -540,6 +590,7 @@ function handleEvent(event) {
     case 'agent_end':
       state.agentRunning = false;
       state.sessionAgentRunning.set(state.activeSessionPath, false);
+      renderSessionTabs();
       state.instanceAgentRunning.set(state.workspacePath, false);
       state.pendingSteerMarker = false;
       stopStallCheck();
@@ -580,10 +631,11 @@ function handleEvent(event) {
       handleToolEnd(event.toolCallId, event.toolName, event.result, event.isError);
       // ask 工具回复后恢复卡住检测
       if (event.toolName === 'ask' && state.agentRunning) startStallCheck();
-      // todo 工具结果包含 phases
+      // todo 工具结果包含 phases（在 result.details.phases 中）
       if (event.toolName === 'todo' && event.result) {
         try {
-          const details = typeof event.result === 'string' ? JSON.parse(event.result) : event.result;
+          const result = typeof event.result === 'string' ? JSON.parse(event.result) : event.result;
+          const details = result && result.details ? result.details : result;
           if (details && details.phases) {
             state.todoPhases = details.phases;
             renderTodoPanel();
@@ -596,9 +648,12 @@ function handleEvent(event) {
       handleExtensionUI(event);
       break;
     case 'config_update':
+      // 只接受当前活跃会话的模型更新，避免后台实例的 config_update 覆盖 UI
       if (event.model) {
-        state.currentModel = event.model;
-        dom.currentModel.textContent = event.model;
+        if (!event._sessionId || !state.activeSessionId || event._sessionId === state.activeSessionId) {
+          state.currentModel = event.model;
+          dom.currentModel.textContent = event.model;
+        }
       }
       break;
     case 'session_info_update':
@@ -624,9 +679,11 @@ function handleEvent(event) {
       break;
     case 'session_switch':
       // 多对话实例模式下，session_switch 来自当前对话进程内部
-      // 安全校验：只在用户主动等待会话分配时（__new__ tab）才处理，
+      // 安全校验 1：只处理当前 workspace 的事件（防止跨项目串味）
+      // 安全校验 2：只在用户主动等待会话分配时（__new__ tab）才处理，
       // 避免后台实例的内部切换事件意外篡改当前视图状态
-      if (event.sessionPath && state.activeSessionPath && state.activeSessionPath.startsWith('__new__')) {
+      if (event.sessionPath && state.activeSessionPath && state.activeSessionPath.startsWith('__new__')
+          && (!event._cwd || !state.workspacePath || event._cwd === state.workspacePath)) {
         const newPath = event.sessionPath;
         const oldPath = state.activeSessionPath;
 
@@ -643,9 +700,14 @@ function handleEvent(event) {
             state.sessionAgentRunning.set(newPath, state.sessionAgentRunning.get(oldPath));
             state.sessionAgentRunning.delete(oldPath);
           }
-          // 迁移 session 对象的 path
+          // 迁移 session 对象的 path 和 sessionId
           const ns = state.sessions.find(s => s.path === oldPath);
-          if (ns) ns.path = newPath;
+          if (ns) {
+            ns.path = newPath;
+            // 存储真实 sessionId，避免切回时用路径字符串做 sessionId 导致找不到实例
+            const realSid = extractSessionId(newPath);
+            if (realSid) ns.sessionId = realSid;
+          }
           // 迁移 activeSessionPaths
           state.activeSessionPaths.delete(oldPath);
           state.activeSessionPaths.add(newPath);
@@ -736,8 +798,10 @@ function handleExited(data) {
     return; // 无活跃会话时按 cwd 过滤
   }
 
-  // 进程正在自动重启，不重置 UI 状态，等重启结果
+  // 进程正在自动重启，不重置全部 UI 状态，但标记未就绪禁止发送
   if (data.autoRestarting) {
+    state.tiffaReady = false;
+    updateInputState();
     updateStatus(`重启中 (第${data.crashCount}次)...`);
     return;
   }
@@ -745,6 +809,7 @@ function handleExited(data) {
   state.tiffaReady = false;
   state.agentRunning = false;
   state.sessionAgentRunning.set(state.activeSessionPath, false);
+  renderSessionTabs();
   state.pendingSteerMarker = false;
   finalizeAssistantMessage();
   updateInputState();
@@ -1195,6 +1260,7 @@ async function selectProject(dirName) {
         return;
       }
       state.workspacePath = result.cwd || project.cwd;
+      state.fileTreeRoot = null;  // 切换项目时重置文件树根目录
       if (result.ready === false) {
         state.tiffaReady = false;
         updateStatus('正在启动 Tiffa 实例，请稍候...');
@@ -1240,6 +1306,11 @@ async function selectProject(dirName) {
     updateStatus('就绪');
   }
   renderProjects();
+  loadMemoryContent();  // 切换项目时刷新记忆面板
+  // 若侧边栏展开且在文件 Tab，刷新文件树
+  if (!state.sidebarCollapsed && !dom.panelFiles.classList.contains('hidden')) {
+    loadFileTree(state.workspacePath);
+  }
   await loadSessions(dirName);
 
   // 恢复上次打开的所有标签（懒加载：只加载活跃对话内容，其余点击时再加载）
@@ -1251,6 +1322,14 @@ async function selectProject(dirName) {
     // 恢复所有已保存的标签
     for (const p of savedTabs.paths) state.activeSessionPaths.add(p);
     targetPath = savedTabs.active;
+    // 确保活跃路径在 sessions 列表中有对应对象（防御性）
+    const sessionPaths = new Set(state.sessions.map(s => s.path));
+    for (const p of savedTabs.paths) {
+      if (!sessionPaths.has(p)) {
+        const real = realSessions.find(s => s.path === p);
+        if (real) state.sessions.push(real);
+      }
+    }
   } else if (realSessions.length > 0) {
     // 无保存记录：回退为只打开最新会话
     targetPath = realSessions[realSessions.length - 1].path;
@@ -1272,42 +1351,58 @@ async function selectProject(dirName) {
         dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
         enhanceCodeBlocks(dom.messages);
         lazyHighlightCodeBlocks(dom.messages);
-        const targetSid = extractSessionId(targetPath);
-        if (targetSid) {
-          tiffaDesktop.activateSession(state.workspacePath, targetSid).then(() => {
-            const saved = state.sessionModelMap[targetPath];
-            if (saved && saved.provider && saved.modelId) {
-              restoreModelIfAvailable(saved.provider, saved.modelId, targetSid, targetPath).catch(() => {});
-            }
-          }).catch(() => {});
+      } else {
+        if (state.agentRunning) {
+          try {
+            dom.messages.innerHTML = '';
+            await loadAndRenderHistory(targetPath);
+          } catch {}
+          const el = createAssistantMessageElement();
+          dom.messages.appendChild(el);
+          state.currentAssistantEl = el;
+          state.currentTextBuffer = '';
+          scrollToBottom(true);
+        } else {
+          try {
+            dom.messages.innerHTML = '';
+            await loadAndRenderHistory(targetPath);
+          } catch {}
         }
-        return;
       }
 
-      if (state.agentRunning) {
+      // 激活对话级实例（await 确保就绪后再允许发消息）
+      const targetSid = extractSessionId(targetPath);
+      if (targetSid) {
+        state.tiffaReady = false;
+        updateInputState();
         try {
-          dom.messages.innerHTML = '';
-          await loadAndRenderHistory(targetPath);
-        } catch {}
-        const el = createAssistantMessageElement();
-        dom.messages.appendChild(el);
-        state.currentAssistantEl = el;
-        state.currentTextBuffer = '';
-        scrollToBottom(true);
-      } else {
-        try {
-          dom.messages.innerHTML = '';
-          await loadAndRenderHistory(targetPath);
-        } catch {}
-        const targetSid2 = extractSessionId(targetPath);
-        if (targetSid2) {
-          tiffaDesktop.activateSession(state.workspacePath, targetSid2).then(() => {
+          const result = await tiffaDesktop.activateSession(state.workspacePath, targetSid);
+          // 竞态防护：等待期间用户可能又切走了
+          if (state.activeSessionPath !== targetPath) return;
+          if (!result.error) {
+            state.tiffaReady = result.ready !== false;
             const saved = state.sessionModelMap[targetPath];
             if (saved && saved.provider && saved.modelId) {
-              restoreModelIfAvailable(saved.provider, saved.modelId, targetSid2, targetPath).catch(() => {});
+              await restoreModelIfAvailable(saved.provider, saved.modelId, targetSid, targetPath);
+            } else {
+              // 无会话级模型记录 → 回退到 lastModel
+              try {
+                const lastRaw = localStorage.getItem('tiffa-lastModel');
+                if (lastRaw) {
+                  const last = JSON.parse(lastRaw);
+                  if (last && last.provider && last.modelId) {
+                    await restoreModelIfAvailable(last.provider, last.modelId, targetSid, targetPath);
+                  }
+                }
+              } catch {}
             }
-          }).catch(() => {});
+          } else {
+            try { state.tiffaReady = await tiffaDesktop.isReady(); } catch { state.tiffaReady = false; }
+          }
+        } catch {
+          try { state.tiffaReady = await tiffaDesktop.isReady(); } catch { state.tiffaReady = false; }
         }
+        updateInputState();
       }
     };
 
@@ -1333,7 +1428,13 @@ async function loadSessions(dirName) {
   } else {
     // 保留未迁移的 __new__ 临时 tab（已迁移的会被磁盘列表自然替代）
     const newTabs = state.sessions.filter(s => s.path.startsWith('__new__') && state.activeSessionPaths.has(s.path));
-    state.sessions = [...result, ...newTabs];
+    // 合并后按 path 去重（磁盘版本优先，信息更完整）
+    const seen = new Set();
+    state.sessions = [...result, ...newTabs].filter(s => {
+      if (seen.has(s.path)) return false;
+      seen.add(s.path);
+      return true;
+    });
   }
   renderSessionTabs();
   renderHistoryPanel();
@@ -1522,6 +1623,21 @@ function setupSessionTabs() {
       }
       updateStatus('新建对话...');
 
+      // 缓存当前对话的 DOM 与运行状态：新建对话会清屏，切回时从缓存恢复，避免 JSONL 未 flush 时内容"完全消失"
+      if (state.activeSessionPath && !state.activeSessionPath.startsWith('__new__')) {
+        state.sessionMessageCache.set(state.activeSessionPath, {
+          html: dom.messages.innerHTML,
+          scrollPos: dom.messages.scrollTop,
+        });
+        if (state.sessionMessageCache.size > 3) {
+          const oldest = state.sessionMessageCache.keys().next().value;
+          state.sessionMessageCache.delete(oldest);
+        }
+      }
+      if (state.activeSessionPath) {
+        state.sessionAgentRunning.set(state.activeSessionPath, state.agentRunning);
+      }
+
       // 生成临时 sessionId（对话级实例独立进程）
       const tempSessionId = crypto.randomUUID();
       const tempSessionPath = '__new__' + Date.now();
@@ -1532,6 +1648,7 @@ function setupSessionTabs() {
         title: '新对话',
         firstMessage: '',
         messageCount: 0,
+        sessionId: tempSessionId,  // 存储实例 sessionId，切回时用于查找实例
       };
       state.sessions.push(newSession);
       state.activeSessionPath = tempSessionPath;
@@ -1585,8 +1702,8 @@ function saveOpenTabs() {
   if (!state.activeProjectDirName) return;
   const key = `tiffa:openTabs:${state.activeProjectDirName}`;
   const data = {
-    paths: [...state.activeSessionPaths],
-    active: state.activeSessionPath,
+    paths: [...state.activeSessionPaths].filter(p => !p.startsWith('__new__')),
+    active: state.activeSessionPath && !state.activeSessionPath.startsWith('__new__') ? state.activeSessionPath : null,
   };
   localStorage.setItem(key, JSON.stringify(data));
 }
@@ -1603,7 +1720,8 @@ function restoreOpenTabs(dirName, sessions) {
     const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.paths) || data.paths.length === 0) return null;
     const validPaths = new Set(sessions.map(s => s.path));
-    const paths = data.paths.filter(p => validPaths.has(p));
+    // 过滤 __new__ 临时路径（防御性：即使 saveOpenTabs 已过滤，localStorage 可能残留旧数据）
+    const paths = data.paths.filter(p => validPaths.has(p) && !p.startsWith('__new__'));
     if (paths.length === 0) return null;
     const active = (data.active && paths.includes(data.active)) ? data.active : paths[paths.length - 1];
     return { paths, active };
@@ -1630,13 +1748,14 @@ function renderSessionTabs() {
     const tab = document.createElement('button');
     tab.className = 'session-tab';
     if (session.path === state.activeSessionPath) tab.classList.add('active');
+    if (state.sessionAgentRunning.get(session.path)) tab.classList.add('running');
     const title = session.title || session.firstMessage || '新对话';
     const msgCount = session.messageCount || 0;
     tab.innerHTML = `
-      <span class="session-tab-name">${escapeHtml(title.length > 20 ? title.substring(0, 20) + '...' : title)}</span>
+      <span class="session-tab-name">${escapeHtml(title.length > 12 ? title.substring(0, 12) + '…' : title)}</span>
       ${msgCount > 0 ? `<span class="session-tab-msgcount">${msgCount}</span>` : ''}
       <span class="session-tab-close" title="关闭标签（不删除对话）">&#10005;</span>`;
-    tab.title = session.title || session.firstMessage || '新对话';
+    tab.title = title;
     tab.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       showSessionTabContextMenu(e, session);
@@ -1670,12 +1789,22 @@ function renderSessionTabs() {
 
 async function switchToSession(sessionPath) {
   if (state.activeSessionPath === sessionPath) return;
+  // 防抱：300ms 内连续点击只处理最后一次，避免快速切换引发竞态
+  const now = Date.now();
+  if (now - state.lastSwitchTime < 300) return;
+  state.lastSwitchTime = now;
+  // 切换锁：防止重叠 switchToSession 调用（异步期间用户又点了另一个 tab）
+  if (state.sessionSwitching) return;
+  state.sessionSwitching = true;
+  updateInputState();
   const oldSessionPath = state.activeSessionPath;
 
   // 切换对话时丢弃未发送的排队消息
   clearPendingQueue();
 
   // 保存旧对话的 agentRunning 状态（切换回来时恢复）
+  // 不 abort 旧实例：多实例并行架构下，旧实例应在后台继续跑完生成并 flush JSONL。
+  // LRU 淘汰已跳过 agentRunning 实例（main.js），不会被强杀丢失内容。
   if (oldSessionPath) {
     state.sessionAgentRunning.set(oldSessionPath, state.agentRunning);
   }
@@ -1686,8 +1815,14 @@ async function switchToSession(sessionPath) {
   state.activeSessionPaths.add(sessionPath);
 
   // 提取目标对话的 sessionId
-  const targetSessionId = extractSessionId(sessionPath);
-  state.activeSessionId = targetSessionId || sessionPath;  // __new__ tab 用 path 自身作 id
+  // __new__ tab：从 session 对象取存储的 tempSessionId（实例 key 用的是这个 UUID）
+  // 普通对话：从文件路径提取 UUID
+  let targetSessionId = extractSessionId(sessionPath);
+  if (!targetSessionId && sessionPath.startsWith('__new__')) {
+    const sessObj = state.sessions.find(s => s.path === sessionPath);
+    targetSessionId = sessObj && sessObj.sessionId ? sessObj.sessionId : null;
+  }
+  state.activeSessionId = targetSessionId || sessionPath;  // 实在没有才用 path 自身作 id
 
   // 活跃tab上限8个，超过时移除最早未激活的
   const activeList = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
@@ -1728,16 +1863,39 @@ async function switchToSession(sessionPath) {
       }
       // 激活对应的对话级实例
       if (targetSessionId) {
-        const result = await tiffaDesktop.activateSession(state.workspacePath, targetSessionId);
-        if (!result.error) {
-          state.tiffaReady = result.ready !== false;
-          const saved = state.sessionModelMap[sessionPath];
-          if (saved && saved.provider && saved.modelId) {
-            try { await restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId, sessionPath); } catch {}
+        state.tiffaReady = false;
+        updateInputState();
+        try {
+          const result = await tiffaDesktop.activateSession(state.workspacePath, targetSessionId);
+          if (state.activeSessionPath !== sessionPath) { state.sessionSwitching = false; updateInputState(); return; }
+          if (!result.error) {
+            state.tiffaReady = result.ready !== false;
+            const saved = state.sessionModelMap[sessionPath];
+            if (saved && saved.provider && saved.modelId) {
+              try { await restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId, sessionPath); } catch {}
+            } else {
+              // 无会话级模型记录 → 回退到上次使用的模型，避免跳回 CLI 默认模型
+              try {
+                const lastRaw = localStorage.getItem('tiffa-lastModel');
+                if (lastRaw) {
+                  const last = JSON.parse(lastRaw);
+                  if (last && last.provider && last.modelId) {
+                    await restoreModelIfAvailable(last.provider, last.modelId, targetSessionId, sessionPath);
+                  }
+                }
+              } catch {}
+            }
+          } else {
+            try { state.tiffaReady = await tiffaDesktop.isReady(); } catch { state.tiffaReady = false; }
           }
-          updateInputState();
+        } catch {
+          try { state.tiffaReady = await tiffaDesktop.isReady(); } catch { state.tiffaReady = false; }
         }
+        updateInputState();
       }
+      state.sessionSwitching = false;
+      updateInputState();
+      restoreTodoPhases();
       return;
     }
 
@@ -1789,19 +1947,40 @@ async function switchToSession(sessionPath) {
     try {
       const result = await tiffaDesktop.activateSession(state.workspacePath, targetSessionId);
       // 竞态防护：等待期间用户可能又切走了，此时放弃后续操作
-      if (state.activeSessionPath !== sessionPath) return;
+      if (state.activeSessionPath !== sessionPath) { state.sessionSwitching = false; updateInputState(); return; }
       if (!result.error) {
         state.tiffaReady = result.ready !== false;
         const saved = state.sessionModelMap[sessionPath];
         if (saved && saved.provider && saved.modelId) {
           await restoreModelIfAvailable(saved.provider, saved.modelId, targetSessionId, sessionPath);
+        } else {
+          // 无会话级模型记录 → 回退到上次使用的模型，避免新实例用 CLI 默认模型
+          try {
+            const lastRaw = localStorage.getItem('tiffa-lastModel');
+            if (lastRaw) {
+              const last = JSON.parse(lastRaw);
+              if (last && last.provider && last.modelId) {
+                await restoreModelIfAvailable(last.provider, last.modelId, targetSessionId, sessionPath);
+              }
+            }
+          } catch {}
         }
+      } else {
+        // activateSession 返回错误 -> 兜底检查实例是否已就绪
+        const ready = await tiffaDesktop.isReady();
+        state.tiffaReady = ready;
       }
-    } catch { /* 激活失败不阻塞切换流程 */ }
+    } catch {
+      // 激活异常 -> 兜底检查实例是否已就绪，避免永久阻塞
+      try { state.tiffaReady = await tiffaDesktop.isReady(); } catch { state.tiffaReady = false; }
+    }
     updateInputState();
   }
   saveOpenTabs();
   renderHistoryPanel();
+  state.sessionSwitching = false;
+  updateInputState();
+  restoreTodoPhases();  // 恢复目标会话的 Todo 面板
 }
 
 async function loadAndRenderHistory(sessionPath) {
@@ -1967,7 +2146,7 @@ function updateSessionTabTitle(title) {
   for (const tab of tabs) {
     if (tab.classList.contains('active')) {
       const nameEl = tab.querySelector('.session-tab-name');
-      if (nameEl) nameEl.textContent = title.length > 20 ? title.substring(0, 20) + '...' : title;
+      if (nameEl) nameEl.textContent = title.length > 12 ? title.substring(0, 12) + '…' : title;
       tab.title = title;
     }
   }
@@ -2558,15 +2737,18 @@ function showModalConfirm(title, message) {
 
 function handleExtensionUI(event) {
   const { id, method } = event;
+  // 多实例：审批响应必须带回发请求的实例 sessionId，否则会发给当前活跃实例（可能已切换）
+  const ssid = event._sessionId || null;
+  const resp = (value) => tiffaDesktop.extensionResponse(id, value, ssid);
 
   switch (method) {
     case 'editor': {
       // 编辑器输入（ask 工具等）
       showModalInput(event.title || '请输入', event.prefill || '').then(v => {
         if (v !== null) {
-          tiffaDesktop.extensionResponse(id, { value: v });
+          resp({ value: v });
         } else {
-          tiffaDesktop.extensionResponse(id, { cancelled: true });
+          resp({ cancelled: true });
         }
       });
       break;
@@ -2575,51 +2757,51 @@ function handleExtensionUI(event) {
       const opts = event.options || [];
       showModalSelect(event.title || '请选择', opts).then(value => {
         if (value !== null && value !== undefined) {
-          tiffaDesktop.extensionResponse(id, { value });
+          resp({ value });
         } else {
-          tiffaDesktop.extensionResponse(id, { cancelled: true });
+          resp({ cancelled: true });
         }
       });
       break;
     }
     case 'confirm': {
       showModalConfirm(event.title, event.message).then(result => {
-        tiffaDesktop.extensionResponse(id, result ? { confirmed: true } : { cancelled: true });
+        resp(result ? { confirmed: true } : { cancelled: true });
       });
       break;
     }
     case 'input': {
       showModalInput(event.title || '请输入', event.placeholder || '').then(v => {
         if (v !== null) {
-          tiffaDesktop.extensionResponse(id, { value: v });
+          resp({ value: v });
         } else {
-          tiffaDesktop.extensionResponse(id, { cancelled: true });
+          resp({ cancelled: true });
         }
       });
       break;
     }
     case 'setWidget':
       // 终端 UI 控件展示（ask 工具的交互面板等），桌面端不需要渲染，直接确认
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     case 'notify':
       addNotice(event.notifyType || 'info', event.message);
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     case 'setStatus':
       updateStatus(event.statusText || '');
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     case 'setTitle':
       document.title = `Tiffa - ${event.title || ''}`;
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     case 'cancel':
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     case 'open_url':
       if (event.url) tiffaDesktop.openExternal(event.url);
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     case 'set_editor_text':
       // 设置 draftInput 而非直接写 dom.input.value，避免与 updateInputState 冲突
@@ -2633,11 +2815,11 @@ function handleExtensionUI(event) {
           dom.input.dispatchEvent(new Event('input'));
         }
       }
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
       break;
     default:
       console.warn('[Extension UI] 未处理的 method:', method);
-      tiffaDesktop.extensionResponse(id, { confirmed: true });
+      resp({ confirmed: true });
   }
 }
 
@@ -2891,7 +3073,21 @@ function moveSlashSelection(delta) {
 async function sendMessage() {
   const message = dom.input.value.trim();
   if (!message && state.pendingImages.length === 0) return;
-  if (!state.tiffaReady) { addNotice('warning', 'Tiffa 尚未就绪'); return; }
+  // 强制等待：切换会话/模型期间禁止发送，避免消息落入错误实例
+  if (state.sessionSwitching) { addNotice('warning', '正在切换会话，请稍候'); return; }
+  if (state.modelSwitching) { addNotice('warning', '正在切换模型，请稍候'); return; }
+  if (!state.tiffaReady) {
+    // 引擎未就绪：短暂等待一次（可能是重启中），避免用户必须手动重试
+    updateStatus('等待引擎就绪…');
+    let waited = 0;
+    while (!state.tiffaReady && waited < 5000) {
+      await new Promise(r => setTimeout(r, 300));
+      waited += 300;
+      try { state.tiffaReady = await tiffaDesktop.isReady(); } catch {}
+    }
+    if (!state.tiffaReady) { addNotice('warning', 'Tiffa 尚未就绪，请稍后再试'); updateStatus('未就绪'); return; }
+    updateStatus('就绪');
+  }
 
   // 如果当前没有活动会话，自动创建一个新对话
   if (!state.activeSessionPath) {
@@ -2902,6 +3098,7 @@ async function sendMessage() {
       title: '新对话',
       firstMessage: message.substring(0, 30),
       messageCount: 0,
+      sessionId: tempSessionId,  // 存储实例 sessionId
     };
     state.sessions.push(newSession);
     state.activeSessionPath = tempPath;
@@ -2941,6 +3138,7 @@ async function sendMessage() {
   scrollToBottom();
   state.agentRunning = true;
   state.sessionAgentRunning.set(state.activeSessionPath, true);
+  renderSessionTabs();
   state.instanceAgentRunning.set(state.workspacePath, true);
   startStallCheck();
   startFirstResponseCheck();
@@ -2952,6 +3150,7 @@ async function sendMessage() {
     // 发送失败时重置状态，避免 UI 卡在“思考中...”
     state.agentRunning = false;
     state.sessionAgentRunning.set(state.activeSessionPath, false);
+    renderSessionTabs();
     state.instanceAgentRunning.set(state.workspacePath, false);
     stopStallCheck();
     stopFirstResponseCheck();
@@ -2974,6 +3173,7 @@ async function abortMessage() {
     if (state.agentRunning) {
       state.agentRunning = false;
       state.sessionAgentRunning.set(state.activeSessionPath, false);
+      renderSessionTabs();
       finalizeAssistantMessage();
       updateInputState();
       updateStatus('已停止');
@@ -3051,11 +3251,18 @@ function updateInputState() {
   dom.btnAbort.classList.toggle('hidden', !state.agentRunning);
   // 生成中输入框视觉区分
   if (dom.inputArea) dom.inputArea.classList.toggle('input-running', state.agentRunning);
+  // 强制禁用：未就绪 / 切换会话中 / 切换模型中 → 禁止输入，避免用户操作落入错误实例
+  const shouldDisable = !state.tiffaReady || state.sessionSwitching || state.modelSwitching;
+  dom.input.disabled = shouldDisable;
+  dom.btnSend.disabled = shouldDisable;
+  if (dom.inputArea) dom.inputArea.classList.toggle('input-disabled', shouldDisable);
   // placeholder
-  dom.input.placeholder = state.agentRunning
-    ? 'Enter 排队 | 点击引导按钮立即干预'
-    : '输入消息，Enter 发送，Shift+Enter 换行...';
-  if (!state.agentRunning) {
+  dom.input.placeholder = shouldDisable
+    ? (state.sessionSwitching ? '正在切换会话…' : state.modelSwitching ? '正在切换模型…' : '等待引擎就绪…')
+    : state.agentRunning
+      ? 'Enter 排队 | 点击引导按钮立即干预'
+      : '输入消息，Enter 发送，Shift+Enter 换行...';
+  if (!state.agentRunning && !shouldDisable) {
     if (state.draftInput) {
       dom.input.value = state.draftInput;
       state.draftInput = null;
@@ -3120,34 +3327,73 @@ function setupSidebar() {
   dom.btnFiles.addEventListener('click', () => {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     dom.sidebar.classList.toggle('collapsed', state.sidebarCollapsed);
-    if (!state.sidebarCollapsed) loadFileTree(state.workspacePath);
+    if (!state.sidebarCollapsed) {
+      // 点击"文件浏览"按钮时自动切换到"文件"Tab
+      switchSidebarTab('files');
+      loadFileTree(state.workspacePath);
+      loadMemoryContent();
+    } else {
+      closeFileDrawer();
+    }
   });
   dom.btnCloseSidebar.addEventListener('click', () => {
     state.sidebarCollapsed = true;
     dom.sidebar.classList.add('collapsed');
+    closeFileDrawer();
   });
-  dom.btnRefreshFiles.addEventListener('click', () => loadFileTree(state.workspacePath));
-  // 折叠/展开文件树（不影响整个侧边栏）
-  dom.btnCollapseTree.addEventListener('click', () => {
-    const section = dom.sidebarTreeSection;
-    const collapsed = section.classList.toggle('tree-collapsed');
-    // 折叠后预览区自动撑满剩余空间
-    if (collapsed) {
-      dom.sidebarPreview.style.flex = '';
-    } else {
-      dom.sidebarTreeSection.style.flex = '';
-      dom.sidebarPreview.style.flex = '';
-    }
+  dom.btnRefreshFiles.addEventListener('click', () => {
+    loadFileTree(state.workspacePath);
+    loadMemoryContent();
   });
-  // 折叠/展开 Todo 面板
-  if (dom.btnCollapseTodo) {
-    dom.btnCollapseTodo.addEventListener('click', () => {
-      const section = dom.sidebarTodo;
-      const collapsed = section.classList.toggle('todo-collapsed');
-      // 切换箭头方向
-      dom.btnCollapseTodo.querySelector('svg').style.transform = collapsed ? 'rotate(-90deg)' : '';
+  // 视图切换：列表 / 缩略图
+  updateViewToggleUI();
+  dom.btnViewList.addEventListener('click', () => switchFileViewMode('list'));
+  dom.btnViewGrid.addEventListener('click', () => switchFileViewMode('grid'));
+  // Tab 切换：概要 / 文件
+  document.querySelectorAll('.sidebar-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchSidebarTab(btn.dataset.tab);
+    });
+  });
+  // 抽屉关闭（滑动回收）
+  dom.btnCloseDrawer.addEventListener('click', closeFileDrawer);
+  // 点击间隙关闭
+  dom.drawerGap.addEventListener('click', closeFileDrawer);
+  // 记忆搜索框：实时过滤小节 / 召回模式下回车触发全局召回
+  if (dom.memorySearch) {
+    dom.memorySearch.addEventListener('input', () => {
+      if (state.recallMode) return; // 召回模式不实时过滤
+      filterMemorySections(dom.memorySearch.value);
+    });
+    dom.memorySearch.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && state.recallMode) {
+        e.preventDefault();
+        performMemoryRecall(dom.memorySearch.value);
+      }
+      if (e.key === 'Escape' && state.recallMode) {
+        exitRecallMode();
+      }
     });
   }
+  // 全局记忆召回按钮
+  if (dom.btnMemoryRecall) {
+    dom.btnMemoryRecall.addEventListener('click', () => {
+      if (state.recallMode) {
+        exitRecallMode();
+      } else {
+        enterRecallMode();
+      }
+    });
+  }
+}
+
+// 切换侧边栏 Tab（概要 / 文件）
+function switchSidebarTab(tab) {
+  dom.panelOverview.classList.toggle('hidden', tab !== 'overview');
+  dom.panelFiles.classList.toggle('hidden', tab !== 'files');
+  document.querySelectorAll('.sidebar-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  // 切换到文件 tab 时始终重新加载文件树（切换项目后旧数据需刷新）
+  if (tab === 'files') loadFileTree(state.workspacePath);
 }
 
 // ── Todo Panel ──
@@ -3181,30 +3427,149 @@ function getTodoStatusIcon(status) {
   return { icon: '○', cls: 'todo-pending' };
 }
 
+// 从内核 get_state 恢复 Todo 面板（切换会话/启动时调用）
+async function restoreTodoPhases() {
+  try {
+    const st = await tiffaDesktop.getState();
+    if (st && Array.isArray(st.todoPhases)) {
+      state.todoPhases = st.todoPhases;
+      renderTodoPanel();
+    }
+  } catch {}
+}
+
 async function loadFileTree(dirPath) {
-  const entries = await tiffaDesktop.listDir(dirPath);
+  // dirPath 可选，不传则用当前 fileTreeRoot
+  const target = dirPath || state.fileTreeRoot || state.workspacePath;
+  state.fileTreeRoot = target;
+  const entries = await tiffaDesktop.listDir(target);
   if (entries.error) {
     dom.fileTree.innerHTML = `<div class="file-tree-item" style="color:var(--danger)">${entries.error}</div>`;
     return;
   }
   dom.fileTree.innerHTML = '';
-  renderFileEntries(dirPath, entries, dom.fileTree, 0);
+  dom.fileTree.classList.toggle('grid-view', state.fileViewMode === 'grid');
+
+  // “返回上一级”导航（根目录是 workspace，不能超越）
+  const wsRoot = state.workspacePath;
+  if (target !== wsRoot && target.startsWith(wsRoot)) {
+    const upItem = document.createElement('div');
+    upItem.className = 'file-tree-item file-tree-up';
+    upItem.innerHTML = '<span class="file-tree-icon">←</span><span class="ft-name">..</span>';
+    upItem.addEventListener('click', () => {
+      const parent = target.replace(/[\\/][^\\/]+$/, '') || wsRoot;
+      // 不允许超越 workspace
+      const safeParent = parent.length >= wsRoot.length ? parent : wsRoot;
+      loadFileTree(safeParent);
+    });
+    dom.fileTree.appendChild(upItem);
+  }
+
+  renderFileEntries(target, entries, dom.fileTree, 0);
+}
+
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico'];
+
+function isImageFile(ext) {
+  return IMAGE_EXTS.includes(ext);
 }
 
 function renderFileEntries(basePath, entries, container, depth) {
+  const gridMode = state.fileViewMode === 'grid';
   for (const entry of entries) {
-    const item = document.createElement('div');
-    item.className = `file-tree-item ${entry.isDirectory ? 'directory' : ''}`;
-    item.style.paddingLeft = `${12 + depth * 16}px`;
-    const icon = entry.isDirectory ? 'D' : getFileIcon(entry.ext);
-    const sizeHtml = (!entry.isDirectory && entry.size > 0) ? `<span class="file-tree-size">${formatFileSize(entry.size)}</span>` : '';
-    item.innerHTML = `<span class="file-tree-icon">${icon}</span><span class="ft-name">${escapeHtml(entry.name)}</span>${sizeHtml}`;
-    item.addEventListener('click', () => {
-      if (entry.isDirectory) toggleDirectory(entry, item, depth);
-      else openFilePreview(entry);
-    });
-    container.appendChild(item);
+    if (gridMode && !entry.isDirectory) {
+      renderGridItem(entry, container);
+    } else {
+      renderListItem(entry, container, depth);
+    }
   }
+}
+
+function renderListItem(entry, container, depth) {
+  const item = document.createElement('div');
+  item.className = `file-tree-item ${entry.isDirectory ? 'directory' : ''}`;
+  item.style.paddingLeft = `${12 + depth * 16}px`;
+  const icon = entry.isDirectory ? 'D' : getFileIcon(entry.ext);
+  const sizeHtml = (!entry.isDirectory && entry.size > 0) ? `<span class="file-tree-size">${formatFileSize(entry.size)}</span>` : '';
+  item.innerHTML = `<span class="file-tree-icon">${icon}</span><span class="ft-name">${escapeHtml(entry.name)}</span>${sizeHtml}`;
+  item.addEventListener('click', () => {
+    if (entry.isDirectory) {
+      // 点击进入目录（重新根化文件树）
+      loadFileTree(entry.path);
+    } else {
+      openFilePreview(entry);
+    }
+  });
+  container.appendChild(item);
+}
+
+function renderGridItem(entry, container) {
+  const item = document.createElement('div');
+  item.className = 'file-grid-item';
+  if (isImageFile(entry.ext)) item.classList.add('image');
+  const sizeHtml = entry.size > 0 ? `<span class="file-grid-size">${formatFileSize(entry.size)}</span>` : '';
+  if (isImageFile(entry.ext)) {
+    item.innerHTML = `
+      <div class="file-grid-thumb" data-path="${escapeHtml(entry.path)}">
+        <div class="file-grid-thumb-loading">…</div>
+      </div>
+      <div class="file-grid-info">
+        <span class="file-grid-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
+        ${sizeHtml}
+      </div>`;
+    // 异步加载缩略图
+    loadThumbnail(entry.path, item.querySelector('.file-grid-thumb'));
+  } else {
+    const icon = getFileIcon(entry.ext);
+    item.innerHTML = `
+      <div class="file-grid-thumb file-grid-thumb-icon"><span>${icon}</span></div>
+      <div class="file-grid-info">
+        <span class="file-grid-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</span>
+        ${sizeHtml}
+      </div>`;
+  }
+  item.addEventListener('click', () => openFilePreview(entry));
+  container.appendChild(item);
+}
+
+// 异步加载图片缩略图，带简单缓存
+const thumbCache = new Map();
+async function loadThumbnail(filePath, thumbEl) {
+  if (!thumbEl) return;
+  if (thumbCache.has(filePath)) {
+    const cached = thumbCache.get(filePath);
+    thumbEl.innerHTML = `<img src="${cached}" alt="">`;
+    return;
+  }
+  try {
+    const result = await tiffaDesktop.readImage(filePath);
+    if (result.error) { thumbEl.innerHTML = '<span class="file-grid-thumb-err">!</span>'; return; }
+    const src = `data:${result.mimeType};base64,${result.base64}`;
+    // 限制缓存大小：超过 100 条时清除最早的
+    if (thumbCache.size > 100) {
+      const firstKey = thumbCache.keys().next().value;
+      thumbCache.delete(firstKey);
+    }
+    thumbCache.set(filePath, src);
+    thumbEl.innerHTML = `<img src="${src}" alt="">`;
+  } catch {
+    thumbEl.innerHTML = '<span class="file-grid-thumb-err">!</span>';
+  }
+}
+
+function switchFileViewMode(mode) {
+  if (state.fileViewMode === mode) return;
+  state.fileViewMode = mode;
+  localStorage.setItem('tiffa-fileViewMode', mode);
+  updateViewToggleUI();
+  // 重新加载当前目录
+  loadFileTree(state.fileTreeRoot || state.workspacePath);
+}
+
+function updateViewToggleUI() {
+  const isList = state.fileViewMode === 'list';
+  if (dom.btnViewList) dom.btnViewList.classList.toggle('active', isList);
+  if (dom.btnViewGrid) dom.btnViewGrid.classList.toggle('active', !isList);
 }
 
 function formatFileSize(bytes) {
@@ -3213,143 +3578,186 @@ function formatFileSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
-async function toggleDirectory(entry, item, depth) {
-  const child = item.nextElementSibling;
-  if (child && child.classList.contains('file-tree-children')) { child.remove(); return; }
-  const entries = await tiffaDesktop.listDir(entry.path);
-  if (entries.error) return;
-  const filtered = entries.filter(e => {
-    if (e.name.startsWith('.') && e.name !== '.omp') return false;
-    if (['node_modules', '__pycache__', '.git', '.temp'].includes(e.name)) return false;
-    return true;
-  });
-  const container = document.createElement('div');
-  container.className = 'file-tree-children';
-  renderFileEntries(entry.path, filtered, container, depth + 1);
-  item.after(container);
-}
-
 function getFileIcon(ext) {
   const icons = { '.js': '{}', '.ts': '{}', '.py': '~', '.md': '#', '.json': '{}', '.yml': '-', '.yaml': '-', '.html': '<>', '.css': '#', '.bat': '>', '.txt': '~', '.log': '~', '.csv': '=', '.png': 'I', '.jpg': 'I', '.jpeg': 'I', '.gif': 'I', '.webp': 'I', '.pdf': 'P', '.docx': 'W', '.xlsx': 'X', '.pptx': 'S' };
   return icons[ext] || 'F';
 }
 
 async function openFilePreview(entry) {
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico'];
-  if (imageExts.includes(entry.ext)) {
+  // 抽屉式预览：点击文件弹出滑动覆盖层
+  if (state.sidebarCollapsed) { state.sidebarCollapsed = false; dom.sidebar.classList.remove('collapsed'); }
+  dom.drawerTitle.textContent = entry.name;
+  dom.drawerBody.innerHTML = '<div class="preview-empty">加载中…</div>';
+  dom.drawerGap.classList.add('visible');
+  dom.fileDrawer.classList.add('open');
+
+  if (isImageFile(entry.ext)) {
     const result = await tiffaDesktop.readImage(entry.path);
-    if (result.error) { addNotice('error', result.error); return; }
-    addPreviewTab(entry.name, 'image', null, result);
+    if (result.error) { dom.drawerBody.innerHTML = `<div class="preview-empty">${escapeHtml(result.error)}</div>`; return; }
+    const src = `data:${result.mimeType};base64,${result.base64}`;
+    dom.drawerBody.innerHTML = `<div class="image-preview-full"><img src="${src}" alt="${escapeHtml(entry.name)}"></div>`;
   } else {
     const result = await tiffaDesktop.readFile(entry.path);
-    if (result.error) { addNotice('error', result.error); return; }
-    addPreviewTab(entry.name, 'code', entry.path, result);
+    if (result.error) { dom.drawerBody.innerHTML = `<div class="preview-empty">${escapeHtml(result.error)}</div>`; return; }
+    const ext = result.ext || entry.ext || '';
+    // HTML 文件用 iframe 渲染
+    if (ext === '.html' || ext === '.htm') {
+      dom.drawerBody.innerHTML = `<iframe srcdoc="${escapeHtml(result.content)}" sandbox="allow-scripts allow-same-origin"></iframe>`;
+    } else if (ext === '.md' || ext === '.markdown') {
+      const html = simpleMarkdownRender(result.content);
+      dom.drawerBody.innerHTML = `<iframe srcdoc="${escapeHtml(html)}" sandbox="allow-scripts allow-same-origin"></iframe>`;
+    } else {
+      // 代码文件：hljs 高亮
+      const langMap = { '.js': 'javascript', '.ts': 'typescript', '.py': 'python', '.css': 'css', '.json': 'json', '.yml': 'yaml', '.yaml': 'yaml', '.bat': 'bash', '.sh': 'bash', '.xml': 'xml', '.sql': 'sql', '.rs': 'rust', '.go': 'go', '.java': 'java', '.cpp': 'cpp', '.c': 'c' };
+      const lang = langMap[ext] || '';
+      let highlighted;
+      try { highlighted = lang && tiffaDesktop.hljs.getLanguage(lang) ? tiffaDesktop.hljs.highlight(result.content, { language: lang }).value : tiffaDesktop.hljs.highlightAuto(result.content).value; }
+      catch { highlighted = escapeHtml(result.content); }
+      dom.drawerBody.innerHTML = `<pre class="code-preview"><code class="hljs">${highlighted}</code></pre>`;
+    }
   }
 }
 
-// ── Preview ──
-function setupPreview() {
-  dom.btnClosePreview.addEventListener('click', () => {
-    state.previewTabs = [];
-    state.activePreviewIndex = -1;
-    renderPreviewTabs();
-    dom.previewContent.innerHTML = '<div class="preview-empty">点击左侧文件预览</div>';
+function closeFileDrawer() {
+  dom.fileDrawer.classList.remove('open');
+  dom.drawerGap.classList.remove('visible');
+}
+
+// ── 记忆内容加载 ──
+// rawProjectMd: 保存原始 markdown 供搜索过滤使用
+state.rawProjectMd = '';
+
+async function loadMemoryContent() {
+  if (!dom.memoryContent) return;
+  dom.memoryContent.classList.add('markdown-body');
+  // 清空搜索框
+  if (dom.memorySearch) dom.memorySearch.value = '';
+  try {
+    // 只显示当前项目的 PROJECT.md（项目进度/决策/规范）
+    if (state.workspacePath) {
+      const proj = await tiffaDesktop.readFile(state.workspacePath + '\\PROJECT.md');
+      if (proj && proj.content) {
+        state.rawProjectMd = proj.content;
+        dom.memoryContent.innerHTML = sanitizeHtml(tiffaDesktop.marked(proj.content));
+        wrapMemorySections(dom.memoryContent);
+        return;
+      }
+    }
+    state.rawProjectMd = '';
+    dom.memoryContent.textContent = '暂无 PROJECT.md';
+  } catch {
+    state.rawProjectMd = '';
+    dom.memoryContent.textContent = '无法加载';
+  }
+}
+
+// 将渲染后的平铺 DOM 按 h3 标题分组成可过滤小节
+// 每个 h3 到下一个 h3/h2 之间的元素包裹进 div.memory-section
+function wrapMemorySections(container) {
+  const children = Array.from(container.children);
+  let currentSection = null;
+  for (const el of children) {
+    if (el.tagName === 'H3') {
+      // 开始新小节
+      currentSection = document.createElement('div');
+      currentSection.className = 'memory-section';
+      currentSection.dataset.section = el.textContent.trim();
+      container.insertBefore(currentSection, el);
+      currentSection.appendChild(el);
+    } else if (el.tagName === 'H2') {
+      // H2 是大类标题，不属于任何 h3 小节
+      currentSection = null;
+    } else if (currentSection) {
+      currentSection.appendChild(el);
+    }
+  }
+}
+
+// 按关键词过滤记忆小节
+function filterMemorySections(query) {
+  if (!dom.memoryContent) return;
+  const sections = dom.memoryContent.querySelectorAll('.memory-section');
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    sections.forEach(s => s.style.display = '');
+    return;
+  }
+  sections.forEach(s => {
+    s.style.display = s.dataset.section.toLowerCase().includes(q) ||
+      s.textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 }
+// ── 全局记忆召回 ──
 
-function addPreviewTab(name, type, filePath, data) {
-  if (state.sidebarCollapsed) { state.sidebarCollapsed = false; dom.sidebar.classList.remove('collapsed'); }
-  const existing = state.previewTabs.findIndex(t => t.name === name);
-  if (existing >= 0) { state.activePreviewIndex = existing; renderPreviewTabs(); renderPreviewContent(); return; }
-  // 判断是否可预览（HTML/Markdown）
-  const ext = data?.ext || path.extname(name || '');
-  const previewable = ['.html', '.htm', '.md', '.markdown'].includes(ext);
-  state.previewTabs.push({ name, type, filePath, data, ext, previewable, previewMode: 'code' });
-  state.activePreviewIndex = state.previewTabs.length - 1;
-  renderPreviewTabs();
-  renderPreviewContent();
-}
-
-function renderPreviewTabs() {
-  dom.previewTabs.innerHTML = '';
-  state.previewTabs.forEach((tab, i) => {
-    const btn = document.createElement('button');
-    btn.className = `ptab ${i === state.activePreviewIndex ? 'active' : ''}`;
-    btn.innerHTML = `${escapeHtml(tab.name)} <span class="ptab-close">x</span>`;
-    btn.addEventListener('click', (e) => {
-      if (e.target.classList.contains('ptab-close')) {
-        state.previewTabs.splice(i, 1);
-        if (state.activePreviewIndex >= state.previewTabs.length)
-          state.activePreviewIndex = Math.max(0, state.previewTabs.length - 1);
-        renderPreviewTabs(); renderPreviewContent();
-        if (state.previewTabs.length === 0) dom.previewContent.innerHTML = '<div class="preview-empty">点击左侧文件预览</div>';
-      } else { state.activePreviewIndex = i; renderPreviewTabs(); renderPreviewContent(); }
-    });
-    dom.previewTabs.appendChild(btn);
-  });
-}
-
-function renderPreviewContent() {
-  const tab = state.previewTabs[state.activePreviewIndex];
-  if (!tab) { dom.previewContent.innerHTML = '<div class="preview-empty">点击左侧文件预览</div>'; return; }
-
-  // 代码/预览 切换按钮（仅可预览文件显示）
-  let modeBar = '';
-  if (tab.previewable) {
-    const isPreview = tab.previewMode === 'preview';
-    modeBar = `<div class="preview-mode-bar">
-      <button class="preview-mode-btn ${!isPreview ? 'active' : ''}" data-mode="code">代码</button>
-      <button class="preview-mode-btn ${isPreview ? 'active' : ''}" data-mode="preview">预览</button>
-    </div>`;
+function enterRecallMode() {
+  state.recallMode = true;
+  if (dom.btnMemoryRecall) dom.btnMemoryRecall.classList.add('active');
+  if (dom.memorySearch) {
+    dom.memorySearch.placeholder = '输入关键词，回车搜索全局记忆…';
+    dom.memorySearch.value = '';
+    dom.memorySearch.focus();
   }
-
-  let content = '';
-  const mode = tab.previewable ? tab.previewMode : 'code';
-  if (mode === 'preview') {
-    content = renderHtmlPreview(tab);
-  } else {
-    content = renderCodeContent(tab);
-  }
-
-  dom.previewContent.innerHTML = modeBar + content;
-
-  // 绑定切换按钮事件
-  if (tab.previewable) {
-    dom.previewContent.querySelectorAll('.preview-mode-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        tab.previewMode = btn.dataset.mode;
-        renderPreviewContent();
-      });
-    });
+  if (dom.memoryContent) {
+    dom.memoryContent.classList.remove('markdown-body');
+    dom.memoryContent.innerHTML = '<div class="memory-recall-empty">输入关键词后按回车，搜索所有项目的记忆</div>';
   }
 }
 
-function renderCodeContent(tab) {
-  const data = tab.data || {};
-  const content = data.content || '';
-  const ext = data.ext || tab.ext || path.extname(tab.name || '');
-  const langMap = { '.js': 'javascript', '.ts': 'typescript', '.py': 'python', '.html': 'html', '.css': 'css', '.json': 'json', '.md': 'markdown', '.yml': 'yaml', '.yaml': 'yaml', '.bat': 'bash', '.sh': 'bash', '.xml': 'xml', '.sql': 'sql', '.rs': 'rust', '.go': 'go', '.java': 'java', '.cpp': 'cpp', '.c': 'c', '.h': 'c' };
-  const lang = langMap[ext] || '';
-  let highlighted;
-  try { highlighted = lang && tiffaDesktop.hljs.getLanguage(lang) ? tiffaDesktop.hljs.highlight(content, { language: lang }).value : tiffaDesktop.hljs.highlightAuto(content).value; }
-  catch { highlighted = escapeHtml(content); }
-  return `<div style="margin-bottom:8px;font-size:12px;color:var(--text-muted);">${escapeHtml(tab.name || '')} ${content.length > 0 ? `(${(content.length / 1024).toFixed(1)}KB)` : ''}</div><pre class="code-preview"><code class="hljs">${highlighted}</code></pre>`;
+function exitRecallMode() {
+  state.recallMode = false;
+  if (dom.btnMemoryRecall) dom.btnMemoryRecall.classList.remove('active');
+  if (dom.memorySearch) {
+    dom.memorySearch.placeholder = '搜索记忆…';
+    dom.memorySearch.value = '';
+  }
+  loadMemoryContent();
 }
 
-function renderHtmlPreview(tab) {
-  const data = tab.data || {};
-  const content = data.content || '';
-  const ext = data.ext || tab.ext || '';
-  // HTML 直接用 iframe srcdoc 渲染
-  if (ext === '.html' || ext === '.htm') {
-    return `<iframe class="html-preview-frame" srcdoc="${escapeHtml(content)}" sandbox="allow-scripts allow-same-origin"></iframe>`;
+async function performMemoryRecall(query) {
+  const q = (query || '').trim();
+  if (!q) return;
+  if (dom.memoryContent) {
+    dom.memoryContent.classList.remove('markdown-body');
+    dom.memoryContent.innerHTML = '<div class="memory-recall-loading">搜索中…</div>';
   }
-  // Markdown 渲染为基本 HTML（简易版）
-  if (ext === '.md' || ext === '.markdown') {
-    const html = simpleMarkdownRender(content);
-    return `<iframe class="html-preview-frame" srcdoc="${escapeHtml(html)}" sandbox="allow-scripts allow-same-origin"></iframe>`;
+  try {
+    const result = await tiffaDesktop.recallMemory(q);
+    if (result.error) {
+      if (dom.memoryContent) {
+        dom.memoryContent.innerHTML = `<div class="memory-recall-empty">搜索失败：${escapeHtml(result.error)}</div>`;
+      }
+      return;
+    }
+    renderRecallResults(result.results || [], q);
+  } catch (err) {
+    if (dom.memoryContent) {
+      dom.memoryContent.innerHTML = `<div class="memory-recall-empty">搜索出错：${escapeHtml(err.message)}</div>`;
+    }
   }
-  return `<div style="padding:12px;color:var(--text-muted);">不支持此格式预览</div>`;
+}
+
+function renderRecallResults(results, query) {
+  if (!dom.memoryContent) return;
+  if (results.length === 0) {
+    dom.memoryContent.innerHTML = `<div class="memory-recall-empty">未找到与「${escapeHtml(query)}」相关的记忆</div>`;
+    return;
+  }
+  let html = `<div class="memory-recall-back" onclick="exitRecallMode()">← 返回项目记忆</div>`;
+  html += `<div class="memory-recall-results">`;
+  for (const item of results) {
+    const time = item.timestamp ? new Date(item.timestamp).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+    const bank = item.bank || '';
+    const source = item.source || '';
+    html += `<div class="memory-recall-item" title="${escapeHtml(item.content)}">`;
+    html += `<div class="memory-recall-item-content">${escapeHtml(item.content)}</div>`;
+    html += `<div class="memory-recall-item-meta">`;
+    if (bank) html += `<span class="memory-recall-item-bank">${escapeHtml(bank)}</span>`;
+    if (source) html += `<span>${escapeHtml(source)}</span>`;
+    if (time) html += `<span>${time}</span>`;
+    html += `</div></div>`;
+  }
+  html += `</div>`;
+  dom.memoryContent.innerHTML = html;
 }
 
 // 简易 Markdown → HTML（不依赖外部库）
@@ -3392,40 +3800,6 @@ function setupSidebarResize() {
 }
 
 // 分隔线：(文件树 + Todo) ↔ 预览，只调整预览区高度
-function setupPreviewDivider() {
-  const divider = dom.previewDivider;
-  const treeSection = dom.sidebarTreeSection;
-  const previewSection = dom.sidebarPreview;
-  let dragging = false, startY, startTreeH, startPreviewH;
-  divider.addEventListener('mousedown', (e) => {
-    if (dom.sidebar.classList.contains('collapsed')) return;
-    dragging = true;
-    startY = e.clientY;
-    startTreeH = treeSection.offsetHeight;
-    startPreviewH = previewSection.offsetHeight;
-    divider.classList.add('dragging');
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-  document.addEventListener('mousemove', (e) => {
-    if (!dragging) return;
-    const delta = e.clientY - startY;
-    // 只调整 tree 和 preview，Todo 固定高度不受影响
-    const treeH = Math.max(60, startTreeH + delta);
-    const previewH = Math.max(80, startPreviewH - delta);
-    treeSection.style.flex = '0 0 ' + treeH + 'px';
-    previewSection.style.flex = '0 0 ' + previewH + 'px';
-  });
-  document.addEventListener('mouseup', () => {
-    if (!dragging) return;
-    dragging = false;
-    divider.classList.remove('dragging');
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-  });
-}
-
 // ── Session Tab Context Menu ──
 
 function showSessionTabContextMenu(e, session) {
@@ -4119,6 +4493,18 @@ async function restoreModelIfAvailable(provider, modelId, sessionId, expectedSes
 }
 
 async function switchModel(provider, modelId) {
+  // 确保对话实例已激活，避免 setModel 落到错误实例（项目级 fallback）
+  if (!state.tiffaReady) {
+    addNotice('warning', 'Tiffa 尚未就绪，请稍候再切换模型');
+    return;
+  }
+  if (state.sessionSwitching) {
+    addNotice('warning', '正在切换会话，请稍候再切换模型');
+    return;
+  }
+  // 模型切换锁：禁止切换期间发送消息，避免用旧模型发出去
+  state.modelSwitching = true;
+  updateInputState();
   try {
     await tiffaDesktop.setModel(provider, modelId, state.activeSessionId);
     state.currentModel = modelId;
@@ -4135,9 +4521,13 @@ async function switchModel(provider, modelId) {
       localStorage.setItem('tiffa-lastModel', JSON.stringify({ provider, modelId }));
     } catch {}
   } catch (err) { addNotice('error', `切换模型失败: ${err.message}`); }
+  finally {
+    state.modelSwitching = false;
+    updateInputState();
+  }
 }
 
-// 从 Tiffa 获取当前模型名并更新顶栏显示
+// 从 Tiffa 获取当前模型名并更新顶栏显示（纯读取，不恢复模型）
 async function fetchCurrentModel() {
   try {
     const result = await tiffaDesktop.getModels();
@@ -4149,32 +4539,40 @@ async function fetchCurrentModel() {
         state.currentProvider = first.provider || '';
         dom.currentModel.textContent = name;
       }
-      // 构建可用模型集合（provider + modelId），用于校验 lastModel
-      // 缓存可用模型集合，供后续 restoreModelIfAvailable 使用
+      // 构建可用模型集合（provider + modelId），供 restoreModelIfAvailable 校验
       _availableModelSet = new Set();
       for (const m of result.models) {
         if (m.provider && m.id) _availableModelSet.add(`${m.provider}/${m.id}`);
       }
       _availableModelSetTime = Date.now();
-      // lastModel 兜底恢复：仅在当前会话无 sessionModelMap 记录时才使用全局 lastModel
-      // 避免 lastModel 覆盖 selectProject/switchToSession 已恢复的每会话模型
-      try {
-        const activePath = state.activeSessionPath;
-        const hasSessionModel = activePath && state.sessionModelMap[activePath];
-        if (!hasSessionModel) {
-          const saved = localStorage.getItem('tiffa-lastModel');
-          if (saved) {
-            const last = JSON.parse(saved);
-            if (last && last.modelId && last.modelId !== state.currentModel && last.provider) {
-              const restored = await restoreModelIfAvailable(last.provider, last.modelId, state.activeSessionId);
-              if (!restored) {
-                // 模型不可用，清除残留的 lastModel 避免下次启动再尝试
-                localStorage.removeItem('tiffa-lastModel');
-              }
-            }
-          }
-        }
-      } catch {}
+    }
+  } catch {}
+}
+
+// 启动时的 lastModel 恢复：只在有活跃对话实例时才恢复，避免 setModel 落到错误实例上
+// 调用时机：init 完成 + selectProject/switchToSession 激活对话实例之后
+async function restoreLastModelIfNeeded() {
+  // 没有活跃对话 -> 不恢复（等用户选了对话再说）
+  if (!state.activeSessionId) return;
+  // 该对话已有 sessionModelMap 记录 -> 用 sessionModelMap 恢复，不用 lastModel
+  const activePath = state.activeSessionPath;
+  if (activePath && state.sessionModelMap[activePath]) return;
+  try {
+    const saved = localStorage.getItem('tiffa-lastModel');
+    if (!saved) return;
+    const last = JSON.parse(saved);
+    if (!last || !last.modelId || !last.provider) return;
+    // 校验模型在可用列表中
+    const availableSet = await getAvailableModelSet();
+    if (availableSet && !availableSet.has(`${last.provider}/${last.modelId}`)) {
+      console.warn(`[restoreLastModel] 模型 "${last.provider}/${last.modelId}" 不在可用列表中，清除残留`);
+      localStorage.removeItem('tiffa-lastModel');
+      return;
+    }
+    // 恢复到当前活跃对话实例
+    const restored = await restoreModelIfAvailable(last.provider, last.modelId, state.activeSessionId, state.activeSessionPath);
+    if (!restored) {
+      localStorage.removeItem('tiffa-lastModel');
     }
   } catch {}
 }
