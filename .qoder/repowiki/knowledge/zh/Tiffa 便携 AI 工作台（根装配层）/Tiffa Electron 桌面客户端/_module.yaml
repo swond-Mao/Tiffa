@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: electron_app
+title: Tiffa Electron 桌面客户端
+scope:
+    - electron/
+source_files: []
+depends_on: []
+related_to: []

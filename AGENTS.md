@@ -18,7 +18,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，�
 | `data\agent\` | 配置目录 (config.yml, models.yml, projects.json) |
 | `data\agent\rules\` | TTSR 规则目录（10 条，零 context 成本约束） |
 | `data\memory\` | 长期记忆目录 (constraints.md, inbox/) |
-| `plugins\claude-mode-extension.ts` | Claude 化扩展 (v4.0, 482 行) |
+| `plugins\claude-mode-extension.ts` | Claude 化扩展 (v6.2) |
 | `skills\` | 专业技能目录 (18 个 skill) |
 | `workspace\` | 工作区根目录 |
 | `tiffa-desktop.exe` | 桌面启动器 (C# winexe) |
@@ -112,12 +112,12 @@ v6.1 配置值通过 `settings` 数据库直接写入，不依赖 config.yml 嵌
 
 ## Claude 化扩展 (v4.0)
 
-扩展文件：`plugins/claude-mode-extension.ts`（461 行，v6.1.1），通过 `-e` 参数加载。
+扩展文件：`plugins/claude-mode-extension.ts`（v6.2），通过 `-e` 参数加载。
 
 ### v4.0 设计原则（精简为 v6.1）
 
-- **已删除**：AGENTS.md 注入、MEMORY.md/PROJECT.md 注入、违反检测、权限契约审批、XML 工具调用纠正、敏感信息检测、memory_search/memory_write 工具、/omfg 命令、constraints.md 注入
-- **保留**：gap-fill 断片补救、危险路径/配置文件拦截、静默工具调用检测、审计日志、error 续行（最多一次，5秒延迟）
+- **已删除**：AGENTS.md 注入、MEMORY.md 注入（PROJECT.md 注入已于 v6.2 重新实现，见下「保留」）、违反检测、权限契约审批、XML 工具调用纠正、敏感信息检测、memory_search/memory_write 工具、/omfg 命令、constraints.md 注入
+- **保留**：gap-fill 断片补救、危险路径/配置文件拦截、静默工具调用检测、审计日志、error 续行（最多一次，5秒延迟）、**PROJECT.md 生成 + 确定性注入（v6.2 新增：before_agent_start 在项目根目录首次对话自动生成脚手架并注入 system prompt）**
 
 
 ### 6 个 Hooks（v6.1）
@@ -126,7 +126,7 @@ v6.1 配置值通过 `settings` 数据库直接写入，不依赖 config.yml 嵌
 |---|------|------|
 | 0 | `session_start` | 移除 eval/hub 工具 |
 | 1 | `before_agent_start` | 静默工具调用计数重置 |
-| 2 | `tool_call` | 危险路径/配置文件自改/workspace mkdir 拦截 + 静默工具调用检测（≥3次 → steer） |
+| 2 | `tool_call` | 危险路径/配置文件自改/workspace mkdir 拦截 + 静默工具调用检测（≥3次 -> steer）+ **技能强制（v6.3：调 comfy.py/craftman.py 前必须先 `read skill://` 加载步骤 + 先 `ask` 询问用户，否则 block）** |
 | 3 | `session_stop` | error 续行一次（最多一次，5秒延迟），其他不干预 |
 | 4 | `session.compacting` | gap-fill 提取（改动文件/命令/决策）+ compact dump + 立即返回 context 注入 |
 | 5 | `tool_result` | 审计日志（JSONL） |
@@ -141,11 +141,13 @@ v6.1 配置值通过 `settings` 数据库直接写入，不依赖 config.yml 嵌
 6. **清理**：60分钟后自动删除（跨 session）
 
 
-### 1 个自定义工具
+### 技能加载方式
 
-| 工具 | 说明 |
-|------|------|
-| `skill` | 加载专业技能执行专业任务（18 个 skill），传入 `name` 加载，`action: "list"` 列出所有 |
+Tiffa 无自定义 `skill` 工具。技能通过内核原生 `read skill://<name>` 协议加载：
+
+- 模型用 `read` 工具读取 `skill://<技能名>` -> 内核解析到 `skills/<技能名>/SKILL.md` -> 返回完整内容
+- `skills.customDirectories` 设置（agent.db settings 表）指向 `G:/Tiffa/skills`
+- `constraints-inject.md` 中列出触发词到 `read skill://` 路径的映射
 
 ### /omfg 命令
 
@@ -231,7 +233,7 @@ Skills 目录：`G:\Tiffa\skills\`
 | xlsx | Excel 助手 |
 ### ComfyUI 生图速查（操作指令，非行为约束）
 
-**服务**：ComfyUI 通过 9876 端口反向代理，输出目录 `E:\workspace\comfyui_out`。未运行时生图会失败，应提醒用户先启动。
+**服务**：ComfyUI 运行在 `http://47.108.197.247:8188`（与 `skills/comfyui-image-gen/comfy.py` 默认地址及 SKILL.md 一致；可用 `COMFY_URL` 环境变量覆盖），输出目录 `E:\workspace\comfyui_out`。未运行时生图会失败，应提醒用户先启动。
 
 | 意图 | 管线 | 命令 |
 |------|------|------|
@@ -249,7 +251,7 @@ Skills 目录：`G:\Tiffa\skills\`
 
 ---
 
-**注意**：用户明确说"用 XX skill"才加载对应 skill。不要主动建议或预判用户要哪个 skill。
+**注意**：用户明确说"用 XX skill"才加载对应 skill（用 `read skill://<name>` 读取 SKILL.md）。不要主动建议或预判用户要哪个 skill。
 
 ## 环境变量
 

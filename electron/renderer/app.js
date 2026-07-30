@@ -495,7 +495,7 @@ async function init() {
   const statusEl = document.getElementById('startupStatus');
   if (overlay) {
     if (!state.tiffaReady) {
-      if (statusEl) statusEl.textContent = '正在启动 AI 引擎…';
+      if (statusEl) statusEl.textContent = '凝心定神…';
       const maxWait = 20000; // 最多等 20 秒
       const start = Date.now();
       while (!state.tiffaReady && Date.now() - start < maxWait) {
@@ -508,10 +508,16 @@ async function init() {
         }
       }
       if (!state.tiffaReady) {
-        // 超时兜底：仍然允许进入，但提示未就绪
-        if (statusEl) statusEl.textContent = '引擎启动较慢，可稍后发送消息';
+        // 超时兖底：仍然允许进入，但提示未就绪
+        if (statusEl) statusEl.textContent = '棋局未启，请稍候…';
         await new Promise(r => setTimeout(r, 1500));
       }
+    }
+    // 等待记忆系统预热完成（embedding 模型加载 + /memory rebuild）
+    if (state.tiffaReady && statusEl) {
+      statusEl.textContent = '阅览旧谱…';
+      // 预热最多需要 ~8秒（3s 延迟 + embedding 加载），等 6s 兖底
+      await new Promise(r => setTimeout(r, 6000));
     }
     overlay.classList.add('fade-out');
     setTimeout(() => { overlay.remove(); }, 400);
@@ -600,7 +606,7 @@ function handleEvent(event) {
       updateStatus('就绪');
       // agent 结束后自动发送排队消息（短暂延迟确保后端就绪）
       setTimeout(() => flushPendingQueue(), 300);
-      if (state.activeProjectDirName) loadSessions(state.activeProjectDirName);
+      if (state.activeProjectDirName) loadSessions(state.activeProjectDirName).then(() => saveOpenTabs());
       break;
     case 'turn_end':
       finalizeAssistantMessage();
@@ -658,8 +664,14 @@ function handleEvent(event) {
       break;
     case 'session_info_update':
       if (event.title) {
-        document.title = `Tiffa - ${event.title}`;
-        updateSessionTabTitle(event.title);
+        // 只接受当前活跃会话的标题更新，避免后台实例覆盖当前 tab
+        if (!event._sessionId || !state.activeSessionId || event._sessionId === state.activeSessionId) {
+          document.title = `Tiffa - ${event.title}`;
+          updateSessionTabTitle(event.title);
+        }
+        // 无论是否当前会话，都更新 state.sessions 中对应会话的 title（供历史列表使用）
+        const session = state.sessions.find(s => s.sessionId === event._sessionId);
+        if (session) session.title = event.title;
       }
       break;
     case 'notice':
@@ -1426,8 +1438,60 @@ async function loadSessions(dirName) {
   if (result.error) {
     state.sessions = [];
   } else {
+    // 兜底迁移：session_switch 事件可能因用户已切走 tab 而未处理，
+    // 导致 __new__ tab 停留在临时路径。通过实例的 sessionFilePath 匹配磁盘会话自动迁移。
+    const newTabsToMigrate = state.sessions.filter(s => s.path.startsWith('__new__') && s.sessionId);
+    if (newTabsToMigrate.length > 0) {
+      let instances = null;
+      try { instances = await tiffaDesktop.getInstances(); } catch {}
+      if (instances && Array.isArray(instances)) {
+        for (const nt of newTabsToMigrate) {
+          // 用临时 sessionId 查找实例，获取真实的 sessionFilePath
+          const inst = instances.find(i => i.sessionId === nt.sessionId);
+          if (inst && inst.sessionFilePath) {
+            // 用 sessionFilePath 在磁盘会话列表中查找匹配
+            const realSession = result.find(rs => {
+              // 规范化比较：统一为小写并替换正斜杠为反斜杠（Windows）
+              const norm = s => s ? s.replace(/\//g, '\\').toLowerCase() : '';
+              return norm(rs.path) === norm(inst.sessionFilePath);
+            });
+            if (realSession) {
+              const oldPath = nt.path;
+              const newPath = realSession.path;
+              // 迁移所有引用旧路径的状态
+              if (state.sessionModelMap[oldPath]) {
+                state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
+                delete state.sessionModelMap[oldPath];
+                saveModelMap();
+              }
+              if (state.sessionAgentRunning.has(oldPath)) {
+                state.sessionAgentRunning.set(newPath, state.sessionAgentRunning.get(oldPath));
+                state.sessionAgentRunning.delete(oldPath);
+              }
+              if (state.sessionMessageCache.has(oldPath)) {
+                state.sessionMessageCache.set(newPath, state.sessionMessageCache.get(oldPath));
+                state.sessionMessageCache.delete(oldPath);
+              }
+              state.activeSessionPaths.delete(oldPath);
+              state.activeSessionPaths.add(newPath);
+              if (state.activeSessionPath === oldPath) {
+                state.activeSessionPath = newPath;
+                state.activeSessionId = extractSessionId(newPath) || nt.sessionId;
+              }
+            }
+          }
+        }
+      }
+    }
     // 保留未迁移的 __new__ 临时 tab（已迁移的会被磁盘列表自然替代）
     const newTabs = state.sessions.filter(s => s.path.startsWith('__new__') && state.activeSessionPaths.has(s.path));
+    // 建立内存中已有标题的映射：path -> title（非空才保留）
+    // agent_end 后 loadSessions 重新读磁盘时，标题可能还没写入/异步延迟，
+    // 用内存中的实时标题避免被磁盘空标题覆盖
+    const memTitles = new Map();
+    for (const s of state.sessions) {
+      if (s.title) memTitles.set(s.path, s.title);
+    }
     // 合并后按 path 去重（磁盘版本优先，信息更完整）
     const seen = new Set();
     state.sessions = [...result, ...newTabs].filter(s => {
@@ -1435,6 +1499,12 @@ async function loadSessions(dirName) {
       seen.add(s.path);
       return true;
     });
+    // 磁盘读到的 title 为空但内存中有实时标题 -> 保留内存标题
+    for (const s of state.sessions) {
+      if (!s.title && memTitles.has(s.path)) {
+        s.title = memTitles.get(s.path);
+      }
+    }
   }
   renderSessionTabs();
   renderHistoryPanel();
@@ -4203,14 +4273,33 @@ function cycleApprovalMode() {
   try { localStorage.setItem('tiffa-approvalMode-default', state.approvalMode); } catch {}
   renderApprovalModeIndicator();
   addNotice('info', `审批模式: ${APPROVAL_MODE_LABELS[state.approvalMode]}`);
-  // 写入 config.yml（下次会话生效）
-  tiffaDesktop.writeApprovalMode(state.approvalMode).then(result => {
-    if (!result?.success) console.warn('[审批] 写入 config.yml 失败:', result?.error);
+  // 写入 config.yml + 重启当前会话实例让审批模式立即生效
+  // 内核不支持运行时修改 approvalMode，必须重启 CLI 进程重新加载 config.yml
+  tiffaDesktop.writeApprovalMode(state.approvalMode).then(async (result) => {
+    if (!result?.success) {
+      console.warn('[审批] 写入 config.yml 失败:', result?.error);
+      return;
+    }
+    // agent 运行中不重启（避免中断任务），配置在下次新对话或手动重启时生效
+    if (state.agentRunning) {
+      addNotice('info', '审批模式将在下次新对话时生效');
+      return;
+    }
+    // 重启当前会话实例
+    if (state.activeSessionId && state.workspacePath) {
+      try {
+        state.tiffaReady = false;
+        updateStatus('重启中...');
+        await tiffaDesktop.closeSession(state.workspacePath, state.activeSessionId);
+        await tiffaDesktop.activateSession(state.workspacePath, state.activeSessionId);
+        // ready 事件会自动设置 tiffaReady=true 和恢复模型
+      } catch (err) {
+        console.warn('[审批] 重启实例失败:', err.message);
+        state.tiffaReady = true; // 兜底，避免 UI 永久卡住
+        updateStatus('就绪');
+      }
+    }
   }).catch(() => {});
-  // 通知 Tiffa（当前会话通过 steer 告知）
-  if (state.agentRunning) {
-    try { tiffaDesktop.command('steer', { message: `[system] 用户切换审批模式为: ${state.approvalMode}（${APPROVAL_MODE_LABELS[state.approvalMode]}）` }); } catch {}
-  }
 }
 
 function restoreApprovalMode(cwd) {
@@ -4852,7 +4941,7 @@ function addModelDialog(provKey, onDone) {
     <input id="dlgModelCtx" type="number" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" value="128000">
     <label style="font-size:12px;color:var(--text-muted);">最大输出</label>
     <input id="dlgModelMax" type="number" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" value="8192">
-    <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin:4px 0 16px;cursor:pointer;"><input id="dlgModelReasoning" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);"> 启用思考模式（推理模型回答前会先思考）</label>
+    <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer;"><input id="dlgModelVision" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);"> 支持视觉（图片输入 / snapcompact 图像压缩）</label>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
       <button id="dlgCancel" style="padding:6px 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;">取消</button>
       <button id="dlgOk" style="padding:6px 16px;border:none;border-radius:4px;background:var(--accent);color:white;cursor:pointer;">添加</button>
@@ -4874,8 +4963,9 @@ function addModelDialog(provKey, onDone) {
     const ctx = parseInt(box.querySelector('#dlgModelCtx').value) || 128000;
     const max = parseInt(box.querySelector('#dlgModelMax').value) || 8192;
     const reasoning = box.querySelector('#dlgModelReasoning').checked;
+    const vision = box.querySelector('#dlgModelVision').checked;
     if (!modelsConfigData.providers[provKey].models) modelsConfigData.providers[provKey].models = [];
-    modelsConfigData.providers[provKey].models.push({ id, name, reasoning, input: ['text'], supportsTools: true, contextWindow: ctx, maxTokens: max, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+    modelsConfigData.providers[provKey].models.push({ id, name, reasoning, input: vision ? ['text', 'image'] : ['text'], supportsTools: true, contextWindow: ctx, maxTokens: max, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
     close();
     onDone();
     await saveModelConfig();
@@ -4895,7 +4985,8 @@ function createConfigField(key, label, value, placeholder) {
 function createModelEntry(provKey, idx, model) {
   const div = document.createElement('div'); div.className = 'model-entry';
   const thinkBadge = model.reasoning ? ' | 思考' : '';
-  div.innerHTML = `<span class="model-entry-id">${escapeHtml(model.id || '')}</span><span class="model-entry-meta">${escapeHtml(model.name || '')} | ${model.contextWindow || '?'}ctx${thinkBadge}</span>`;
+  const visionBadge = (model.input && model.input.includes('image')) ? ' | 视觉' : '';
+  div.innerHTML = `<span class="model-entry-id">${escapeHtml(model.id || '')}</span><span class="model-entry-meta">${escapeHtml(model.name || '')} | ${model.contextWindow || '?'}ctx${thinkBadge}${visionBadge}</span>`;
   const del = document.createElement('button'); del.className = 'model-entry-delete'; del.textContent = 'x';
   del.addEventListener('click', (e) => { e.stopPropagation(); if (confirm(`确定删除模型 "${model.id}"？`)) { modelsConfigData.providers[provKey].models.splice(idx, 1); document.getElementById('modelConfig').innerHTML = ''; renderModelConfig(); } });
   div.appendChild(del);
@@ -4917,6 +5008,7 @@ function editModelInline(container, provKey, idx, model, onDone) {
     { key: 'contextWindow', label: '上下文', value: String(model.contextWindow || 128000), type: 'number' },
     { key: 'maxTokens', label: '最大输出', value: String(model.maxTokens || 8192), type: 'number' },
     { key: 'reasoning', label: '思考模式', checked: !!model.reasoning, type: 'checkbox' },
+    { key: 'vision', label: '视觉', checked: !!(model.input && model.input.includes('image')), type: 'checkbox' },
   ];
   const inputs = {};
   for (const f of fields) {
@@ -4940,8 +5032,8 @@ function editModelInline(container, provKey, idx, model, onDone) {
     const m = modelsConfigData.providers[provKey].models[idx];
     m.id = inputs.id.value; m.name = inputs.name.value;
     m.contextWindow = parseInt(inputs.contextWindow.value) || 128000;
-    m.maxTokens = parseInt(inputs.maxTokens.value) || 8192;
     m.reasoning = !!inputs.reasoning.checked;
+    m.input = inputs.vision.checked ? ['text', 'image'] : ['text'];
     if (onDone) onDone();
     document.getElementById('modelConfig').innerHTML = ''; renderModelConfig();
     await saveModelConfig();
@@ -5032,6 +5124,7 @@ function addProviderUI() {
   let step = 1;
   let selectedPreset = null; // null=预设列表, 'custom'=自定义, object=选中预设
   let pid = '', name = '', baseUrl = '', api = 'openai-completions', apiKey = '', manualIds = '';
+  let vision = false; // 视觉能力（图片输入）
   let discovered = []; // 第 2 步发现的模型
   let checked = new Set();
   let savedManualIds = []; // 跨步传递
@@ -5167,6 +5260,10 @@ function addProviderUI() {
             <input class="form-input" id="fldManualIds" placeholder="如 deepseek-v4-pro；留空则尝试自动获取" value="${escapeHtml(manualIds)}">
             <span class="form-hint">${hasManualIds ? '已填模型 ID，可直接「仅保存」' : '留空则依赖自动发现'}</span>
           </label>
+          <label class="form-field" style="flex-direction:row;align-items:center;gap:6px;">
+            <input type="checkbox" id="fldVision" style="width:16px;height:16px;accent-color:var(--accent);" ${vision ? 'checked' : ''}>
+            <span class="form-label" style="margin:0;">支持视觉（图片输入 / snapcompact 图像压缩）</span>
+          </label>
           <div class="add-model-actions">
             <button class="settings-btn" id="btnBack">返回</button>
             <button class="settings-btn" id="btnCancel">取消</button>
@@ -5187,6 +5284,8 @@ function addProviderUI() {
       updateField('#fldManualIds', v => manualIds = v);
       const apiSelect = modal.querySelector('#fldApi');
       if (apiSelect) apiSelect.addEventListener('change', () => { api = apiSelect.value; render(); });
+      const visionCheckbox = modal.querySelector('#fldVision');
+      if (visionCheckbox) visionCheckbox.addEventListener('change', () => { vision = visionCheckbox.checked; });
 
       modal.querySelector('#addModelClose').addEventListener('click', close);
       modal.querySelector('#btnCancel').addEventListener('click', close);
@@ -5216,7 +5315,7 @@ function addProviderUI() {
     if (apiKey.trim()) cfg.apiKey = apiKey.trim();
     else if (!NO_KEY_NEEDED_APIS.has(api)) cfg.auth = 'none';
     const ids = manualIds.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
-    if (ids.length > 0) cfg.models = ids.map(id => ({ id }));
+    if (ids.length > 0) cfg.models = ids.map(id => ({ id, input: vision ? ['text', 'image'] : ['text'] }));
     return cfg;
   }
 

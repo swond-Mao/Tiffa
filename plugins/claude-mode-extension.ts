@@ -259,6 +259,16 @@ export default async function (pi: any) {
         }
       }
 
+      // (a2) 用户档案：USER.md（L1 层记忆，每次会话注入）
+      // 写入规则：用户说“以后你都必须/不能 xxx”“记住我喜欢/讨厌 xxx”时写入
+      const userMdPath = join(MEMORY_DIR, "USER.md")
+      if (existsSync(userMdPath)) {
+        try {
+          const userContent = readFileSync(userMdPath, "utf8").trim()
+          if (userContent) injected.push(`# 用户偏好（USER.md）\n\n> 写入规则：用户说“以后你都必须/不能 xxx”“记住我喜欢/讨厌 xxx”等跨项目偏好时写入此文件。项目级约束写 PROJECT.md。\n\n${userContent}`)
+        } catch {}
+      }
+
       // (b) 项目级 PROJECT.md：项目根目录首次对话自动生成脚手架，并确定性注入 system prompt
       // 模板版本号：检测到旧版本时自动升级头部模板（保留用户正文内容）
       try {
@@ -273,7 +283,7 @@ export default async function (pi: any) {
             `<!-- scaffold:${SCAFFOLD_VERSION} -->`,
             `# PROJECT.md - ${dirName}`,
             "",
-            `> 由 Tiffa 自动维护，记录项目规范、决策与踩坑，每会话开头注入 system prompt。`,
+            `> 项目纲领文件。AI 只允许写入「项目目标」和「里程碑进展」（非必要不写），其余内容由用户维护。近期决策/踩坑由 mnemopi 自动记录。`,
             "- **项目名称**：" + dirName,
             "- **项目目标**：暂未确定",
             "- **创建时间**：" + today,
@@ -294,11 +304,11 @@ export default async function (pi: any) {
           ].join("\n")
         }
 
-        // 脚手架尾部模板（章节标题 + 外部服务提示）
+        // 脚手架尾部模板（章节标题 —— 只放稳定的架构级信息）
         const SCAFFOLD_TAIL = [
-          "## 关键决策 / 架构约定",
+          "## 架构约定",
           "",
-          "## 注意事项 / 踩坑记录",
+          "（只放稳定的、不经常变动的架构决策和技术约束）",
           "",
           "## 外部服务 / 端口",
           "",
@@ -344,23 +354,32 @@ export default async function (pi: any) {
         }
         if (existsSync(projectMd)) {
           const pm = readFileSync(projectMd, "utf8").trim()
-          if (pm) injected.push(`# 项目记忆（PROJECT.md · ${projectDir}）\n\n${pm}`)
+          if (pm) injected.push(`# 项目纲领（PROJECT.md · ${projectDir}）\n\n> 写入规则：允许写入「项目目标」「里程碑进展」（非必要不写）「项目铁律/约束」（用户说“这个项目必须/不能 xxx”时写入）。禁止写入踩坑记录、日常决策、临时笔记（由 mnemopi 自动记录）。用户说“以后你都必须/不能 xxx”→写入 USER.md（跨项目偏好）。\n\n${pm}`)
         }
       } catch (err: any) {
         log("before_agent_start.project_md.error", err?.message || String(err))
       }
 
       // (c) 记忆工具提示：recall 可用于跨项目语义检索历史记忆
-      // autoRecall 关闭时，agent 不会自动召回，但可按需手动调用 recall
       injected.push([
-        "# 记忆工具（Mnemopi）",
+        "# 记忆系统（重要）",
         "",
-        "你可以使用以下记忆工具：",
-        "- `recall`：语义检索历史记忆（跨项目）。当用户提到「之前/上次/其他项目做过」等，或需要查找历史决策时调用。参数：`{ query: \"检索关键词\" }`",
-        "- `retain`：主动记住重要事实/决策，供未来 recall 检索。当前已开启自动 retain（每 2 轮），一般无需手动调用。",
-        "- `memory_edit`：按 ID 更新/删除已召回的记忆。",
+        "你有语义记忆能力。记忆存储在向量数据库中，通过 `recall` 工具检索，**禁止直接查询 SQLite 数据库文件**。",
         "",
-        "**使用时机**：用户要求检索记忆、提到历史任务、或你不确定某事是否之前做过时，优先调用 `recall` 而非手动查数据库。",
+        "## recall（检索记忆）",
+        "- 调用方式：`recall` 工具，参数 `{ query: \"检索关键词\" }`",
+        "- 触发时机：用户问「之前/上次/以前讨论过」「记得吗」「查一下历史」，或你不确定某事是否做过时",
+        "- 示例：`recall({ query: \"ComfyUI 管线配置\" })`、`recall({ query: \"用户偏好的代码风格\" })`",
+        "- 返回：相关记忆列表（包含内容、时间、来源）",
+        "",
+        "## retain（记住事实）",
+        "- 已开启自动 retain（每 2 轮），一般无需手动调用",
+        "- 仅当用户明确说「记住这个」「把这个存下来」时才手动调用",
+        "",
+        "## 禁止事项",
+        "- 日常对话中检索记忆优先用 `recall` 工具（语义排序、自动双层搜索）",
+        "- 仅在诊断/统计/结构化查询（按时间、按类型筛选）时才直接查询数据库",
+        "- 数据库路径：`$PORTABLE_ROOT/data/agent/memories/mnemopi/mnemopi.db`（全局 bank）",
       ].join("\n"))
 
       if (injected.length > 0) {

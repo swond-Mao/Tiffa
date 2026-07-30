@@ -53,6 +53,44 @@ function _extractSessionIdFromPath(sessionPath) {
   const match = String(sessionPath).match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
   return match ? match[1] : null;
 }
+// ── 会话目录名编码：cwd -> session 目录名（与内核 cli.js WR5/d46 编码一致） ──
+// G:\Tiffa\workspace\Tiffa开发 -> --G--Tiffa-workspace-Tiffa开发--
+function _encodeSessionDirName(cwdPath) {
+  const resolved = path.resolve(cwdPath);
+  const stripped = resolved.replace(/^[/\\]/, '');
+  const encoded = stripped.replace(/[/\\:]/g, '-');
+  return '--' + encoded + '--';
+}
+
+// ── 查找会话 JSONL 文件：给定 cwd + sessionId，在 SESSIONS_DIR 下定位匹配的 .jsonl ──
+// 会话文件有两种存放模式：
+//   1. 直接在项目目录下：*_<uuid>.jsonl
+//   2. 在子目录中：*_<uuid>/<name>.jsonl
+// sessionId 是 UUID，用它做唯一匹配键
+const _SESSIONS_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions');
+function _findSessionFile(cwd, sessionId) {
+  if (!cwd || !sessionId) return null;
+  const dirName = _encodeSessionDirName(cwd);
+  const projectDir = path.join(_SESSIONS_DIR, dirName);
+  if (!fs.existsSync(projectDir)) return null;
+  const uuidLower = sessionId.toLowerCase();
+  try {
+    // 模式 1：直接在项目目录下的 *_<uuid>.jsonl
+    const directFiles = fs.readdirSync(projectDir)
+      .filter(f => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
+    if (directFiles.length > 0) return path.join(projectDir, directFiles[0]);
+
+    // 模式 2：子目录 *_<uuid>/ 中的 .jsonl
+    const subDirs = fs.readdirSync(projectDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
+    for (const sd of subDirs) {
+      const sdPath = path.join(projectDir, sd.name);
+      const jsonlFiles = fs.readdirSync(sdPath).filter(f => f.endsWith('.jsonl'));
+      if (jsonlFiles.length > 0) return path.join(sdPath, jsonlFiles[0]);
+    }
+  } catch {}
+  return null;
+}
 
 // ── UTF-8 环境变量注入（治理中文乱码） ──
 // 乱码根因：Tiffa 内核 spawn bash/powershell 执行命令时，Windows 控制台默认
@@ -96,6 +134,9 @@ class TiffaInstance {
     this.maxCrashRestart = 3;   // 最多自动重启 3 次
     this._restartTimer = null;
     this.isPrewarming = false;  // embedding 预热中，过滤噪音事件
+    this.sessionFilePath = null; // session_switch 事件中保存的 JSONL 文件路径
+    this._titleGenerated = false; // 本会话是否已生成过标题（避免重复）
+    this._restoringContext = false; // 正在通过 switch_session 恢复历史上下文，过滤重复事件
   }
 
   start() {
@@ -109,6 +150,8 @@ class TiffaInstance {
       HOME: path.join(PORTABLE_ROOT, 'home'),
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
       BUN_INSTALL: PORTABLE_ROOT,
+      // Mnemopi embedding：必须用中文模型，否则回退到默认英文模型
+      MNEMOPI_EMBEDDING_MODEL: 'BAAI/bge-small-zh-v1.5',
       // 将便携 python/node 前置到 PATH，确保子进程能直接用 python/node 命令
       // 否则 Windows 系统 PATH 中的 Store 占位符 python.exe 会被命中（exit 49 弹窗）
       PATH: [
@@ -298,6 +341,19 @@ class TiffaInstance {
         // 30 秒兜底：若 agent_end 未正常到达（进程异常），强制解除过滤
         setTimeout(() => { this.isPrewarming = false; }, 30000);
       }, 3000);
+      // 崩溃重启后上下文恢复：crashCount 在 ready 时已重置，用 sessionFilePath 判断是否为重启。
+      // 首次启动时 sessionFilePath 为 null（activateSession 负责恢复）；
+      // 崩溃重启时 sessionFilePath 保留着之前会话的路径，需重新发 switch_session 恢复上下文。
+      if (this.sessionFilePath && this.sessionId) {
+        const sf = this.sessionFilePath;
+        if (fs.existsSync(sf)) {
+          this._restoringContext = true;
+          this.sendCommand({ type: 'switch_session', sessionPath: sf })
+            .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文已恢复`); })
+            .catch((e) => { console.warn(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文恢复失败: ${e.message}`); })
+            .finally(() => { this._restoringContext = false; });
+        }
+      }
     }
 
     if (event.type === 'prompt_result' && event.agentInvoked) {
@@ -305,9 +361,16 @@ class TiffaInstance {
     } else if (event.type === 'agent_start') {
       this.agentRunning = true;
     } else if (event.type === 'agent_end') {
+      const wasPrewarming = this.isPrewarming;
       this.agentRunning = false;
-      // 预热 agent 结束 → 立即解除事件过滤（不再等 30 秒兜底）
+      // 预热 agent 结束 -> 立即解除事件过滤（不再等 30 秒兜底）
       this.isPrewarming = false;
+      // 非预热 agent_end 后，尝试生成会话标题
+      // RPC-UI 模式下内核不自动调用 generateTitle，需 main.js 主动补标题
+      if (!wasPrewarming && !this._titleGenerated) {
+        this._titleGenerated = true;
+        setTimeout(() => { if (TiffaInstance._titleGenerateCallback) TiffaInstance._titleGenerateCallback(this); }, 500);
+      }
     }
 
     // Handle command responses
@@ -324,11 +387,13 @@ class TiffaInstance {
     }
 
     // 拦截 session_switch：CLI 分配真实 sessionId 后，同步更新实例的 sessionId 与 map key。
-    // 否则 renderer 用 realSessionId 切回时 _key(cwd, realSessionId) 查不到 → spawn 新进程 →
-    // CLI 进程内存里的对话上下文随旧进程死亡丢失（用户感知为“找不到上下文”）。
+    // 否则 renderer 用 realSessionId 切回时 _key(cwd, realSessionId) 查不到 -> spawn 新进程 ->
+    // CLI 进程内存里的对话上下文随旧进程死亡丢失（用户感知为"找不到上下文"）。
     // 注意：预热期间的 session_switch 来自 /memory rebuild，不应迁移实例 key，
     // 否则后续用户消息的 session_switch 无法正确匹配。
-    if (event.type === 'session_switch' && event.sessionPath && !this.isPrewarming) {
+    // 上下文恢复期间的 session_switch 是我们主动触发的，不需要迁移 key（key 已是正确的 realSessionId）。
+    if (event.type === 'session_switch' && event.sessionPath && !this.isPrewarming && !this._restoringContext) {
+      this.sessionFilePath = event.sessionPath; // 保存当前会话的 JSONL 文件路径
       const realSessionId = _extractSessionIdFromPath(event.sessionPath);
       if (realSessionId && realSessionId !== this.sessionId) {
         tiffaManager.migrateSessionId(this.cwd, this.sessionId, realSessionId);
@@ -341,6 +406,12 @@ class TiffaInstance {
 
     // embedding 预热期间过滤掉 /memory rebuild 产生的噪音事件
     if (this.isPrewarming) {
+      return;
+    }
+
+    // 上下文恢复期间（switch_session 重放历史），过滤掉重放的消息事件避免前端重复渲染。
+    // 允许 session_switch（已完成恢复操作本身）和 response（命令响应）通过。
+    if (this._restoringContext && event.type !== 'session_switch' && event.type !== 'response') {
       return;
     }
 
@@ -515,7 +586,29 @@ class TiffaInstanceManager {
       if (!inst.process || inst.process.exitCode !== null) {
         const willRestart = !inst.userKilled && inst.crashCount < inst.maxCrashRestart;
         if (!willRestart) this.instances.delete(key);
+        return { inst, ready: inst.ready };
       }
+
+      // ── 会话上下文恢复 ──
+      // 新进程是空白会话，需通过 switch_session 从 JSONL 加载历史上下文到内存。
+      // 否则用户发消息时 AI 看到的是全新对话，之前的上下文全丢。
+      // 仅对话级实例（sessionId != null）需要恢复；项目级实例不绑定特定会话。
+      if (inst.ready && inst.sessionId) {
+        const sessionFile = _findSessionFile(normalized, inst.sessionId);
+        if (sessionFile) {
+          inst._restoringContext = true;
+          try {
+            await inst.sendCommand({ type: 'switch_session', sessionPath: sessionFile });
+            inst.sessionFilePath = sessionFile;
+            console.log(`[TiffaInstance:${inst._shortCwd()}] 会话上下文已恢复: ${sessionFile}`);
+          } catch (err) {
+            console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复失败: ${err.message}`);
+          } finally {
+            inst._restoringContext = false;
+          }
+        }
+      }
+
       return { inst, ready: inst.ready };
     })();
 
@@ -665,6 +758,7 @@ class TiffaInstanceManager {
         key,
         cwd: inst.cwd,
         sessionId: inst.sessionId,
+        sessionFilePath: inst.sessionFilePath,
         active: key === this.activeKey,
         ready: inst.ready,
         agentRunning: inst.agentRunning,
@@ -1816,6 +1910,79 @@ function setupIpc() {
       return { path: filePath, name: path.basename(filePath), error: err.message };
     }
   }
+
+  // ── 自动生成会话标题 ──
+  // RPC-UI 模式下内核不调用 generateTitle，main.js 在 agent_end 后补标题。
+  // 策略：读取 JSONL header，若无 title 则从第一条用户消息截取前 25 字作标题，
+  // 写入 header.title + 追加 title 事件，然后通知前端更新标签。
+  function _tryGenerateSessionTitle(inst) {
+    try {
+      const sessionPath = inst.sessionFilePath;
+      if (!sessionPath) return;
+      const resolved = path.resolve(sessionPath);
+      if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) return;
+
+      const header = parseSessionHeader(resolved);
+      // 已有标题（title 事件或 header.title）-> 不覆盖
+      if (header.title) return;
+      // 没有用户消息 -> 无法生成
+      if (!header.firstMessage || header.firstMessage === '(空会话)') return;
+
+      // 截取前 25 字作为标题（与前端 renderHistoryPanel 的截断长度一致）
+      let title = header.firstMessage;
+      // 去掉换行和多余空白
+      title = title.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (title.length > 25) title = title.substring(0, 25) + '…';
+      if (!title) return;
+
+      // 写入 JSONL：更新 header.title + 追加 title 事件
+      // 安全策略：只读第一行（header），修改后写回第一行位置，再 append title 事件到文件末尾
+      // 避免读取整个文件再写回（与内核并发 append 冲突会丢数据）
+      const fd = fs.openSync(resolved, 'r+');
+      let headerBuf = Buffer.alloc(65536);
+      const bytesRead = fs.readSync(fd, headerBuf, 0, 65536, 0);
+      const headerText = headerBuf.toString('utf8', 0, bytesRead);
+      const firstNl = headerText.indexOf('\n');
+      if (firstNl < 0) { fs.closeSync(fd); return; }
+      const firstLine = headerText.substring(0, firstNl);
+      let headerObj;
+      try { headerObj = JSON.parse(firstLine); } catch { fs.closeSync(fd); return; }
+      headerObj.title = title;
+      const newFirstLine = JSON.stringify(headerObj) + '\n';
+      // 检查新 header 行长度不超过原 header 行长度（避免覆盖后续行）
+      // 如果更长，放弃修改 header（仅追加 title 事件即可，parseSessionHeader 也能读到）
+      if (newFirstLine.length <= firstLine.length + 1) {
+        // 用空格 pad 到原长度，避免覆盖下一行
+        const padded = newFirstLine.padEnd(firstLine.length + 1, ' ');
+        fs.writeSync(fd, padded, 0, 'utf8');
+      }
+      fs.closeSync(fd);
+      // 追加 title 事件到文件末尾（与内核的 append-only 写入模式一致，无并发冲突）
+      const titleEvent = JSON.stringify({
+        type: 'title', v: 1, title,
+        updatedAt: new Date().toISOString(),
+        source: 'auto',
+      }) + '\n';
+      fs.appendFileSync(resolved, titleEvent, 'utf8');
+
+      // 通知前端更新标签标题
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('tiffa:event', {
+          type: 'session_info_update',
+          title,
+          sessionId: inst.sessionId,
+          _cwd: inst.cwd,
+          _sessionId: inst.sessionId,
+        });
+      }
+      console.log(`[title-gen] 会话标题已生成: "${title}" (${inst._shortCwd()})`);
+    } catch (err) {
+      console.warn('[title-gen] 生成标题失败:', err.message);
+    }
+  }
+  // 将标题生成函数注册为 TiffaInstance 的静态回调
+  // （TiffaInstance 类定义在模块顶层，无法直接访问 setupIpc 闭包内的函数）
+  TiffaInstance._titleGenerateCallback = _tryGenerateSessionTitle;
 
   ipcMain.handle('sessions:listProjects', async () => {
     try {
