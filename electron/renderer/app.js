@@ -634,11 +634,19 @@ function handleEvent(event) {
       // agent 结束后自动发送排队消息（短暂延迟确保后端就绪）
       setTimeout(() => flushPendingQueue(), 300);
       if (state.activeProjectDirName) loadSessions(state.activeProjectDirName).then(() => saveOpenTabs());
-      // 自动重命名：第一次对话结束后，标题仍为“新对话”时自动触发 AI 命名
+      // 自动重命名：第一次对话结束后，直接用 firstMessage 截断作标题（零算力，不调 AI）
       {
         const sess = state.sessions.find(s => s.path === state.activeSessionPath);
-        if (sess && !sess.path.startsWith('__new__') && (!sess.title || sess.title === '新对话')) {
-          setTimeout(() => aiRenameSession(sess), 800);
+        if (sess && !sess.path.startsWith('__new__') && (!sess.title || sess.title === '新对话' || sess.title === sess.firstMessage)) {
+          const autoTitle = (sess.firstMessage || '').replace(/\n+/g, ' ').trim().substring(0, 20);
+          if (autoTitle && autoTitle !== sess.title) {
+            sess.title = autoTitle;
+            if (!sess.path.startsWith('__new__')) {
+              tiffaDesktop.renameSession(sess.path, autoTitle).catch(() => {});
+            }
+            renderSessionTabs();
+            renderHistoryPanel();
+          }
         }
       }
       break;
@@ -646,8 +654,8 @@ function handleEvent(event) {
       finalizeAssistantMessage();
       break;
     case 'message_start':
-      // 如果用户消息已在 sendMessage 中提前渲染，跳过重复显示
-      if (event.message.role === 'user' && state.agentRunning) {
+      // 如果用户消息已在 sendMessage 中提前渲染，或处于 AI 重命名模式，跳过重复显示
+      if (event.message.role === 'user' && (state.agentRunning || state.aiRenameMode)) {
         break;
       }
       if (event.message.role === 'assistant') markFirstResponseReceived();
@@ -2268,6 +2276,8 @@ function updateSessionTabTitle(title) {
 
 function handleMessageStart(message) {
   if (message.role === 'user') {
+    // AI 重命名模式下不渲染用户消息（内层保险，防竞态泄漏）
+    if (state.aiRenameMode) return;
     // 后端可能不携带 steering/follow_up 字段，优先用本地跟踪标记
     const isSteered = message.steering || state.pendingSteerMarker;
     const isQueued = message.follow_up || state.pendingFollowUpMarker;
@@ -3491,6 +3501,13 @@ function setupSidebar() {
   dom.btnCloseDrawer.addEventListener('click', closeFileDrawer);
   // 点击间隙关闭
   dom.drawerGap.addEventListener('click', closeFileDrawer);
+  // 点击抽屉内容区域的背景（图片/代码以外的空白处）也关闭
+  dom.drawerBody.addEventListener('click', (e) => {
+    // 只有点击的是背景容器本身（不是 img/pre/code/iframe 等内容元素）才关闭
+    if (e.target === dom.drawerBody || e.target.classList.contains('image-preview-full') || e.target.classList.contains('preview-empty')) {
+      closeFileDrawer();
+    }
+  });
   // 记忆搜索框：实时过滤小节 / 召回模式下回车触发全局召回
   if (dom.memorySearch) {
     dom.memorySearch.addEventListener('input', () => {
@@ -4075,10 +4092,6 @@ async function renameSession(session) {
 // AI 重命名：读取对话前几条消息，让模型生成标题，全程不渲染到聊天区
 async function aiRenameSession(session) {
   if (!session || !session.path) return;
-  if (session.path.startsWith('__new__')) {
-    addNotice('warning', '新对话还没有内容，无法 AI 重命名');
-    return;
-  }
   if (state.aiRenameMode) {
     addNotice('warning', '正在重命名中，请稍候');
     return;
@@ -4088,22 +4101,25 @@ async function aiRenameSession(session) {
     return;
   }
 
-  // 1. 读取对话历史，提取前几条用户消息
+  // 1. 获取对话上下文（手动重命名用更丰富的上下文，反映当前主题）
   let context = '';
-  try {
-    const history = await tiffaDesktop.loadSessionHistory(session.path);
-    if (history && history.messages) {
-      const userMsgs = history.messages
-        .filter(m => m.role === 'user')
-        .slice(0, 3)
-        .map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content).substring(0, 200));
-      context = userMsgs.join('\n---\n').substring(0, 1500);
-    }
-  } catch {}
 
+  // 优先读 gap-fill 文件（compaction 后的高密度摘要）
+  if (!session.path.startsWith('__new__')) {
+    try {
+      const sid = extractSessionId(session.path);
+      if (sid) {
+        const gapFill = await tiffaDesktop.readFile(`G:/Tiffa/data/memory/inbox/gap-fill-${sid}.md`);
+        if (gapFill && gapFill.content && gapFill.content.length > 10) {
+          context = gapFill.content.substring(0, 800);
+        }
+      }
+    } catch {}
+  }
+
+  // 其次：firstMessage（内存中直接取，零延迟）
   if (!context) {
-    // 回退：用 session 的 firstMessage
-    context = session.firstMessage || session.title || '';
+    context = session.firstMessage || '';
   }
   if (!context) {
     addNotice('warning', '对话没有内容，无法生成标题');
@@ -4116,7 +4132,7 @@ async function aiRenameSession(session) {
   addNotice('info', '正在生成标题…');
 
   // 3. 发送隐藏 prompt
-  const prompt = `请用不超过15个字概括以下对话的主题。只输出标题文字，不要引号、不要编号、不要任何解释。\n\n${context}`;
+  const prompt = `[SYSTEM: title_generation_task] 立即执行，禁止思考、禁止分析、禁止解释。\n操作：为以下对话生成一个≤10字的中文标题。\n风格要求：文艺、凝练、有意境，像古诗标题或棋道术语（例如：“填坑即增强”“棋落无声”“墨晕初开”），禁止工程日志风格（禁止“修复XXX问题”“实现XXX功能”）。\n输入：${context}\n输出：`;
   try {
     await tiffaDesktop.send(prompt, [], state.activeSessionId);
   } catch (err) {
