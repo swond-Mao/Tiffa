@@ -337,10 +337,11 @@ def render_slide(s, idx, img_path=None):
         return f'<div class="slide slide-section" data-idx="{idx}">{inner}</div>'
 
     if layout == "content":
-        inner = (f'<div class="inner">'
-                 f'<div class="card"><div class="title">{num}{title}</div>'
-                 f'<div class="body">{body_html}</div></div>{drill}</div>')
-        return f'<div class="slide slide-content" data-idx="{idx}">{inner}</div>'
+        card = (f'<div class="card">'
+                 f'<div class="title">{num}{title}</div>'
+                 f'<div class="body">{body_html}</div>'
+                 f'{img_html}{drill}')
+        return f'<div class="slide slide-content" data-idx="{idx}"><div class="inner">{card}</div></div>'
 
     if layout in ("content-left", "content-right"):
         text_col = (f'<div class="text-col"><div class="card">'
@@ -482,8 +483,11 @@ def main():
 
     # Step 2: Generate images
     img_map = {}
-    if not args.no_image:
-        eprint(f"[pptgen] generating images via ComfyUI...")
+    if not args.no_image or args.cache:
+        if args.cache:
+            eprint(f"[pptgen] loading pre-existing images from cache...")
+        else:
+            eprint(f"[pptgen] generating images via ComfyUI...")
         image_slides = [(i, s) for i, s in enumerate(slides) if s.get("image") and (isinstance(s["image"], dict) and (s["image"].get("prompt") is not None or s["image"].get("path")) or isinstance(s["image"], str))]
         if image_slides:
             os.makedirs(COMFY_OUT, exist_ok=True)
@@ -495,6 +499,11 @@ def main():
                     eprint(f"[pptgen] slide {i+1}: using pre-existing image from path {img}")
                     continue
                 img_info = img
+                # 检查是否是 {"path": "..."} 格式
+                if isinstance(img_info, dict) and img_info.get("path"):
+                    img_map[i] = os.path.join(COMFY_OUT, os.path.basename(img_info["path"]))
+                    eprint(f"[pptgen] slide {i+1}: using pre-existing image from path {img_info['path']}")
+                    continue
                 p = img_info["prompt"]
                 if p is None:
                     # 已有图片路径，直接复制到 img_map
