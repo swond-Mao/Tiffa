@@ -11,7 +11,7 @@ from pathlib import Path
 import urllib.parse
 
 SKILL_DIR = Path(__file__).parent
-OUT_DIR = SKILL_DIR / "output"
+OUT_DIR = Path(os.getcwd()) / "output"  # 输出到当前项目目录，不是技能目录
 SKILLS_DIR = SKILL_DIR.parent
 
 # === Available skills registry ===

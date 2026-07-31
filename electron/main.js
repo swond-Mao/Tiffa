@@ -488,7 +488,9 @@ class TiffaInstanceManager {
 
     // 超过上限 -> LRU 淘汰
     if (this.instances.size >= MAX_INSTANCES) {
-      this._evictLRU();
+      if (!this._evictLRU()) {
+        throw new Error(`实例数已达上限(${MAX_INSTANCES})，且所有实例均在运行中无法淘汰。请关闭部分对话后重试。`);
+      }
     }
 
     // 创建新实例
@@ -561,7 +563,9 @@ class TiffaInstanceManager {
 
     // 超过上限 -> LRU 淘汰
     if (this.instances.size >= MAX_INSTANCES) {
-      this._evictLRU();
+      if (!this._evictLRU()) {
+        throw new Error(`实例数已达上限(${MAX_INSTANCES})，且所有实例均在运行中无法淘汰。请关闭部分对话后重试。`);
+      }
     }
 
     // 创建新实例（对话级：带 sessionId）
@@ -747,7 +751,11 @@ class TiffaInstanceManager {
     if (oldest) {
       console.log(`[TiffaManager] LRU 淘汰: ${oldest}`);
       this.closeByKey(oldest);
+      return true;
     }
+    // 所有实例都在运行或为当前活跃，无法淘汰
+    console.warn(`[TiffaManager] LRU 淘汰失败：所有 ${this.instances.size} 个实例均不可淘汰`);
+    return false;
   }
 
   // 获取所有实例状态（供前端显示）
@@ -916,7 +924,23 @@ function setupIpc() {
     }
     const frame = { type: 'prompt', message };
     if (images && images.length > 0) {
-      frame.images = images;
+      // WebP → PNG：本地 llama.cpp 不解 webp，统一转 PNG 确保所有模型兼容
+      // 使用 Electron 内置 nativeImage，无需额外依赖
+      const { nativeImage } = require('electron');
+      frame.images = images.map(img => {
+        if (img.mimeType === 'image/webp') {
+          try {
+            const ni = nativeImage.createFromBuffer(Buffer.from(img.data, 'base64'));
+            if (!ni.isEmpty()) {
+              const pngBuf = ni.toPNG();
+              return { data: pngBuf.toString('base64'), mimeType: 'image/png' };
+            }
+          } catch (e) {
+            console.warn('[主进程] webp→png 转换失败，保留原图:', e.message);
+          }
+        }
+        return img;
+      });
     }
     let inst = tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
     if (!inst && sessionId) {
@@ -1427,12 +1451,20 @@ function setupIpc() {
     // workspace 根目录不作为项目
     if (normalized === DEFAULT_WORKSPACE_DIR) return normalized;
     // 防御：路径在磁盘上不存在则不注册（避免幽灵项目）
-    // 但 workspace 下的项目允许不存在（换电脑后子目录可能还没创建）
+    // workspace 下的项目：仅当有会话记录时才自动重建目录（换盘符场景）
     if (!fs.existsSync(normalized)) {
       if (extractWorkspaceSuffix(normalized)) {
-        // 自动创建 workspace 子目录
-        fs.mkdirSync(normalized, { recursive: true });
-        console.log(`[projects] 自动创建项目目录: ${normalized}`);
+        const sessionDirName = encodeSessionDirName(normalized);
+        const sessionDir = path.join(SESSIONS_DIR, sessionDirName);
+        if (fs.existsSync(sessionDir)) {
+          // 有会话记录，自动创建 workspace 子目录（换电脑/换盘符场景）
+          fs.mkdirSync(normalized, { recursive: true });
+          console.log(`[projects] 自动创建项目目录(有会话): ${normalized}`);
+        } else {
+          // 无会话记录，不重建（避免已删除项目复活）
+          console.warn('[projects] 路径不存在且无会话，跳过注册:', normalized);
+          return normalized;
+        }
       } else {
         console.warn('[projects] 路径不存在，跳过注册:', normalized);
         return normalized;
@@ -1516,9 +1548,17 @@ function setupIpc() {
       seen.add(normalized);
       // 保留 archived 的（可能在归档区）
       if (p.archived) return true;
-      // workspace 下的项目即使路径不存在也保留（换电脑后子目录可能还没创建）
+      // workspace 下的项目：目录存在则保留；目录不存在但有会话记录也保留（换电脑场景）；
+      // 目录不存在且无会话记录 → 幽灵项目，清理（用户已在文件管理器删除）
       const resolved = path.resolve(p.cwd);
-      if (extractWorkspaceSuffix(resolved)) return true;
+      if (extractWorkspaceSuffix(resolved)) {
+        if (fs.existsSync(resolved)) return true;
+        // 目录不存在，检查是否有会话记录
+        const sessionDirName = encodeSessionDirName(resolved);
+        const sessionDir = path.join(SESSIONS_DIR, sessionDirName);
+        if (fs.existsSync(sessionDir)) return true;  // 有会话，保留
+        return false;  // 无目录无会话，清理
+      }
       // 其他路径必须存在
       return fs.existsSync(resolved);
     });
