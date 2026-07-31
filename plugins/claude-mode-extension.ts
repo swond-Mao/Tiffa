@@ -134,6 +134,7 @@ export default async function (pi: any) {
 
   let agentTurnCount = 0
   let silentToolCallCount = 0
+  let consecutiveBlockCount = 0  // 连续被拦截次数（熔断用）
   const SILENT_TOOL_CALL_THRESHOLD = 3
 
   // ── 技能强制机制：弱模型不读 SKILL.md 就调脚本 -> block ──
@@ -144,6 +145,36 @@ export default async function (pi: any) {
   let skillLoadedMap = new Map<string, number>() // skill名 -> 加载时间戳
   let askTimestamp = 0                          // 最近一次 ask 的时间戳
   let lastSkillRead = ""                        // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
+
+  // ── WebP 白名单：本地推理引擎不解 webp，云端放行 ──
+  // 策略：本地引擎黑名单 + models.yml 手动开关 + 内置云端自动放行
+  const LOCAL_ENGINE_BLACKLIST = new Set(["llama.cpp", "ollama", "ollama-cloud", "lm-studio", "local-server"])
+  let userProviders = new Map<string, boolean>() // models.yml 里的 provider -> supportsWebp
+  let currentModelProvider = ""
+
+  function loadUserProviders(): Map<string, boolean> {
+    const m = new Map<string, boolean>()
+    const p = join(AGENT_DIR, "models.yml")
+    if (!existsSync(p)) return m
+    try {
+      const txt = readFileSync(p, "utf8")
+      let cur = ""
+      for (const line of txt.split("\n")) {
+        const pm = line.match(/^  (\S+):\s*$/) // provider 行（2 空格缩进）
+        if (pm) { cur = pm[1]; m.set(cur, false) }
+        if (/^\s*supportsWebp:\s*true\s*$/i.test(line) && cur) m.set(cur, true)
+      }
+    } catch (e: any) { log("webp_whitelist.load.error", e?.message || String(e)) }
+    return m
+  }
+
+  // webp -> PNG（复用 Bun.Image，与内核 AJ3 同款）
+  async function webpBlockToPng(data: string) {
+    try {
+      const png = await new Bun.Image(Buffer.from(data, "base64")).png().toBase64()
+      return { type: "image" as const, data: png, mimeType: "image/png" }
+    } catch { return null }
+  }
 
   function isSkillFresh(skill: string): boolean {
     const ts = skillLoadedMap.get(skill)
@@ -217,6 +248,9 @@ export default async function (pi: any) {
   // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用 + 解除标题禁用
   pi.on("session_start", async () => {
     resetSkillState()
+    userProviders = loadUserProviders()
+    const wl = [...userProviders.entries()].filter(([, v]) => v).map(([k]) => k)
+    log("webp_whitelist.loaded", `user providers: ${[...userProviders.keys()].join(",") || "(none)"} | webp-ok: ${wl.join(",") || "(none)"}`)
     await sanitizeTools("session_start")
     // 内核在 rpc-ui/rpc/acp 模式下设置 PI_NO_TITLE=1，完全禁用 AI 标题生成。
     // 桌面端用 rpc-ui 模式，需要标题生成功能，在此解除禁用。
@@ -233,10 +267,13 @@ export default async function (pi: any) {
   })
 
   // ── 1. before_agent_start ── 注入行为约束 + 项目 PROJECT.md 生成/注入
-  pi.on("before_agent_start", async (event: any) => {
+  pi.on("before_agent_start", async (event: any, ctx?: any) => {
     try {
       agentTurnCount++
       silentToolCallCount = 0
+      consecutiveBlockCount = 0
+      const mp = ctx?.model?.provider
+      if (mp) currentModelProvider = mp
       // skill/ask 状态已改为会话级持久+超时重置，不在此处清零。
       // 仅清理过期的 skill 状态（超过 TTL 的条目）
       const now = Date.now()
@@ -398,6 +435,17 @@ export default async function (pi: any) {
       const tool = event.toolName || ""
       const input = event.input || {}
 
+      // ── 连续拦截熔断：同一轮被 block 3 次后强制终止，避免弱模型反复重试撑爆 context ──
+      if (consecutiveBlockCount >= 3) {
+        log("tool_call.circuit_breaker", `consecutiveBlockCount=${consecutiveBlockCount}, tool=${tool}`)
+        consecutiveBlockCount = 0  // 重置，下一轮可以重新开始
+        return {
+          block: true,
+          reason: `[claude-mode] 熔断：你已被连续拦截 ${consecutiveBlockCount + 1} 次。停止重试！请换一种完全不同的方法，或者直接用文字回复用户说明情况。不要再次调用同一个工具。`,
+        }
+      }
+      consecutiveBlockCount++  // 每次进入 hook 先加 1，如果工具最终放行则在末尾重置为 0
+
       // 静默工具调用检测
       silentToolCallCount++
       if (silentToolCallCount >= SILENT_TOOL_CALL_THRESHOLD) {
@@ -471,6 +519,17 @@ export default async function (pi: any) {
       // bash 工具：拦截在 workspace 根目录下 mkdir
       if (tool === "bash" || tool === "shell") {
         const cmd = String(input.command || input.content || "")
+
+        // ── 反斜杠路径自动纠正：所有模型都习惯写 \，但 OMP bash 要求 / ──
+        // 检测命令中是否含 Windows 风格路径（盘符:\ 或 连续 \）
+        if (/[A-Za-z]:\\/.test(cmd) || /\\[A-Za-z\u4e00-\u9fff]/.test(cmd)) {
+          const fixed = cmd.replace(/\\/g, "/")
+          log("tool_call.backslash_fix", `original: ${cmd.substring(0, 100)}`)
+          return {
+            block: true,
+            reason: `[claude-mode] bash 命令中的路径必须用正斜杠 /，不能用反斜杠 \\。请用以下修正后的命令重试：\n${fixed}`,
+          }
+        }
         if (/\bmkdir\b/i.test(cmd)) {
           const workspaceDir = join(PORTABLE_ROOT, "workspace")
           const normWs = resolve(workspaceDir).replace(/\\/g, "/").toLowerCase()
@@ -522,6 +581,8 @@ export default async function (pi: any) {
     } catch (err: any) {
       log("tool_call.error", err?.message || String(err))
     }
+    // 工具放行（没有被任何拦截规则 block）→ 重置连续拦截计数
+    consecutiveBlockCount = 0
   })
 
   // ── 3. session.compacting ── gap-fill 断片提取 + compact dump + 立即注入
@@ -684,7 +745,7 @@ export default async function (pi: any) {
   })
 
   // ── 5. tool_result ── 审计日志 + 堆栈/路径泄露拦截 + 技能路径注入
-  pi.on("tool_result", async (event: any) => {
+  pi.on("tool_result", async (event: any, ctx?: any) => {
     try {
       const tool = event.toolName || "unknown"
       auditLog({ event: "tool_result", tool, isError: event.isError || false })
@@ -700,6 +761,31 @@ export default async function (pi: any) {
         }
       }
       lastSkillRead = "" // 非技能读取时也清空
+
+      // ── WebP 拦截：非白名单模型的 webp image -> PNG ──
+      // 本地引擎黑名单 / models.yml 未标 supportsWebp 的 provider -> 转 PNG
+      // 不在 models.yml 的 provider（内置云端）-> 自动放行
+      const provider = ctx?.model?.provider || currentModelProvider
+      let shouldConvert = false
+      if (provider) {
+        if (LOCAL_ENGINE_BLACKLIST.has(provider)) shouldConvert = true
+        else if (userProviders.has(provider)) shouldConvert = !userProviders.get(provider)
+        // else: 不在 models.yml = 内置云端 = 放行 webp
+      }
+      if (shouldConvert && Array.isArray(event.content)) {
+        let changed = false
+        const newContent = await Promise.all(event.content.map(async (b: any) => {
+          if (b?.type === "image" && b?.mimeType === "image/webp") {
+            const png = await webpBlockToPng(b.data)
+            if (png) { changed = true; return png }
+          }
+          return b
+        }))
+        if (changed) {
+          log("tool_result.webp2png", `provider=${provider} tool=${tool}`)
+          return { content: newContent }
+        }
+      }
 
       // 检查错误结果是否泄露堆栈/路径
       if (event.isError) {

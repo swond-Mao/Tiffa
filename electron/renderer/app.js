@@ -157,6 +157,9 @@ const state = {
   lastSwitchTime: 0,             // 上次切换时间戳（防抖用）
   // ── 记忆召回模式 ──
   recallMode: false,             // 全局记忆召回模式（侧边栏搜索框切换）
+  // ── AI 重命名模式 ──
+  aiRenameMode: null,            // 正在 AI 重命名的 session 对象（非 null 时抑制渲染）
+  aiRenameText: '',              // 累积 AI 返回的标题文本
 };
 
 // 从 sessionPath 提取 sessionId（UUID）
@@ -594,6 +597,30 @@ function handleEvent(event) {
       updateInputState();
       break;
     case 'agent_end':
+      // AI 重命名模式：提取标题并应用
+      if (state.aiRenameMode) {
+        const targetSession = state.aiRenameMode;
+        let title = state.aiRenameText.trim().replace(/^["'“”《]+|["'“”》]+$/g, '').substring(0, 30);
+        state.aiRenameMode = null;
+        state.aiRenameText = '';
+        state.agentRunning = false;
+        state.sessionAgentRunning.set(state.activeSessionPath, false);
+        renderSessionTabs();
+        updateInputState();
+        if (title) {
+          targetSession.title = title;
+          if (!targetSession.path.startsWith('__new__')) {
+            tiffaDesktop.renameSession(targetSession.path, title).catch(() => {});
+          }
+          renderSessionTabs();
+          renderHistoryPanel();
+          addNotice('success', `已重命名：${title}`);
+        } else {
+          addNotice('warning', 'AI 未能生成标题');
+        }
+        updateStatus('就绪');
+        break;
+      }
       state.agentRunning = false;
       state.sessionAgentRunning.set(state.activeSessionPath, false);
       renderSessionTabs();
@@ -607,6 +634,13 @@ function handleEvent(event) {
       // agent 结束后自动发送排队消息（短暂延迟确保后端就绪）
       setTimeout(() => flushPendingQueue(), 300);
       if (state.activeProjectDirName) loadSessions(state.activeProjectDirName).then(() => saveOpenTabs());
+      // 自动重命名：第一次对话结束后，标题仍为“新对话”时自动触发 AI 命名
+      {
+        const sess = state.sessions.find(s => s.path === state.activeSessionPath);
+        if (sess && !sess.path.startsWith('__new__') && (!sess.title || sess.title === '新对话')) {
+          setTimeout(() => aiRenameSession(sess), 800);
+        }
+      }
       break;
     case 'turn_end':
       finalizeAssistantMessage();
@@ -1352,6 +1386,7 @@ async function selectProject(dirName) {
     state.activeSessionPath = targetPath;
     state.activeSessionId = extractSessionId(targetPath) || targetPath;
     renderSessionTabs();
+    renderHistoryPanel();  // 重新渲染历史面板（此时 activeSessionPaths 已填充，能正确过滤已打开的 tab）
     saveOpenTabs();
 
     const doLoad = async () => {
@@ -1637,12 +1672,14 @@ function renderHistoryPanel() {
     if (itemInfo) {
       const sessionPath = itemInfo.dataset.path;
       if (sessionPath) {
-        // 防重复：如果已在活跃tab中，直接切换而不重复添加
-        if (!state.activeSessionPaths.has(sessionPath)) {
+        // 如果已在活跃tab中，直接切换到该tab
+        if (state.activeSessionPaths.has(sessionPath)) {
+          switchToSession(sessionPath);
+        } else {
           state.activeSessionPaths.add(sessionPath);
+          switchToSession(sessionPath);
+          renderHistoryPanel();  // 从历史列表中移除
         }
-        switchToSession(sessionPath);
-        renderHistoryPanel();
       }
     }
   };
@@ -2242,6 +2279,12 @@ function handleMessageStart(message) {
     }));
     scrollToBottom();
   } else if (message.role === 'assistant') {
+    // AI 重命名模式下不创建 assistant DOM 元素
+    if (state.aiRenameMode) {
+      state.currentAssistantEl = null;
+      state.currentTextBuffer = '';
+      return;
+    }
     const el = createAssistantMessageElement();
     dom.messages.appendChild(el);
     state.currentAssistantEl = el;
@@ -2257,6 +2300,11 @@ function handleMessageUpdate(message, assistantEvent) {
   switch (assistantEvent.type) {
     case 'text_start': state.currentTextBuffer = ''; break;
     case 'text_delta':
+      // AI 重命名模式：累积文本到 aiRenameText，不渲染
+      if (state.aiRenameMode) {
+        state.aiRenameText += assistantEvent.delta;
+        break;
+      }
       state.currentTextBuffer += assistantEvent.delta;
       updateAssistantContent(state.currentTextBuffer);
       scrollToBottom();
@@ -2635,8 +2683,19 @@ function handleToolEnd(toolCallId, toolName, result, isError) {
   if (!div) return;
   const status = div.querySelector('.tool-call-status');
   if (status) {
-    status.className = `tool-call-status ${isError ? 'error' : 'done'}`;
-    status.textContent = isError ? '出错' : '完成';
+    // bash/execute 工具：非零退出码不等于真错误，只有内核明确标记 isError 且结果含错误信息才算
+    // 其他工具（read/write/edit）：isError 就是真错误
+    let showError = isError;
+    if (isError && (toolName === 'bash' || toolName === 'execute' || toolName === 'run')) {
+      // bash 类工具：检查结果是否真的是错误（有 error 字段或 stderr 内容）
+      const r = typeof result === 'string' ? result : (result && result.content ? JSON.stringify(result.content) : JSON.stringify(result || ''));
+      // 如果只是退出码非零但没有错误信息，降级为“完成”
+      if (r && r.length < 5000 && !/error|Error|ERROR|failed|Failed|FAILED|exception|Exception|traceback|Traceback/.test(r)) {
+        showError = false;
+      }
+    }
+    status.className = `tool-call-status ${showError ? 'error' : 'done'}`;
+    status.textContent = showError ? '出错' : '完成';
   }
   const body = div.querySelector('.tool-call-body');
   if (body && result) {
@@ -3203,9 +3262,12 @@ async function sendMessage() {
     ? state.pendingImages.map(img => ({ data: img.data, mimeType: img.mimeType }))
     : undefined;
   clearPendingImages();
-  // 立即显示用户消息 + "思考中"状态（本地模型 prefill 可能 60-90 秒，不等 Tiffa 事件）
-  dom.messages.appendChild(createMessageElement('user', message));
-  scrollToBottom();
+  // 立即显示用户消息 + “思考中”状态（本地模型 prefill 可能 60-90 秒，不等 Tiffa 事件）
+  // AI 重命名模式下不渲染用户消息（隐藏 prompt）
+  if (!state.aiRenameMode) {
+    dom.messages.appendChild(createMessageElement('user', message));
+    scrollToBottom();
+  }
   state.agentRunning = true;
   state.sessionAgentRunning.set(state.activeSessionPath, true);
   renderSessionTabs();
@@ -3877,8 +3939,11 @@ function showSessionTabContextMenu(e, session) {
   const menu = document.createElement('div');
   menu.className = 'context-menu';
   menu.innerHTML = `
+    <div class="context-menu-item" data-action="ai-rename">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.8 2.8-2 3.5V11h3a3 3 0 0 1 3 3v1.5a2.5 2.5 0 0 1-5 0V14H9v1.5a2.5 2.5 0 0 1-5 0V14a3 3 0 0 1 3-3h3V9.5A4 4 0 0 1 8 6a4 4 0 0 1 4-4z"/></svg>AI 重命名
+    </div>
     <div class="context-menu-item" data-action="rename">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>重命名
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>手动重命名
     </div>
     <div class="context-menu-item" data-action="branch">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>分支
@@ -3918,6 +3983,7 @@ function showSessionTabContextMenu(e, session) {
       console.log('[DEBUG] 调用 renameSession');
       await renameSession(session);
     }
+    else if (action === 'ai-rename') await aiRenameSession(session)
     else if (action === 'branch') await branchSession(session);
     else if (action === 'export-html') await exportSessionHtml(session);
     else if (action === 'archive') await archiveSessionFromTab(session);
@@ -4004,6 +4070,60 @@ async function renameSession(session) {
   } else {
     addNotice('error', `重命名失败: ${result.error || '未知错误'}`);
   }
+}
+
+// AI 重命名：读取对话前几条消息，让模型生成标题，全程不渲染到聊天区
+async function aiRenameSession(session) {
+  if (!session || !session.path) return;
+  if (session.path.startsWith('__new__')) {
+    addNotice('warning', '新对话还没有内容，无法 AI 重命名');
+    return;
+  }
+  if (state.aiRenameMode) {
+    addNotice('warning', '正在重命名中，请稍候');
+    return;
+  }
+  if (state.agentRunning) {
+    addNotice('warning', 'AI 正在回复中，请等待完成后再重命名');
+    return;
+  }
+
+  // 1. 读取对话历史，提取前几条用户消息
+  let context = '';
+  try {
+    const history = await tiffaDesktop.loadSessionHistory(session.path);
+    if (history && history.messages) {
+      const userMsgs = history.messages
+        .filter(m => m.role === 'user')
+        .slice(0, 3)
+        .map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content).substring(0, 200));
+      context = userMsgs.join('\n---\n').substring(0, 1500);
+    }
+  } catch {}
+
+  if (!context) {
+    // 回退：用 session 的 firstMessage
+    context = session.firstMessage || session.title || '';
+  }
+  if (!context) {
+    addNotice('warning', '对话没有内容，无法生成标题');
+    return;
+  }
+
+  // 2. 进入 AI 重命名模式（抑制渲染）
+  state.aiRenameMode = session;
+  state.aiRenameText = '';
+  addNotice('info', '正在生成标题…');
+
+  // 3. 发送隐藏 prompt
+  const prompt = `请用不超过15个字概括以下对话的主题。只输出标题文字，不要引号、不要编号、不要任何解释。\n\n${context}`;
+  try {
+    await tiffaDesktop.send(prompt, [], state.activeSessionId);
+  } catch (err) {
+    state.aiRenameMode = null;
+    addNotice('error', `AI 重命名失败: ${err.message}`);
+  }
+  // agent_end 事件中会处理标题应用（见 handleEvent 中的 aiRenameMode 逻辑）
 }
 
 // ── 分支功能 ──

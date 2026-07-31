@@ -14,7 +14,7 @@ SKILL_DIR = Path(__file__).parent
 TEMPLATES_DIR = SKILL_DIR / "templates"
 DEFAULT_CONFIG = SKILL_DIR / "config.yaml"
 
-OUT_DIR_DEFAULT = SKILL_DIR / "output"
+OUT_DIR_DEFAULT = Path(os.getcwd()) / "output"  # 输出到当前项目目录
 COMFY_OUT = Path(os.environ.get("COMFY_OUT", os.path.join(os.getcwd(), "comfyui_out")))
 COMFY_SCRIPT = SKILL_DIR.parent / "comfyui-image-gen" / "comfy.py"
 
@@ -43,11 +43,11 @@ def load_config(path=None):
         model = os.environ.get("LLM_MODEL", "")
         return {"llm": {"endpoint": endpoint, "model": model, "api_key": "not-needed"},
                 "comfyui": {"script": str(COMFY_SCRIPT), "output_dir": str(COMFY_OUT)},
-                "output": {"dir": str(SKILL_DIR / "output")}}
+                "output": {"dir": str(Path(os.getcwd()) / "output")}}
     except Exception:
         return {"llm": {"endpoint": "", "model": "", "api_key": "not-needed"},
                 "comfyui": {"script": str(COMFY_SCRIPT), "output_dir": str(COMFY_OUT)},
-                "output": {"dir": str(SKILL_DIR / "output")}}
+                "output": {"dir": str(Path(os.getcwd()) / "output")}}
 
 
 def eprint(*a, **kw):
@@ -484,12 +484,24 @@ def main():
     img_map = {}
     if not args.no_image:
         eprint(f"[pptgen] generating images via ComfyUI...")
-        image_slides = [(i, s) for i, s in enumerate(slides) if s.get("image") and s["image"].get("prompt")]
+        image_slides = [(i, s) for i, s in enumerate(slides) if s.get("image") and (isinstance(s["image"], dict) and (s["image"].get("prompt") is not None or s["image"].get("path")) or isinstance(s["image"], str))]
         if image_slides:
             os.makedirs(COMFY_OUT, exist_ok=True)
             for i, s in image_slides:
-                img_info = s["image"]
+                img = s["image"]
+                if isinstance(img, str) and img:
+                    # 已经是字符串路径
+                    img_map[i] = os.path.join(COMFY_OUT, os.path.basename(img))
+                    eprint(f"[pptgen] slide {i+1}: using pre-existing image from path {img}")
+                    continue
+                img_info = img
                 p = img_info["prompt"]
+                if p is None:
+                    # 已有图片路径，直接复制到 img_map
+                    if img_info["path"]:
+                        img_map[i] = os.path.join(COMFY_OUT, os.path.basename(img_info["path"]))
+                        eprint(f"[pptgen] slide {i+1}: using pre-existing image")
+                        continue
                 st = img_info.get("style") or None
                 if st and st.lower() in ("null", "none", "ask_user"):
                     st = None
@@ -531,10 +543,15 @@ def main():
                     img_map[i] = result
                 else:
                     eprint(f"[pptgen]   slide {i+1}: image generation failed, skipping")
+                    img_map[i] = os.path.join(COMFY_OUT, os.path.basename(s["image"]["path"]))
+                    eprint(f"[pptgen]   slide {i+1}: using pre-existing image from path")
+
+                if isinstance(s["image"], dict) and s["image"].get("path"):
+                    eprint(f"[pptgen]   slide {i+1}: using pre-existing image from path")
 
             # Copy images to output dir
             if img_map:
-                out_dir = Path(args.output).parent if args.output else SKILL_DIR / "output"
+                out_dir = Path(args.output).parent if args.output else Path(os.getcwd()) / "output"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 for idx, src in list(img_map.items()):
                     ext = os.path.splitext(src)[1] or ".png"
