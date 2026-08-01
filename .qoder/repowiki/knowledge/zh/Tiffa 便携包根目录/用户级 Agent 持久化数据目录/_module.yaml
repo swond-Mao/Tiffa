@@ -7,3 +7,4 @@ source_files: []
 depends_on: []
 related_to:
     - path: electron_app
+    - path: skills_computer_use

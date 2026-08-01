@@ -7,3 +7,4 @@ source_files: []
 depends_on: []
 related_to:
     - path: per_user_data
+    - path: skills_computer_use

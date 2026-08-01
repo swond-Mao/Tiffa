@@ -22,6 +22,7 @@
 - **新增**：WebP图像处理支持，自动转换为PNG格式确保模型兼容性
 - **新增**：改进的错误处理机制，增强异常捕获和恢复能力
 - **新增**：优化的前端交互体验，包括启动遮罩状态管理和用户反馈
+- **最新**：品牌图标集成与窗口尺寸优化，提升用户体验和视觉一致性
 
 ## 目录
 1. [简介](#简介)
@@ -44,7 +45,7 @@
 - 三进程通信关系与数据流向的架构图
 - 面向初学者的 Electron 基础概念，以及面向高级开发者的安全最佳实践与性能优化建议
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验。
+**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验。**最新优化**：集成了品牌图标资源，优化了窗口初始尺寸（1600x1000）和最小尺寸限制（1100x720），提升了应用的专业性和用户体验。
 
 ## 项目结构
 Tiffa 采用典型的 Electron 多进程架构：
@@ -66,9 +67,11 @@ H["index.html<br/>页面结构"]
 S["styles.css<br/>样式与主题变量"]
 T["themes.js<br/>主题切换/变量注入"]
 O["startupOverlay<br/>启动遮罩"]
+A["assets/<br/>品牌图标资源"]
 end
 M --> |创建窗口/加载页面| H
 M --> |设置 preload| P
+M --> |应用图标| A
 P --> |ipcRenderer.invoke/on| M
 R --> |调用 tiffaDesktop API| P
 H --> S
@@ -80,14 +83,14 @@ R --> O
 ```
 
 **图表来源** 
-- [electron/main.js:775-826](file://electron/main.js#L775-L826)
+- [electron/main.js:813-831](file://electron/main.js#L813-L831)
 - [electron/preload.js:24-134](file://electron/preload.js#L24-L134)
 - [electron/renderer/index.html:13-19](file://electron/renderer/index.html#L13-L19)
 - [electron/renderer/styles.css:1-200](file://electron/renderer/styles.css#L1-L200)
 - [electron/renderer/themes.js:1-200](file://electron/renderer/themes.js#L1-L200)
 
 **章节来源**
-- [electron/main.js:775-826](file://electron/main.js#L775-L826)
+- [electron/main.js:813-831](file://electron/main.js#L813-L831)
 - [electron/package.json:1-75](file://electron/package.json#L1-L75)
 - [README.md:1-207](file://README.md#L1-L207)
 
@@ -97,6 +100,7 @@ R --> O
   - 子进程管理：启动并维护 Tiffa 内核进程（Bun + CLI），JSONL 协议通信，自动重启与 LRU 淘汰
   - IPC 路由：将渲染进程请求转发到对应实例，统一事件分发
   - **新增**：会话ID迁移、崩溃重启上下文恢复、内存召回功能、WebP图像处理支持
+  - **最新**：品牌图标集成，优化窗口尺寸配置
 - 预加载脚本（preload.js）
   - 使用 contextBridge.exposeInMainWorld 暴露最小化 API（tiffaDesktop）
   - 封装 ipcRenderer.invoke/on，屏蔽底层通道名，限制可调用方法
@@ -108,7 +112,7 @@ R --> O
   - **新增**：启动遮罩显示后端就绪状态，改进会话切换逻辑，内存召回模式
 
 **章节来源**
-- [electron/main.js:775-826](file://electron/main.js#L775-L826)
+- [electron/main.js:813-831](file://electron/main.js#L813-L831)
 - [electron/preload.js:24-134](file://electron/preload.js#L24-L134)
 - [electron/renderer/app.js:387-524](file://electron/renderer/app.js#L387-L524)
 
@@ -147,7 +151,7 @@ M-->>R : 返回结果或事件
 ```
 
 **图表来源** 
-- [electron/main.js:830-1072](file://electron/main.js#L830-L1072)
+- [electron/main.js:882-997](file://electron/main.js#L882-L997)
 - [electron/preload.js:24-134](file://electron/preload.js#L24-L134)
 - [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-L524)
 
@@ -157,6 +161,7 @@ M-->>R : 返回结果或事件
 - 窗口配置
   - 启用 contextIsolation=true，nodeIntegration=false，sandbox=false（允许通过 preload 访问 fs）
   - 隐藏原生菜单栏，按需打开 DevTools
+  - **最新优化**：设置品牌图标（tiffa-icon.ico），优化窗口初始尺寸（1600x1000）和最小尺寸限制（1100x720）
 - 子进程管理
   - TiffaInstance：启动 Bun CLI，stdin/stdout JSONL 协议，readline 解析，错误与退出处理，自动重启（最多 3 次）
   - TiffaInstanceManager：LRU 淘汰，按 cwd#sessionId 键管理实例，支持激活/关闭/查询状态
@@ -203,14 +208,14 @@ TiffaInstanceManager --> TiffaInstance : "管理多个实例"
 ```
 
 **图表来源** 
-- [electron/main.js:121-435](file://electron/main.js#L121-L435)
-- [electron/main.js:441-768](file://electron/main.js#L441-L768)
+- [electron/main.js:149-465](file://electron/main.js#L149-L465)
+- [electron/main.js:471-787](file://electron/main.js#L471-L787)
 
 **章节来源**
-- [electron/main.js:775-826](file://electron/main.js#L775-L826)
-- [electron/main.js:121-435](file://electron/main.js#L121-L435)
-- [electron/main.js:441-768](file://electron/main.js#L441-L768)
-- [electron/main.js:830-1072](file://electron/main.js#L830-L1072)
+- [electron/main.js:813-831](file://electron/main.js#L813-L831)
+- [electron/main.js:149-465](file://electron/main.js#L149-L465)
+- [electron/main.js:471-787](file://electron/main.js#L471-L787)
+- [electron/main.js:882-997](file://electron/main.js#L882-L997)
 
 ### 预加载脚本（preload.js）安全桥接
 - 通过 contextBridge.exposeInMainWorld('tiffaDesktop', {...}) 暴露受控 API
@@ -340,10 +345,10 @@ Log --> Model
 ```
 
 **图表来源** 
-- [electron/main.js:926-944](file://electron/main.js#L926-L944)
+- [electron/main.js:957-974](file://electron/main.js#L957-L974)
 
 **章节来源**
-- [electron/main.js:926-944](file://electron/main.js#L926-L944)
+- [electron/main.js:957-974](file://electron/main.js#L957-L974)
 
 ### 新增功能：内存召回系统
 - 主进程实现
@@ -389,7 +394,7 @@ Render --> Display["显示记忆内容、来源、时间等信息"]
   - 自动清理孤儿目录和重复项目条目
 
 **章节来源**
-- [electron/main.js:50-93](file://electron/main.js#L50-93)
+- [electron/main.js:51-93](file://electron/main.js#L51-93)
 - [electron/main.js:95-111](file://electron/main.js#L95-L111)
 - [electron/main.js:1687-1841](file://electron/main.js#L1687-L1841)
 - [electron/main.js:1808-1819](file://electron/main.js#L1808-L1819)
@@ -409,15 +414,34 @@ Render --> Display["显示记忆内容、来源、时间等信息"]
   - 资源加载失败：备用方案，渐进增强
 
 **章节来源**
-- [electron/main.js:203-234](file://electron/main.js#L203-L234)
+- [electron/main.js:231-262](file://electron/main.js#L231-L262)
 - [electron/main.js:1117-1151](file://electron/main.js#L1117-L1151)
 - [electron/renderer/app.js:496-533](file://electron/renderer/app.js#L496-L533)
+
+### 最新优化：品牌图标集成与窗口尺寸优化
+- 品牌图标集成
+  - 在 BrowserWindow 配置中设置 icon 属性指向 assets/tiffa-icon.ico
+  - 提升应用专业性和品牌识别度
+  - 支持 Windows 任务栏和应用切换器中的图标显示
+- 窗口尺寸优化
+  - 初始窗口尺寸设置为 1600x1000，提供更好的工作空间
+  - 最小尺寸限制为 1100x720，确保界面元素不会过度挤压
+  - 左侧项目栏固定 180px，右侧 minimap + 聊天区布局合理
+  - 缩小到最小尺寸时不露出背景边框，保持界面完整性
+- 用户体验提升
+  - 应用启动时显示品牌图标，增强视觉一致性
+  - 窗口尺寸适配不同屏幕分辨率
+  - 最小尺寸保证基本功能可用性
+
+**章节来源**
+- [electron/main.js:813-831](file://electron/main.js#L813-L831)
 
 ## 依赖关系分析
 - package.json
   - 入口 main: electron/main.js
   - 依赖：electron、highlight.js、marked、yaml
   - 构建：electron-builder 打包为便携版，包含 npm-global、plugins、data、home、workspace 等资源
+  - **最新**：Windows 平台图标配置（icon: null 表示使用运行时指定图标）
 - 模块依赖
   - main.js 依赖 child_process、fs、path、js-yaml、yaml
   - preload.js 依赖 electron（contextBridge、ipcRenderer、clipboard、webUtils）、highlight.js、marked
@@ -431,6 +455,7 @@ Pkg --> Rend["renderer/app.js"]
 Main --> Child["child_process/fs/path/yaml"]
 Pre --> E["electron(highlight.js/marked)"]
 Rend --> PreAPI["tiffaDesktop(API)"]
+Main --> Assets["assets/tiffa-icon.ico"]
 ```
 
 **图表来源** 
@@ -453,6 +478,7 @@ Rend --> PreAPI["tiffaDesktop(API)"]
   - **新增**：启动遮罩防止用户在后端就绪前进行无效操作
 - **新增优化**：内存召回直接查询 SQLite FTS，避免经过内核进程的网络开销
 - **新增优化**：WebP图片转换使用Electron原生模块，无需额外依赖，性能优异
+- **最新优化**：合理的窗口尺寸配置，减少不必要的重绘和布局计算
 
 [本节为通用性能讨论，不直接分析具体文件]
 
@@ -470,16 +496,17 @@ Rend --> PreAPI["tiffaDesktop(API)"]
 - **新增排查**：启动遮罩长时间不消失可能是后端启动失败，检查端口占用或服务状态
 - **新增排查**：内存召回失败检查 Python 环境和 mnemopi 数据库文件完整性
 - **新增排查**：WebP图片转换失败检查Electron版本和图片数据格式
+- **最新排查**：品牌图标不显示检查 assets/tiffa-icon.ico 文件是否存在且路径正确
 
 **章节来源**
 - [electron/main.js:1001-1012](file://electron/main.js#L1001-L1012)
-- [electron/main.js:201-232](file://electron/main.js#L201-L232)
+- [electron/main.js:231-262](file://electron/main.js#L231-L262)
 - [electron/preload.js:24-134](file://electron/preload.js#L24-L134)
 
 ## 结论
 Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进程的职责，通过 contextIsolation 与最小化 API 暴露实现安全通信。主进程集中管理子进程与 IPC，预加载脚本作为可信桥接层，渲染进程专注于 UI 与交互。该设计兼顾安全性与性能，适合初学者理解 Electron 基础，也为高级开发者提供了可扩展的安全与优化空间。
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验，进一步提升了用户体验和系统稳定性。
+**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验，进一步提升了用户体验和系统稳定性。**最新优化**：品牌图标集成和窗口尺寸优化，提升了应用的专业性和用户体验的一致性。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -501,5 +528,6 @@ Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进�
 - **新增建议**：使用启动遮罩确保后端就绪后再允许用户操作，避免无效请求
 - **新增建议**：利用内存召回功能直接查询 SQLite FTS，提高搜索性能
 - **新增建议**：使用Electron内置nativeImage进行图片处理，避免额外依赖
+- **最新建议**：合理设置窗口尺寸和图标资源，提升应用专业性和用户体验
 
 [本节为通用指导，不直接分析具体文件]

@@ -4,6 +4,7 @@
 **本文引用的文件**
 - [README.md](file://README.md)
 - [AGENTS.md](file://AGENTS.md)
+- [webp-crash-fix.md](file://webp-crash-fix.md)
 - [electron/main.js](file://electron/main.js)
 - [electron/renderer/app.js](file://electron/renderer/app.js)
 - [skills/dashiai-ppt/project/src/components/themes/theme04/source/image-slot.js](file://skills/dashiai-ppt/project/src/components/themes/theme04/source/image-slot.js)
@@ -11,6 +12,13 @@
 - [data/agent/managed-skills/dashiai-ppt/project/src/components/themes/client-runtime.jsx](file://data/agent/managed-skills/dashiai-ppt/project/src/components/themes/client-runtime.jsx)
 - [data/agent/sessions/--G--Tiffa-workspace-弱智模型测试--/2026-07-29T08-18-59-223Z_019facf4-9a17-7000-b93a-40dfa611494b/img3.jsonl](file://data/agent/sessions/--G--Tiffa-workspace-弱智模型测试--/2026-07-29T08-18-59-223Z_019facf4-9a17-7000-b93a-40dfa611494b/img3.jsonl)
 </cite>
+
+## 更新摘要
+**所做更改**
+- 更新了WebP崩溃修复机制，从扩展层白名单方案改为内核原生工具调用机制
+- 改进了提供者配置验证，确保provider key命中内核约定名
+- 移除了无效的扩展层WebP处理逻辑，简化了架构
+- 更新了故障排查指南以反映新的修复方案
 
 ## 目录
 1. [简介](#简介)
@@ -25,7 +33,9 @@
 10. [附录](#附录)
 
 ## 简介
-本文件围绕仓库中的“WebP图像处理系统”进行系统化文档化。该系统在多个环节使用浏览器原生能力将图片转码为WebP，以兼顾画质与体积；同时在Electron主进程中对WebP MIME类型进行识别与处理，并在渲染层提供统一的输入、预览与展示流程。整体方案强调零额外依赖、前端内联压缩、以及稳定的跨会话数据持久化。
+本文件围绕仓库中的"WebP图像处理系统"进行系统化文档化。该系统在多个环节使用浏览器原生能力将图片转码为WebP，以兼顾画质与体积；同时在Electron主进程中对WebP MIME类型进行识别与处理，并在渲染层提供统一的输入、预览与展示流程。整体方案强调零额外依赖、前端内联压缩、以及稳定的跨会话数据持久化。
+
+**重要更新**：系统已采用内核原生工具调用机制解决关键WebP崩溃问题，替代了之前的扩展层工作区方案，显著提升了稳定性和可靠性。
 
 ## 项目结构
 - Electron 桌面壳：负责进程管理、IPC通信、事件路由与本地资源访问。
@@ -76,6 +86,8 @@ R --> S
 - electron/main.js：识别image/webp的MIME类型，参与文件读写与路径映射。
 - electron/renderer/app.js：统一的事件路由与渲染逻辑，确保多会话下WebP内容正确显示与切换。
 
+**更新**：WebP处理现已通过内核原生工具调用机制处理，避免了扩展层工作区的复杂性和潜在崩溃问题。
+
 章节来源
 - [skills/dashiai-ppt/project/src/components/themes/theme04/source/image-slot.js:167-187](file://skills/dashiai-ppt/project/src/components/themes/theme04/source/image-slot.js#L167-L187)
 - [skills/dashiai-ppt/project/src/components/themes/theme08/source/image-slot.js:142-171](file://skills/dashiai-ppt/project/src/components/themes/theme08/source/image-slot.js#L142-L171)
@@ -85,6 +97,8 @@ R --> S
 
 ## 架构总览
 WebP处理链路从用户操作到最终展示，贯穿渲染进程与主题组件，必要时由主进程协助识别MIME类型或执行文件系统操作。
+
+**更新**：架构已优化，采用内核原生工具调用机制替代扩展层工作区，提供更稳定的WebP处理能力。
 
 ```mermaid
 sequenceDiagram
@@ -244,20 +258,29 @@ MainProcess --> RendererApp : "IPC事件转发"
   - 检查.sidecar文件是否可写；localStorage容量是否不足。
 - 多会话串扰
   - 确认渲染进程事件路由过滤了非当前会话事件。
+- **新增**：WebP崩溃问题
+  - 确保provider key使用内核约定名（llama.cpp/local-server而非qwen/qwen-remote）。
+  - 检查models.yml配置是否正确，supportsTools必须为true。
+  - 验证内核WebP支持检测是否正常工作。
 
 章节来源
 - [electron/main.js:930-930](file://electron/main.js#L930-L930)
 - [skills/dashiai-ppt/project/src/components/themes/theme04/source/image-slot.js:167-187](file://skills/dashiai-ppt/project/src/components/themes/theme04/source/image-slot.js#L167-L187)
 - [skills/dashiai-ppt/project/src/components/themes/theme08/source/image-slot.js:142-171](file://skills/dashiai-ppt/project/src/components/themes/theme08/source/image-slot.js#L142-L171)
 - [electron/renderer/app.js:1-120](file://electron/renderer/app.js#L1-L120)
+- [webp-crash-fix.md:1-99](file://webp-crash-fix.md#L1-L99)
 
 ## 结论
-该WebP图像处理系统在浏览器端完成高效转码与持久化，结合Electron主进程的MIME识别与会话路由，形成稳定、低依赖、易扩展的处理链路。通过尺寸与质量约束、内存管理与并发保护，兼顾性能与用户体验。建议在后续迭代中考虑动态质量策略与更细粒度的缓存机制，以进一步提升大图场景表现。
+该WebP图像处理系统在浏览器端完成高效转码与持久化，结合Electron主进程的MIME识别与会话路由，形成稳定、低依赖、易扩展的处理链路。通过尺寸与质量约束、内存管理与并发保护，兼顾性能与用户体验。
+
+**重要改进**：系统已成功采用内核原生工具调用机制解决关键WebP崩溃问题，替代了复杂的扩展层工作区方案，显著提升了稳定性和可靠性。建议在后续迭代中考虑动态质量策略与更细粒度的缓存机制，以进一步提升大图场景表现。
 
 [本节为总结，不直接分析具体文件]
 
 ## 附录
 - 示例：会话JSONL中记录image/webp的toolResult，可用于回溯与调试。
+- **新增**：WebP崩溃修复文档提供了详细的根因分析和解决方案。
 
 章节来源
 - [data/agent/sessions/--G--Tiffa-workspace-弱智模型测试--/2026-07-29T08-18-59-223Z_019facf4-9a17-7000-b93a-40dfa611494b/img3.jsonl:34-34](file://data/agent/sessions/--G--Tiffa-workspace-弱智模型测试--/2026-07-29T08-18-59-223Z_019facf4-9a17-7000-b93a-40dfa611494b/img3.jsonl#L34-L34)
+- [webp-crash-fix.md:1-99](file://webp-crash-fix.md#L1-L99)

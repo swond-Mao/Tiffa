@@ -66,26 +66,55 @@ export default async function (pi: any) {
       const computerUsePrompt = [
         {
           type: "text",
-          text: `[电脑控制工具 v2 — UIA 优先 + 四级降级]
+          text: `[电脑控制 v3 — 探测优先 + 分类施策]
 
-当用户要求操作电脑、控制桌面、打开应用、输入文字等桌面自动化任务时，
-使用 MCP 电脑控制工具集（5 个原子工具）。禁止在 bash 中自己写 pyautogui/mss/PIL。
+当用户要求操作电脑、控制桌面、打开应用等桌面自动化任务时，
+使用 MCP 电脑控制工具集。禁止在 bash 中自己写 pyautogui/mss/PIL。
 
-【标准工作流】
-1. ui_inspect(window?) → 枚举当前窗口的可交互控件（返回编号+名称+坐标表+缩略图）
-2. ui_act(ref="#编号", action="invoke/click/set_text/...") → 操作指定元素
-3. ui_screenshot(annotate=True) → 截图（可选 SoM 编号标注框，4K 友好）
-4. desktop_input(action, nx?, ny?) → 归一化坐标兜底（游戏/Canvas/Electron）
+【★★★ 三阶段强制流程（不可跳过） ★★★】
+
+■ 阶段一：应用探测（必须先做！）
+  1. 确定目标应用是什么、UI 框架是什么
+  2. 执行 ui_inspect(window="目标窗口") 试探控件树
+     - 返回 ≥5 个有名称控件 → UIA 可用
+     - 返回 <3 个或全是 Pane/Custom → 盲窗
+  3. 判断有无后台通道（CLI / API / COM）
+  常见应用速查：
+     微信/QQ = Qt盲窗,无API → OCR路线
+     钉钉/飞书/Teams = Electron,有API → API优先
+     Office/Outlook = COM自动化 → PowerShell后台
+     记事本/资源管理器 = Win32 → UIA精控
+     VS Code = 有CLI code命令 → CLI优先
+     游戏/Steam = 全盲 → 视觉兜底
+
+■ 阶段二：策略选择（向用户说明理由）
+  A. 后台直通：有 CLI/API/COM → bash 直接调，不碰 GUI
+  B. UIA 精控：Win32/WPF 标准控件 → inspect→act→screenshot
+  C. OCR 盲操：Qt/盲窗 → ui_ocr→ui_find_text→ui_click_text
+  D. 视觉兜底：纯图形界面 → screenshot(annotate)→desktop_input
+  E. 混合策略：多应用任务按应用分段，每段独立策略
+  优先级：A > B > C > D
+
+■ 阶段三：分步执行 + 验证
+  - 每步操作后截图/inspect 验证
+  - 与预期不符 → 停下重新探测，不盲目重试
+  - 多应用任务分段执行，每段独立验证
+
+【工具速查】
+  ui_inspect(window?) → 枚举控件（探测用）
+  ui_act(ref, action) → 操作元素
+  ui_screenshot(annotate?) → 截图验证
+  desktop_input(action, nx?, ny?) → 归一化坐标兜底
+  ui_ocr(window?) → OCR识别（盲窗用）
+  ui_find_text(query, window?) → OCR模糊匹配
+  ui_click_text(query, window?) → OCR找字点击
+  computer_use(task) → 简单任务便利入口
 
 【关键规则】
-- 第一步永远是 ui_inspect() 看有哪些元素可用
-- ui_act 的 ref 用 inspect 返回的编号（如 "#5"）或名称片段
-- 每步操作后调用 ui_screenshot() 验证结果——操作后自动附带截图回传
-- UIA 路径（L1/L2）不需要视觉模型，速度快且零偏差
-- SoM 标注模式（annotate=true）在截图上画编号框，模型只需选编号
-- desktop_input 坐标是 0~1000 归一化的，与屏幕分辨率解耦
-- 简单任务可用 computer_use(task=...) 便利入口；复杂多步任务逐步调原子工具
-- 执行前会弹确认框，ESC 可随时中断`
+  - 禁止跳过探测直接规划“点哪里、输什么”
+  - 禁止对所有应用一视同仁，必须分类施策
+  - 有后台通道的应用绝不走 GUI
+  - 执行前会弹确认框，ESC 可随时中断`
         }
       ]
       event.systemPrompt = [...prompt, ...computerUsePrompt]
