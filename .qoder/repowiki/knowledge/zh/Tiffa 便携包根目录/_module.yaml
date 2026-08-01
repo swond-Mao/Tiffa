@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: Tiffa 便携 AI 工作台（根装配层）
+title: Tiffa 便携包根目录
 scope:
     - README.md
     - AGENTS.md

@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: skills_library
-title: AI Agent 可插拔技能库（Skills Library）
-scope:
-    - skills/
-source_files: []
-depends_on: []
-related_to: []

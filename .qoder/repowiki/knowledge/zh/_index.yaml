@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-07-30T16:23:43Z"
+exported_at: "2026-08-01T01:54:44Z"
 modules:
     "":
-        dir_name: Tiffa 便携 AI 工作台（根装配层）
-        title: Tiffa 便携 AI 工作台（根装配层）
+        dir_name: Tiffa 便携包根目录
+        title: Tiffa 便携包根目录
         scope:
             - README.md
             - AGENTS.md
@@ -23,7 +23,6 @@ modules:
         children:
             - electron_app
             - per_user_data
-            - skills_library
         depends_on: []
         related_to: []
     electron_app:
@@ -34,22 +33,15 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: per_user_data
     per_user_data:
-        dir_name: 按用户_工作空间隔离的 Agent 运行时持久化存储
-        title: 按用户/工作空间隔离的 Agent 运行时持久化存储
+        dir_name: 用户级 Agent 持久化数据目录
+        title: 用户级 Agent 持久化数据目录
         scope:
             - data/
         source_files: []
         children: []
         depends_on: []
-        related_to: []
-    skills_library:
-        dir_name: AI Agent 可插拔技能库（Skills Library）
-        title: AI Agent 可插拔技能库（Skills Library）
-        scope:
-            - skills/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
+        related_to:
+            - path: electron_app

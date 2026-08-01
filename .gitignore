@@ -35,6 +35,7 @@ data/agent/models.yml
 data/agent/models.yml.bak*
 data/agent/models.yml.example
 data/cache/
+data/agent/cache/
 data/memory/
 local_cache/
 
