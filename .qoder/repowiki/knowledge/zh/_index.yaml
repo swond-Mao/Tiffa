@@ -3,7 +3,7 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-08-01T01:54:44Z"
+exported_at: "2026-08-01T16:20:39Z"
 modules:
     "":
         dir_name: Tiffa 便携包根目录
@@ -23,6 +23,7 @@ modules:
         children:
             - electron_app
             - per_user_data
+            - skills_computer_use
         depends_on: []
         related_to: []
     electron_app:
@@ -35,6 +36,7 @@ modules:
         depends_on: []
         related_to:
             - path: per_user_data
+            - path: skills_computer_use
     per_user_data:
         dir_name: 用户级 Agent 持久化数据目录
         title: 用户级 Agent 持久化数据目录
@@ -45,3 +47,19 @@ modules:
         depends_on: []
         related_to:
             - path: electron_app
+            - path: skills_computer_use
+    skills_computer_use:
+        dir_name: Windows 桌面自动化技能（UIA 优先 + 四级降级）
+        title: Windows 桌面自动化技能（UIA 优先 + 四级降级）
+        scope:
+            - skills/computer-use/SKILL.md
+            - skills/computer-use/computer_use.py
+            - skills/computer-use/computer_use_mcp.py
+            - skills/computer-use/requirements.txt
+            - skills/computer-use/uia_core.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: electron_app
+            - path: per_user_data

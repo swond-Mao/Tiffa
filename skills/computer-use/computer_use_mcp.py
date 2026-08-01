@@ -36,6 +36,248 @@ import uia_core as U
 
 
 # ══════════════════════════════════════════════════════════════
+# Grounding 子模型配置（可选，不配则完全走原有 UIA/OCR 路径）
+# ══════════════════════════════════════════════════════════════
+# 环境变量：
+#   GROUNDING_API_BASE  — OpenAI 兼容 API 地址（如 http://127.0.0.1:8080/v1 或 https://api.kimi.moonshot.cn/v1）
+#   GROUNDING_MODEL     — 模型名（默认 xiaomi/mimo-v2-flash，便宜快）
+#   GROUNDING_API_KEY   — API Key（本地 llama.cpp 可留空）
+#   GROUNDING_ENABLED   — "1" 启用 / "0" 禁用（默认：有 API_BASE 就启用）
+
+import urllib.request
+import urllib.error
+
+# ══ 模型配置联动：从 models.yml + config.yml 自动解析 ══
+
+def _resolve_model_role(role: str) -> dict:
+    """
+    从 config.yml 的 modelRoles 和 models.yml 的 providers 解析出
+    {"api_base": ..., "model": ..., "api_key": ...}。
+    失败返回空 dict。
+    """
+    try:
+        # 定位 data/agent/ 目录
+        agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR", ""))
+        if not agent_dir.exists():
+            # 回退：从 skill 目录向上找
+            agent_dir = Path(__file__).parent.parent.parent / "data" / "agent"
+        if not agent_dir.exists():
+            return {}
+
+        # 1. 读 config.yml 获取 role 对应的 "provider/model"
+        config_path = agent_dir / "config.yml"
+        if not config_path.exists():
+            return {}
+        config_text = config_path.read_text(encoding="utf-8")
+
+        # 简单解析 modelRoles 区块
+        model_ref = ""  # e.g. "kimi/kimi-k3"
+        in_roles = False
+        for line in config_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("modelRoles:"):
+                in_roles = True
+                continue
+            if in_roles:
+                if not line.startswith(" ") and not line.startswith("\t") and stripped and not stripped.startswith("#"):
+                    break  # 离开 modelRoles 区块
+                if stripped.startswith(f"{role}:"):
+                    model_ref = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                    break
+
+        if not model_ref or "/" not in model_ref:
+            return {}
+
+        provider_name, model_id = model_ref.split("/", 1)
+
+        # 2. 读 models.yml 获取 provider 的 baseUrl 和 apiKey
+        models_path = agent_dir / "models.yml"
+        if not models_path.exists():
+            return {}
+        models_text = models_path.read_text(encoding="utf-8")
+
+        # 简单解析 providers 区块，找到目标 provider
+        api_base = ""
+        api_key = ""
+        in_providers = False
+        in_target_provider = False
+        provider_indent = 0
+
+        for line in models_text.splitlines():
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip())
+
+            if stripped.startswith("providers:"):
+                in_providers = True
+                continue
+
+            if not in_providers:
+                continue
+
+            # 检测是否进入目标 provider
+            if stripped == f"{provider_name}:" or stripped.startswith(f"{provider_name}:"):
+                if indent <= 4:  # provider 级别
+                    in_target_provider = True
+                    provider_indent = indent
+                    continue
+
+            # 在目标 provider 内
+            if in_target_provider:
+                # 检测是否离开了当前 provider（同级或更高级的新 key）
+                if indent <= provider_indent and stripped and not stripped.startswith("#") and ":" in stripped:
+                    if not stripped.startswith("-"):
+                        in_target_provider = False
+                        continue
+
+                if stripped.startswith("baseUrl:"):
+                    api_base = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                elif stripped.startswith("apiKey:"):
+                    api_key = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+
+        if not api_base:
+            return {}
+
+        return {
+            "api_base": api_base,
+            "model": model_id,
+            "api_key": api_key if api_key != "none" else "",
+        }
+
+    except Exception as e:
+        log("resolve_role.error", role, str(e)[:80])
+        return {}
+
+
+# ══ Grounding 配置加载（优先级：环境变量 > grounding.json > role 联动） ══
+
+_GROUNDING_CFG_PATH = Path(__file__).parent / "grounding.json"
+_gcfg = {}
+if _GROUNDING_CFG_PATH.exists():
+    try:
+        _gcfg = json.loads(_GROUNDING_CFG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+# 如果配置了 role，从 models.yml 自动解析
+_role_cfg = {}
+if _gcfg.get("role"):
+    _role_cfg = _resolve_model_role(_gcfg["role"])
+
+# 最终配置：环境变量 > grounding.json 直写值 > role 联动解析值
+GROUNDING_API_BASE = (
+    os.environ.get("GROUNDING_API_BASE")
+    or _gcfg.get("api_base")
+    or _role_cfg.get("api_base", "")
+).rstrip("/")
+GROUNDING_MODEL = (
+    os.environ.get("GROUNDING_MODEL")
+    or _gcfg.get("model")
+    or _role_cfg.get("model", "xiaomi/mimo-v2-flash")
+)
+GROUNDING_API_KEY = (
+    os.environ.get("GROUNDING_API_KEY")
+    or _gcfg.get("api_key")
+    or _role_cfg.get("api_key", "")
+) or "sk-no-key"
+GROUNDING_ENABLED = (
+    os.environ.get("GROUNDING_ENABLED")
+    or _gcfg.get("enabled", "1" if GROUNDING_API_BASE else "0")
+) == "1"
+
+# 盲窗判定阈值：UIA 返回有名称元素 < 此值时触发 grounding
+BLIND_THRESHOLD = 5
+
+
+def _grounding_analyze(img, window_hint: str = "", task_hint: str = "") -> list:
+    """
+    调用轻量 VLM 分析截图，返回结构化可交互元素列表。
+    返回: [{"name": str, "type": str, "x": int, "y": int}, ...]
+    失败时返回空列表（静默降级，不影响主流程）。
+    """
+    if not GROUNDING_ENABLED or not GROUNDING_API_BASE:
+        return []
+
+    try:
+        b64 = U.img_to_b64(img, fmt="JPEG")
+        if not b64:
+            return []
+
+        prompt = (
+            "分析这个界面截图，列出所有可交互元素（按钮、输入框、链接、菜单项、列表项、图标按钮）。\n"
+            "返回纯 JSON 数组，每项格式：{\"name\": \"元素显示文字\", \"type\": \"button|input|link|listitem|icon|menu\", \"x\": 中心x像素, \"y\": 中心y像素}\n"
+            "只返回 JSON，不要其他文字。最多返回 30 个最重要的元素。"
+        )
+        if window_hint:
+            prompt += f"\n当前窗口：{window_hint}"
+        if task_hint:
+            prompt += f"\n用户意图：{task_hint}"
+
+        req_body = json.dumps({
+            "model": GROUNDING_MODEL,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": prompt}
+                ]
+            }],
+            "max_tokens": 2000,
+            "temperature": 0,
+        }).encode()
+
+        headers = {"Content-Type": "application/json"}
+        if GROUNDING_API_KEY and GROUNDING_API_KEY != "sk-no-key":
+            headers["Authorization"] = f"Bearer {GROUNDING_API_KEY}"
+
+        req = urllib.request.Request(
+            f"{GROUNDING_API_BASE}/chat/completions",
+            data=req_body,
+            headers=headers,
+        )
+        resp = urllib.request.urlopen(req, timeout=30)
+        data = json.loads(resp.read().decode())
+
+        content = data["choices"][0]["message"]["content"]
+        # 提取 JSON 数组（模型可能包裹在 ```json ... ``` 中）
+        content = content.strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1].rsplit("```", 1)[0]
+        elements = json.loads(content)
+
+        if isinstance(elements, list):
+            # 校验格式
+            valid = []
+            for el in elements[:30]:
+                if isinstance(el, dict) and "x" in el and "y" in el:
+                    valid.append({
+                        "name": str(el.get("name", "?")),
+                        "type": str(el.get("type", "unknown")),
+                        "x": int(el["x"]),
+                        "y": int(el["y"]),
+                    })
+            log("grounding", window_hint or "全屏", f"{len(valid)} 元素")
+            return valid
+        return []
+
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError, IndexError, OSError) as e:
+        log("grounding.error", str(e)[:100])
+        return []
+
+
+def _format_grounding(elements: list) -> str:
+    """把 grounding 结果格式化为文本表格。"""
+    if not elements:
+        return ""
+    lines = [f"[Visual Grounding] 视觉模型识别到 {len(elements)} 个可交互元素："]
+    lines.append(f'{"#":>4}  {"类型":<10}  {"名称":<28}  {"中心坐标"}')
+    lines.append("-" * 60)
+    for i, el in enumerate(elements, 1):
+        lines.append(f'G{i:>3d}  {el["type"]:<10s}  "{el["name"][:26]}"  ({el["x"]},{el["y"]})')
+    lines.append("提示：用 desktop_input(action=\"click\", nx=..., ny=...) 点击上述坐标（需转换为 0~1000 归一化值）")
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════
 # 安全拦截
 # ══════════════════════════════════════════════════════════════
 
@@ -266,6 +508,11 @@ TOOLS = {
                         "type": "integer",
                         "default": 0,
                         "description": "把裁下的小区域(搜索结果行、标题)放大到此宽度，提升识别率(0=不放大)"
+                    },
+                    "grounding": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "显式请求 Visual Grounding：调用视觉子模型分析截图并返回结构化元素列表（盲窗场景推荐开启）"
                     },
                 },
             }
@@ -509,14 +756,27 @@ def handle_ui_inspect(args):
 
     table = _format_items(items, meta)
 
+    # ── 盲窗检测 + Grounding 子模型增强 ──
+    # 有名称的元素少于阈值 → 判定盲窗 → 调 grounding 补充结构化信息
+    named_count = sum(1 for it in items if it.get("name", "").strip())
+    grounding_text = ""
+    if GROUNDING_ENABLED and named_count < BLIND_THRESHOLD:
+        img_for_g, _, _ = U.screenshot(window=window, annotate=False, max_width=1024)
+        if img_for_g:
+            g_elements = _grounding_analyze(img_for_g, window_hint=window or "")
+            grounding_text = _format_grounding(g_elements)
+
     # 附带一张无标注的缩略截图，让主模型看到当前界面状态
     img, smeta, serr = U.screenshot(window=window, annotate=False, max_width=800)
     contents = [_text(table)]
+    if grounding_text:
+        contents.append(_text(grounding_text))
     img_block = _image(img)
     if img_block:
         contents.append(img_block)
 
-    log("inspect", window or "前台", f"{len(items)} 元素", f"{elapsed:.2f}s")
+    blind_tag = " [盲窗,已启用Visual Grounding]" if grounding_text else ""
+    log("inspect", window or "前台", f"{len(items)} 元素{blind_tag}", f"{elapsed:.2f}s")
     return contents, False
 
 
@@ -550,6 +810,7 @@ def handle_ui_screenshot(args):
     mx = int(args.get("max_items", 40))
     region = _resolve_region_arg(args)
     mw = int(args.get("min_width", 0))
+    grounding = bool(args.get("grounding", False))  # 新增：显式请求 grounding
 
     img, meta, err = U.screenshot(window=window, annotate=annotate,
                                   max_width=1280, max_items=mx,
@@ -571,11 +832,24 @@ def handle_ui_screenshot(args):
         info += f" | 已标注 {meta['marked_count']} 个元素"
 
     contents = [_text(info)]
+
+    # ── Grounding 增强：显式请求 或 盲窗自动触发 ──
+    grounding_text = ""
+    if GROUNDING_ENABLED and (grounding or annotate):
+        # 用原图（未缩放）做 grounding 以获得准确坐标
+        img_full, _, _ = U.screenshot(window=window, annotate=False, max_width=1024)
+        if img_full:
+            g_elements = _grounding_analyze(img_full, window_hint=window or "")
+            grounding_text = _format_grounding(g_elements)
+            if grounding_text:
+                contents.append(_text(grounding_text))
+
     img_block = _image(img)
     if img_block:
         contents.append(img_block)
 
-    log("screenshot", window or "全屏", f"annotate={annotate} region={region}", f"{elapsed:.2f}s")
+    g_tag = " [+grounding]" if grounding_text else ""
+    log("screenshot", window or "全屏", f"annotate={annotate} region={region}{g_tag}", f"{elapsed:.2f}s")
     return contents, False
 
 
