@@ -51,8 +51,12 @@ data/agent/removed-cwds.json
 # Log files
 data/log/
 plugins/*.log
+skills/*/*.log
 electron/stdout.log
 electron/stderr.log
+
+# Tencent Docs export temp files
+.tx_export_tmp_*
 
 # Backup files
 *.bak*

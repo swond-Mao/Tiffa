@@ -271,6 +271,30 @@ G  4  listitem    "三jian客"                   (180,260)
 
 ---
 
+## 窗口管理（最小化/切换/激活）
+
+**最小化窗口也能枚举和操作！** 不需要 Alt+Tab。
+
+```
+# 1. 列出所有窗口（含最小化的，会标注 [最小化]）
+ui_inspect(window="desktop")
+
+# 2. 恢复最小化窗口并切到前台（用 focus 动作）
+ui_act(ref="#3", action="focus")    # 自动 ShowWindow(SW_RESTORE) + SetForegroundWindow
+ui_act(ref="微信", action="focus")  # 名称引用也行
+
+# 3. 确认窗口已在前台
+ui_screenshot(window="微信")
+```
+
+**关键规则**：
+- 目标窗口不在前台 → 先 `ui_inspect(window="desktop")` 找到它
+- 看到 `[最小化]` 标记 → 用 `ui_act(ref="#N", action="focus")` 恢复
+- **禁止用 Alt+Tab**——不可控，不知道要按几次
+- **禁止反复枚举窗口却不操作**——枚举一次就够了，然后直接 focus
+
+---
+
 ## 典型工作流示例
 
 ### 示例 A：操作记事本（Win32，UIA 完整）

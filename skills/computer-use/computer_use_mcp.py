@@ -896,7 +896,7 @@ def handle_ui_find_text(args):
 
     if not hits:
         return [_text(f'未在窗口找到与 "{query}" 足够相似的文本(阈值 {thr})。'
-                      f'可先 ui_ocr 看实际识别出的文字再调整 query。'), False]
+                      f'可先 ui_ocr 看实际识别出的文字再调整 query。')], False
 
     if allres:
         lines = [f'匹配 "{query}" 的全部命中({len(hits)}):']
@@ -928,7 +928,7 @@ def handle_ui_click_text(args):
                               scope_end=scope_end)
     if desc is None:
         log("click_text.error", query, warn)
-        return [_text(f"点击失败: {warn}"), False]
+        return [_text(f"点击失败: {warn}")], False
     log("click_text", query, desc[:60])
     # 点击后附一张小截图，主模型可立刻看到结果
     img, _, _ = U.screenshot(max_width=800)

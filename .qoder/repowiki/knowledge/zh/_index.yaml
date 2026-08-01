@@ -3,7 +3,7 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-08-01T16:20:39Z"
+exported_at: "2026-08-01T16:49:28Z"
 modules:
     "":
         dir_name: Tiffa 便携包根目录
@@ -49,8 +49,8 @@ modules:
             - path: electron_app
             - path: skills_computer_use
     skills_computer_use:
-        dir_name: Windows 桌面自动化技能（UIA 优先 + 四级降级）
-        title: Windows 桌面自动化技能（UIA 优先 + 四级降级）
+        dir_name: Windows 桌面自动化技能（UIA + OCR + MCP）
+        title: Windows 桌面自动化技能（UIA + OCR + MCP）
         scope:
             - skills/computer-use/SKILL.md
             - skills/computer-use/computer_use.py

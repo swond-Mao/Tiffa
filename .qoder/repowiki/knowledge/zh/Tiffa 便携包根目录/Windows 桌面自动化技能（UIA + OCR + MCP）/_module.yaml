@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: skills_computer_use
-title: Windows 桌面自动化技能（UIA 优先 + 四级降级）
+title: Windows 桌面自动化技能（UIA + OCR + MCP）
 scope:
     - skills/computer-use/SKILL.md
     - skills/computer-use/computer_use.py

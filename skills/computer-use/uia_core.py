@@ -198,7 +198,7 @@ def _rect_tuple(r):
 
 
 def list_windows():
-    """列出所有可见顶层窗口。"""
+    """列出所有顶层窗口（含最小化）。"""
     iuia, _ = get_uia()
     out = []
     try:
@@ -212,14 +212,17 @@ def list_windows():
             if not name.strip():
                 continue
             l, t, r, b = _rect_tuple(e.CurrentBoundingRectangle)
-            if r - l <= 1 or b - t <= 1:
-                continue  # 隐藏/零尺寸窗口
+            # 检测最小化窗口（rect 在 -32000 附近或极小）
+            is_minimized = (l <= -30000 or t <= -30000 or (r - l <= 1 and b - t <= 1))
+            if not is_minimized and (r - l <= 1 or b - t <= 1):
+                continue  # 真正隐藏的零尺寸窗口，跳过
             out.append({
                 "name": name,
                 "rect": (l, t, r, b),
                 "class": e.CurrentClassName or "",
                 "pid": e.CurrentProcessId,
                 "el": e,
+                "minimized": is_minimized,
             })
         except Exception:
             continue
@@ -300,8 +303,10 @@ def inspect(window=None, name_filter=None, types=None, max_items=80,
         items = []
         for i, w in enumerate(wins[:max_items], 1):
             l, t, r, b = w["rect"]
+            minimized = w.get("minimized", False)
             items.append({
-                "id": i, "type": "Window", "name": w["name"],
+                "id": i, "type": "Window", 
+                "name": ("[最小化] " if minimized else "") + w["name"],
                 "rect": (l, t, r, b), "center": ((l + r) // 2, (t + b) // 2),
                 "enabled": True, "actions": ["focus"], "el": w["el"],
                 "automation_id": "",
@@ -504,6 +509,16 @@ def act(ref, action="invoke", text=None, button="left"):
             return None, f"{label} 不支持 {action} 操作"
 
         if action == "focus":
+            # 对最小化窗口使用 ShowWindow(SW_RESTORE) 恢复
+            try:
+                hwnd = el.CurrentNativeWindowHandle
+                if hwnd:
+                    SW_RESTORE = 9
+                    ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                    return f"{label} 已恢复并切到前台", None
+            except Exception:
+                pass
             el.SetFocus()
             return f"{label} 已获得焦点", None
 
