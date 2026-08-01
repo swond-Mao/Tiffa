@@ -1,4 +1,4 @@
-# Electron应用架构
+# Tiffa Electron应用架构
 
 <cite>
 **本文引用的文件**   
@@ -19,6 +19,9 @@
 - 优化了环境路径配置，支持便携模式下的盘符迁移和数据修复
 - 完善了启动遮罩机制，确保后端就绪后再允许用户操作
 - 改进了多对话实例管理，支持每个对话独立进程隔离
+- **新增**：WebP图像处理支持，自动转换为PNG格式确保模型兼容性
+- **新增**：改进的错误处理机制，增强异常捕获和恢复能力
+- **新增**：优化的前端交互体验，包括启动遮罩状态管理和用户反馈
 
 ## 目录
 1. [简介](#简介)
@@ -41,7 +44,7 @@
 - 三进程通信关系与数据流向的架构图
 - 面向初学者的 Electron 基础概念，以及面向高级开发者的安全最佳实践与性能优化建议
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。
+**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验。
 
 ## 项目结构
 Tiffa 采用典型的 Electron 多进程架构：
@@ -93,7 +96,7 @@ R --> O
   - 窗口创建与配置（BrowserWindow），启用 contextIsolation，禁用 nodeIntegration，按需开启 sandbox=false 以便通过 preload 访问文件系统
   - 子进程管理：启动并维护 Tiffa 内核进程（Bun + CLI），JSONL 协议通信，自动重启与 LRU 淘汰
   - IPC 路由：将渲染进程请求转发到对应实例，统一事件分发
-  - **新增**：会话ID迁移、崩溃重启上下文恢复、内存召回功能
+  - **新增**：会话ID迁移、崩溃重启上下文恢复、内存召回功能、WebP图像处理支持
 - 预加载脚本（preload.js）
   - 使用 contextBridge.exposeInMainWorld 暴露最小化 API（tiffaDesktop）
   - 封装 ipcRenderer.invoke/on，屏蔽底层通道名，限制可调用方法
@@ -132,6 +135,7 @@ R->>R : 移除遮罩，显示主界面
 U->>R : 输入消息/触发操作
 R->>P : tiffaDesktop.send(message, images, sessionId)
 P->>M : ipcRenderer.invoke('tiffa : send', ...)
+M->>M : WebP→PNG转换(如需要)
 M->>I : JSONL 写入 stdin (prompt)
 I-->>M : stdout 逐行返回事件(JSONL)
 M-->>R : mainWindow.webContents.send('tiffa : event', event)
@@ -161,6 +165,11 @@ M-->>R : 返回结果或事件
   - 统一 handle('tiffa:*') 通道，转发到对应实例；事件通过 webContents.send('tiffa:event', event) 推送渲染进程
   - 特殊命令拦截（如 /omfg）生成规则提示，增强约束
   - **新增**：memory:recall 通道直接查询 mnemopi SQLite FTS 数据库
+- **新增**：WebP图像处理支持
+  - 在发送消息前自动检测WebP格式图片
+  - 使用Electron内置nativeImage进行格式转换
+  - 转换为PNG格式确保所有模型兼容性
+  - 失败时保留原图并记录警告日志
 
 ```mermaid
 classDiagram
@@ -301,6 +310,41 @@ A --> O
 - [electron/renderer/styles.css:1-200](file://electron/renderer/styles.css#L1-L200)
 - [electron/renderer/themes.js:1-200](file://electron/renderer/themes.js#L1-L200)
 
+### 新增功能：WebP图像处理支持
+- 主进程实现
+  - 在发送消息前检测图片格式，识别WebP格式
+  - 使用Electron内置nativeImage模块进行格式转换
+  - 将WebP转换为PNG格式，确保所有AI模型兼容性
+  - 转换失败时保留原图并记录警告日志
+- 技术细节
+  - 通过Buffer.from(img.data, 'base64')解码Base64图片数据
+  - 使用nativeImage.createFromBuffer创建图像对象
+  - 调用toPNG()方法转换为PNG格式
+  - 重新编码为Base64格式供AI模型使用
+
+```mermaid
+flowchart TD
+User["用户上传WebP图片"] --> Send["发送到主进程"]
+Send --> Detect{"检测图片格式"}
+Detect --> |WebP| Convert["nativeImage转换"]
+Convert --> PNG["转换为PNG格式"]
+PNG --> Encode["Base64编码"]
+Encode --> Model["发送给AI模型"]
+Detect --> |其他格式| Direct["直接发送"]
+Direct --> Model
+Model --> Success["处理成功"]
+Convert --> Error["转换失败"]
+Error --> KeepOriginal["保留原图"]
+KeepOriginal --> Log["记录警告日志"]
+Log --> Model
+```
+
+**图表来源** 
+- [electron/main.js:926-944](file://electron/main.js#L926-L944)
+
+**章节来源**
+- [electron/main.js:926-944](file://electron/main.js#L926-L944)
+
 ### 新增功能：内存召回系统
 - 主进程实现
   - memory:recall IPC 处理器，直接查询 mnemopi SQLite FTS 数据库
@@ -323,11 +367,11 @@ Render --> Display["显示记忆内容、来源、时间等信息"]
 ```
 
 **图表来源** 
-- [electron/main.js:2535-2611](file://electron/main.js#L2535-L2611)
+- [electron/main.js:2577-2653](file://electron/main.js#L2577-L2653)
 - [electron/renderer/app.js:3754-3825](file://electron/renderer/app.js#L3754-L3825)
 
 **章节来源**
-- [electron/main.js:2535-2611](file://electron/main.js#L2535-L2611)
+- [electron/main.js:2577-2653](file://electron/main.js#L2577-L2653)
 - [electron/renderer/app.js:3754-3825](file://electron/renderer/app.js#L3754-L3825)
 
 ### 新增功能：会话ID迁移与环境路径配置
@@ -349,6 +393,25 @@ Render --> Display["显示记忆内容、来源、时间等信息"]
 - [electron/main.js:95-111](file://electron/main.js#L95-L111)
 - [electron/main.js:1687-1841](file://electron/main.js#L1687-L1841)
 - [electron/main.js:1808-1819](file://electron/main.js#L1808-L1819)
+
+### 新增功能：改进的错误处理机制
+- 主进程错误处理
+  - 子进程异常捕获：process.exit事件处理，自动重启机制
+  - IPC调用错误：try-catch包裹所有IPC处理器，返回结构化错误信息
+  - 文件操作错误：路径验证、权限检查、大小限制
+  - 网络请求错误：超时处理、HTTP状态码检查
+- 渲染进程错误处理
+  - 异步操作错误：Promise.catch处理，用户友好提示
+  - DOM操作错误：元素存在性检查，空值保护
+  - 用户输入验证：表单验证，边界条件处理
+- 启动遮罩错误处理
+  - 后端连接超时：20秒超时机制，降级显示
+  - 资源加载失败：备用方案，渐进增强
+
+**章节来源**
+- [electron/main.js:203-234](file://electron/main.js#L203-L234)
+- [electron/main.js:1117-1151](file://electron/main.js#L1117-L1151)
+- [electron/renderer/app.js:496-533](file://electron/renderer/app.js#L496-L533)
 
 ## 依赖关系分析
 - package.json
@@ -389,6 +452,7 @@ Rend --> PreAPI["tiffaDesktop(API)"]
   - 卡住检测与首次响应超时提示，改善用户感知
   - **新增**：启动遮罩防止用户在后端就绪前进行无效操作
 - **新增优化**：内存召回直接查询 SQLite FTS，避免经过内核进程的网络开销
+- **新增优化**：WebP图片转换使用Electron原生模块，无需额外依赖，性能优异
 
 [本节为通用性能讨论，不直接分析具体文件]
 
@@ -405,6 +469,7 @@ Rend --> PreAPI["tiffaDesktop(API)"]
   - 在 preload 中打印 ipcRenderer 调用日志，确认通道名与参数
 - **新增排查**：启动遮罩长时间不消失可能是后端启动失败，检查端口占用或服务状态
 - **新增排查**：内存召回失败检查 Python 环境和 mnemopi 数据库文件完整性
+- **新增排查**：WebP图片转换失败检查Electron版本和图片数据格式
 
 **章节来源**
 - [electron/main.js:1001-1012](file://electron/main.js#L1001-L1012)
@@ -414,7 +479,7 @@ Rend --> PreAPI["tiffaDesktop(API)"]
 ## 结论
 Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进程的职责，通过 contextIsolation 与最小化 API 暴露实现安全通信。主进程集中管理子进程与 IPC，预加载脚本作为可信桥接层，渲染进程专注于 UI 与交互。该设计兼顾安全性与性能，适合初学者理解 Electron 基础，也为高级开发者提供了可扩展的安全与优化空间。
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化，进一步提升了用户体验和系统稳定性。
+**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验，进一步提升了用户体验和系统稳定性。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -435,5 +500,6 @@ Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进�
   - 监控子进程资源占用，及时清理与重启
 - **新增建议**：使用启动遮罩确保后端就绪后再允许用户操作，避免无效请求
 - **新增建议**：利用内存召回功能直接查询 SQLite FTS，提高搜索性能
+- **新增建议**：使用Electron内置nativeImage进行图片处理，避免额外依赖
 
 [本节为通用指导，不直接分析具体文件]

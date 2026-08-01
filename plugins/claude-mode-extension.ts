@@ -146,35 +146,10 @@ export default async function (pi: any) {
   let askTimestamp = 0                          // 最近一次 ask 的时间戳
   let lastSkillRead = ""                        // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
 
-  // ── WebP 白名单：本地推理引擎不解 webp，云端放行 ──
-  // 策略：本地引擎黑名单 + models.yml 手动开关 + 内置云端自动放行
-  const LOCAL_ENGINE_BLACKLIST = new Set(["llama.cpp", "ollama", "ollama-cloud", "lm-studio", "local-server"])
-  let userProviders = new Map<string, boolean>() // models.yml 里的 provider -> supportsWebp
-  let currentModelProvider = ""
-
-  function loadUserProviders(): Map<string, boolean> {
-    const m = new Map<string, boolean>()
-    const p = join(AGENT_DIR, "models.yml")
-    if (!existsSync(p)) return m
-    try {
-      const txt = readFileSync(p, "utf8")
-      let cur = ""
-      for (const line of txt.split("\n")) {
-        const pm = line.match(/^  (\S+):\s*$/) // provider 行（2 空格缩进）
-        if (pm) { cur = pm[1]; m.set(cur, false) }
-        if (/^\s*supportsWebp:\s*true\s*$/i.test(line) && cur) m.set(cur, true)
-      }
-    } catch (e: any) { log("webp_whitelist.load.error", e?.message || String(e)) }
-    return m
-  }
-
-  // webp -> PNG（复用 Bun.Image，与内核 AJ3 同款）
-  async function webpBlockToPng(data: string) {
-    try {
-      const png = await new Bun.Image(Buffer.from(data, "base64")).png().toBase64()
-      return { type: "image" as const, data: png, mimeType: "image/png" }
-    } catch { return null }
-  }
+  // ── WebP 处理：已下放给内核 ──
+  // 本地推理引擎（llama.cpp / local-server 等）在 models.yml 用内核原生 provider 命名，
+  // 内核 modelLacksWebpSupport() 自动命中 -> excludeWebP，覆盖拖拽 + read 两条路径。
+  // 原扩展层白名单已删除（只能罩 tool_result，且拦不住内核回转 webp）。
 
   function isSkillFresh(skill: string): boolean {
     const ts = skillLoadedMap.get(skill)
@@ -206,12 +181,18 @@ export default async function (pi: any) {
       `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
       `comfy.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "comfyui-image-gen", "comfy.py")}`,
     ].join("\n"),
+    "computer-use": [
+      "\n\n---\n[系统注入 · 禁止自行拼接路径]",
+      `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
+      `computer_use.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "computer-use", "computer_use.py")}`,
+    ].join("\n"),
   }
 
   // 技能脚本 -> 对应 skill 名 + 是否必须先问用户
   const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean }> = [
     { pattern: /comfy\.py\b/, skill: "comfyui-image-gen", requireAsk: true },
     { pattern: /craftman\.py\b/, skill: "craftman", requireAsk: true },
+    { pattern: /computer_use\.py\b/, skill: "computer-use", requireAsk: true },
   ]
 
   log("init", [
@@ -248,9 +229,6 @@ export default async function (pi: any) {
   // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用 + 解除标题禁用
   pi.on("session_start", async () => {
     resetSkillState()
-    userProviders = loadUserProviders()
-    const wl = [...userProviders.entries()].filter(([, v]) => v).map(([k]) => k)
-    log("webp_whitelist.loaded", `user providers: ${[...userProviders.keys()].join(",") || "(none)"} | webp-ok: ${wl.join(",") || "(none)"}`)
     await sanitizeTools("session_start")
     // 内核在 rpc-ui/rpc/acp 模式下设置 PI_NO_TITLE=1，完全禁用 AI 标题生成。
     // 桌面端用 rpc-ui 模式，需要标题生成功能，在此解除禁用。
@@ -272,8 +250,6 @@ export default async function (pi: any) {
       agentTurnCount++
       silentToolCallCount = 0
       consecutiveBlockCount = 0
-      const mp = ctx?.model?.provider
-      if (mp) currentModelProvider = mp
       // skill/ask 状态已改为会话级持久+超时重置，不在此处清零。
       // 仅清理过期的 skill 状态（超过 TTL 的条目）
       const now = Date.now()
@@ -577,6 +553,16 @@ export default async function (pi: any) {
             break
           }
         }
+
+        // ── 技能强制：禁止内联 pyautogui/mss/PIL 操控桌面 ──
+        const desktopLibPattern = /\b(pyautogui|import\s+mss|from\s+mss|from\s+PIL|import\s+PIL)\b/
+        if (desktopLibPattern.test(cmd) && !cmd.includes("computer_use.py")) {
+          log("tool_call.blocked", "inline pyautogui/mss detected without computer_use.py")
+          return {
+            block: true,
+            reason: `[claude-mode] 检测到 bash 中内联使用 pyautogui/mss/PIL 操控桌面。禁止自己写 Python 操控桌面代码，必须通过 computer_use.py 脚本执行。正确用法：\`python "<computer_use.py绝对路径>" run "<任务描述>"\``,
+          }
+        }
       }
     } catch (err: any) {
       log("tool_call.error", err?.message || String(err))
@@ -761,31 +747,6 @@ export default async function (pi: any) {
         }
       }
       lastSkillRead = "" // 非技能读取时也清空
-
-      // ── WebP 拦截：非白名单模型的 webp image -> PNG ──
-      // 本地引擎黑名单 / models.yml 未标 supportsWebp 的 provider -> 转 PNG
-      // 不在 models.yml 的 provider（内置云端）-> 自动放行
-      const provider = ctx?.model?.provider || currentModelProvider
-      let shouldConvert = false
-      if (provider) {
-        if (LOCAL_ENGINE_BLACKLIST.has(provider)) shouldConvert = true
-        else if (userProviders.has(provider)) shouldConvert = !userProviders.get(provider)
-        // else: 不在 models.yml = 内置云端 = 放行 webp
-      }
-      if (shouldConvert && Array.isArray(event.content)) {
-        let changed = false
-        const newContent = await Promise.all(event.content.map(async (b: any) => {
-          if (b?.type === "image" && b?.mimeType === "image/webp") {
-            const png = await webpBlockToPng(b.data)
-            if (png) { changed = true; return png }
-          }
-          return b
-        }))
-        if (changed) {
-          log("tool_result.webp2png", `provider=${provider} tool=${tool}`)
-          return { content: newContent }
-        }
-      }
 
       // 检查错误结果是否泄露堆栈/路径
       if (event.isError) {

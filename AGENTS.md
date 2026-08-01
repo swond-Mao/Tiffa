@@ -35,26 +35,35 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 编程助手，�
 
 ## 模型配置
 
-### 云端模型 (models.yml)
+### 模型清单 (models.yml)
 
 | Provider | 模型 | 特点 |
 |----------|------|------|
-| kimi | kimi-k3 | 最新旗舰，262K 上下文，支持推理+视觉 |
-| minimax | MiniMax-M3 | 100 万上下文 |
-| xiaomi | mimo-v2-flash / mimo-v2-pro | 轻量快速 / 旗舰推理 |
-| qwen | localmodel | 本地模型 (llama.cpp，通过 frp 中继) |
+| kimi | kimi-k3 | 最新旗舰，262K 上下文，推理+视觉 |
+| minimax | MiniMax-M3 / MiniMax-M2.7 | 100 万上下文 / 视觉 |
+| xiaomi | mimo-v2.5 / mimo-v2.5-pro | 轻量快速 / 旗舰推理 |
+| volcengine | glm-5.2 | 火山方舟 Coding Plan，102 万上下文 |
+| opencode-zen | 7 个免费模型 | 含 mimo-v2.5-free（视觉） |
+| deepseek | — | 仅配 provider，未列模型 |
+| **llama.cpp** | localmodel | 家用模型**本地直连** `127.0.0.1:11434` |
+| **local-server** | localmodel | 家用模型**远程中继** `47.108.197.247:9876`（frp） |
+
+> **本地 provider 必须用内核约定名，不可自定义**（2026-08-01 改名，原为 `qwen` / `qwen-remote`）：
+> - 名字命中内核 `modelLacksWebpSupport()` 白名单 → `excludeWebP: true`，拖拽与 `read` 两条路径都不会被编码成 WebP，避免 llama.cpp（stb_image 无 libwebp）静默崩。
+> - 远程中继特意选 `local-server` 而非 `llama.cpp` 系：`append-only-context-mode.ts` 的 `LOCAL_INFERENCE_PROVIDERS` 不含 `local-server`，避免凭空打开 append-only 上下文。本地直连因 loopback 判定本就开着，改名后行为不变。
+> - 两者 `supportsTools` 必须都为 `true`：标 `false` 会让内核 `resolveDialect()` 从原生 function calling 退化成 GLM in-band 文本协议。
 
 ### 模型角色 (config.yml)
 
 | 角色 | 模型 | 说明 |
 |------|------|------|
-| default | home-models/Qwen3.6-27B | 默认任务 |
-| smol | home-models/Qwen3.6-27B | 轻量任务 |
+| default | llama.cpp/localmodel | 默认任务 |
+| smol | llama.cpp/localmodel | 轻量任务 |
 | slow | kimi/kimi-k3 | 深度推理 |
 | plan | kimi/kimi-k3 | 规划 |
 | vision | kimi/kimi-k3 | 视觉理解 |
-| commit | home-models/Qwen3.6-27B | 代码提交 |
-| tiny | xiaomi/mimo-v2-flash | 最小模型 |
+| commit | llama.cpp/localmodel | 代码提交 |
+| tiny | xiaomi/mimo-v2.5 | 最小模型 |
 
 ---
 

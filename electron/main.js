@@ -27,6 +27,7 @@ const PORTABLE_ROOT = global.PORTABLE_ROOT;
 const BUN_EXE = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin', 'bun.exe');
 const TIFFA_CLI = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
 const EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'claude-mode-extension.ts');
+const COMPUTER_USE_EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'computer-use-extension.ts');
 const DEFAULT_WORKSPACE_DIR = path.join(PORTABLE_ROOT, 'workspace');
 let currentWorkspaceDir = DEFAULT_WORKSPACE_DIR;
 
@@ -53,6 +54,33 @@ function _extractSessionIdFromPath(sessionPath) {
   const match = String(sessionPath).match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
   return match ? match[1] : null;
 }
+// 删除/归档会话前关闭持有该会话文件的实例。
+// 根因：实例内存持有 session 状态，只删 jsonl 不关实例时，内核后续任何写盘
+// （agent_end flush / switch_session / 消息追加）都会把文件"复活"，历史面板残留记录；
+// 且实例持有的文件句柄会导致 Windows unlink/rename EBUSY。
+function _closeInstancesForSessionFile(sessionPath) {
+  const resolved = path.resolve(sessionPath);
+  const norm = resolved.toLowerCase();
+  const targetSessionId = _extractSessionIdFromPath(resolved);
+  const keysToClose = [];
+  for (const [key, inst] of tiffaManager.instances) {
+    const sf = inst.sessionFilePath;
+    const matchByPath = sf && path.resolve(sf).toLowerCase() === norm;
+    const matchById = targetSessionId && inst.sessionId === targetSessionId;
+    if (matchByPath || matchById) keysToClose.push(key);
+  }
+  for (const key of keysToClose) {
+    const inst = tiffaManager.instances.get(key);
+    console.log(`[sessions] 关闭会话实例: ${key}`);
+    if (inst) inst.kill(true); // userKilled=true 防自动重启 + 同步树杀
+    tiffaManager.instances.delete(key);
+    if (tiffaManager.activeKey === key) {
+      tiffaManager.activeKey = null;
+      tiffaManager.activeCwd = null;
+    }
+  }
+}
+
 // ── 会话目录名编码：cwd -> session 目录名（与内核 cli.js WR5/d46 编码一致） ──
 // G:\Tiffa\workspace\Tiffa开发 -> --G--Tiffa-workspace-Tiffa开发--
 function _encodeSessionDirName(cwdPath) {
@@ -166,7 +194,7 @@ class TiffaInstance {
     delete env.NODE_OPTIONS;
     delete env.ELECTRON_RUN_AS_NODE;
 
-    const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH];
+    const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH, '-e', COMPUTER_USE_EXTENSION_PATH];
 
     console.log(`[TiffaInstance] Starting Tiffa cwd=${this.cwd}`, BUN_EXE, args.join(' '));
 
@@ -784,11 +812,14 @@ const tiffaManager = new TiffaInstanceManager();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1600,
+    height: 1000,
+    // 最小尺寸足够大：左侧项目栏 180px 固定 + 右侧 minimap + 聊天区，
+    // 缩小到最小也不挤压内容、不露出背景边框
+    minWidth: 1100,
+    minHeight: 720,
     title: 'Tiffa',
+    icon: path.join(__dirname, 'assets', 'tiffa-icon.ico'),
     backgroundColor: '#1a1a2e',
     show: false,
     webPreferences: {
@@ -925,7 +956,6 @@ function setupIpc() {
     const frame = { type: 'prompt', message };
     if (images && images.length > 0) {
       // WebP → PNG：本地 llama.cpp 不解 webp，统一转 PNG 确保所有模型兼容
-      // 使用 Electron 内置 nativeImage，无需额外依赖
       const { nativeImage } = require('electron');
       frame.images = images.map(img => {
         if (img.mimeType === 'image/webp') {
@@ -2366,13 +2396,16 @@ function setupIpc() {
     }
   });
 
-  // ── 单会话归档：移动 jsonl 到归档目录 ──
+  // ── 单会话归档：关闭实例 + 移动 jsonl 到归档目录 ──
   ipcMain.handle('sessions:archiveSession', async (event, sessionPath) => {
     try {
       const resolved = path.resolve(sessionPath);
       if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) {
         return { error: 'Session file not found' };
       }
+      // 先关闭实例，防止内核后续写盘在归档后的原路径重建文件
+      _closeInstancesForSessionFile(resolved);
+      await new Promise(r => setTimeout(r, 300));
       // 从文件路径反推项目 dirName
       const sessionDir = path.dirname(resolved);
       const dirName = path.basename(sessionDir);
@@ -2393,14 +2426,20 @@ function setupIpc() {
     }
   });
 
-  // ── 单会话删除：物理删除 jsonl 文件 ──
+  // ── 单会话删除：关闭实例 + 物理删除 jsonl 文件（幂等） ──
   ipcMain.handle('sessions:deleteSession', async (event, sessionPath) => {
     try {
       const resolved = path.resolve(sessionPath);
-      if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) {
+      if (!resolved.endsWith('.jsonl')) {
         return { error: 'Session file not found' };
       }
-      fs.unlinkSync(resolved);
+      // 先关闭持有该会话的实例：防内核写盘复活文件 + 释放文件句柄（Windows unlink EBUSY）
+      _closeInstancesForSessionFile(resolved);
+      await new Promise(r => setTimeout(r, 300));
+      if (fs.existsSync(resolved)) {
+        fs.unlinkSync(resolved);
+      }
+      // 幂等：文件已不存在也视为删除成功（目标就是删掉它），仅路径非法/IO 错误才报错
       return { success: true };
     } catch (err) {
       return { error: err.message };

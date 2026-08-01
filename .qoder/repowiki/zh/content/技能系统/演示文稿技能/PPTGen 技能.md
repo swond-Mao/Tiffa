@@ -15,6 +15,14 @@
 - [test_dark_tech.html](file://skills/pptgen/test_dark_tech.html)
 </cite>
 
+## 更新摘要
+**已进行的更改**   
+- 修复了输出目录配置，将默认输出路径从技能安装目录改为用户当前工作目录（`os.getcwd()/output`）
+- 修复了内容布局渲染问题，正确包裹card结构的inner div容器
+- 新增缓存模式支持现有图片路径，图像处理逻辑现在同时支持prompt生成和直接路径引用
+- 包含对不同输入格式（包括带path属性的字典对象）的正确回退机制
+- 更新了相关文档说明，确保用户了解生成的演示文稿保存位置
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -28,7 +36,9 @@
 10. [附录：模板与样式定制指南](#附录模板与样式定制指南)
 
 ## 简介
-PPTGen 是一个基于 HTML/CSS 模板的演示文稿生成引擎。它通过 Python CLI 工具将自然语言需求转化为交互式 HTML 演示，支持本地 LLM 内容生成、ComfyUI 图片生成、以及多套视觉主题模板渲染。输出为可直接在浏览器打开的 HTML 文件，具备键盘翻页、全屏、进度指示等交互能力。该技能强调“零 API 费用”的本地化工作流，适合快速产出高质量、可定制的网页式演示。
+PPTGen 是一个基于 HTML/CSS 模板的演示文稿生成引擎。它通过 Python CLI 工具将自然语言需求转化为交互式 HTML 演示，支持本地 LLM 内容生成、ComfyUI 图片生成、以及多套视觉主题模板渲染。输出为可直接在浏览器打开的 HTML 文件，具备键盘翻页、全屏、进度指示等交互能力。该技能强调"零 API 费用"的本地化工作流，适合快速产出高质量、可定制的网页式演示。
+
+**重要更新**：输出目录已优化为默认保存到当前项目目录（`./output/`），而非技能安装目录，便于用户管理和访问生成的演示文稿。同时增强了图像处理逻辑，支持多种输入格式和缓存模式。
 
 ## 项目结构
 - 入口脚本：pptgen.py（CLI 主程序）
@@ -48,7 +58,7 @@ D --> F["遍历slides<br/>按需调用 ComfyUI 生图"]
 E --> F
 F --> G["渲染每页HTML片段"]
 G --> H["选择主题模板<br/>替换占位符"]
-H --> I["写入最终HTML到output"]
+H --> I["写入最终HTML到./output/"]
 ```
 
 图表来源 
@@ -73,7 +83,7 @@ H --> I["写入最终HTML到output"]
   - LLM 端点/模型、ComfyUI 脚本路径与输出目录、默认输出目录
 
 章节来源
-- [pptgen.py:1-592](file://skills/pptgen/pptgen.py#L1-L592)
+- [pptgen.py:1-618](file://skills/pptgen/pptgen.py#L1-L618)
 - [gen_themes.py:1-265](file://skills/pptgen/gen_themes.py#L1-L265)
 - [tokens.json:1-425](file://skills/pptgen/tokens.json#L1-L425)
 - [config.yaml:1-13](file://skills/pptgen/config.yaml#L1-L13)
@@ -93,7 +103,7 @@ participant LLM as "本地LLM服务"
 participant CFG as "config.yaml"
 participant COMFY as "ComfyUI脚本"
 participant TPL as "主题模板"
-participant OUT as "输出HTML"
+participant OUT as "./output/"
 U->>CLI : 执行命令(提示词+参数)
 CLI->>CFG : 加载配置
 alt 未跳过LLM
@@ -133,7 +143,13 @@ CLI-->>U : 输出文件路径
 - 模板装配
   - 加载 templates/{style}.html，替换 {TITLE}/{SUBTITLE}/{AUTHOR}/{STYLE_NAME}/{SLIDES}，并在 </head> 前注入钻取面板 CSS。
 - 输出
-  - 自动创建 output 目录，文件名基于 title 安全化处理。
+  - **已更新**：自动创建 `./output/` 目录（当前项目目录），文件名基于 title 安全化处理。
+
+**重大更新**：输出目录配置已修复，现在默认保存到当前工作目录的 `./output/` 文件夹，而不是技能安装目录。同时增强了图像处理逻辑，支持多种输入格式：
+- 字符串路径：直接使用现有图片路径
+- 字典对象：支持 `{"path": "..."}` 格式的现有图片引用
+- Prompt生成：传统的 `{"prompt": "...", "style": "..."}` 格式
+- 智能回退：当图片生成失败时，自动回退到现有图片路径
 
 ```mermaid
 flowchart TD
@@ -147,13 +163,21 @@ ReadCache --> ValidateSlides
 ValidateSlides -- 否 --> ExitErr["报错退出"]
 ValidateSlides -- 是 --> GenImages{"是否需要生图?"}
 GenImages -- 否 --> RenderSlides["渲染幻灯片HTML"]
-GenImages -- 是 --> ComfyCall["调用ComfyUI生图"]
-ComfyCall --> CopyImg["复制图片至输出目录"]
+GenImages -- 是 --> ImageType{"检查图片格式"}
+ImageType --> StringPath{"字符串路径?"}
+StringPath -- 是 --> UseExisting["使用现有图片路径"]
+StringPath -- 否 --> DictPath{"字典对象?"}
+DictPath -- 是 --> HasPath{"有path属性?"}
+HasPath -- 是 --> UseExisting
+HasPath -- 否 --> PromptGen["调用ComfyUI生成图片"]
+DictPath -- 否 --> PromptGen
+PromptGen --> CopyImg["复制图片至./output/"]
+UseExisting --> CopyImg
 CopyImg --> RenderSlides
 RenderSlides --> PickStyle{"--style覆盖? 否则用LLM推荐"}
 PickStyle --> LoadTpl["加载主题模板"]
 LoadTpl --> Replace["替换占位符+注入CSS"]
-Replace --> WriteOut["写入HTML文件"]
+Replace --> WriteOut["写入./output/HTML文件"]
 WriteOut --> End(["结束"])
 ```
 
@@ -164,7 +188,7 @@ WriteOut --> End(["结束"])
 - [pptgen.py:415-443](file://skills/pptgen/pptgen.py#L415-L443)
 
 章节来源
-- [pptgen.py:1-592](file://skills/pptgen/pptgen.py#L1-L592)
+- [pptgen.py:1-618](file://skills/pptgen/pptgen.py#L1-L618)
 
 ### 主题生成器（gen_themes.py）
 - 功能
@@ -213,6 +237,8 @@ ThemeGenerator --> Tokens : "读取并渲染"
   - .slide-cover/.slide-section/.slide-content/.slide-side/.slide-2col/.slide-quote/.slide-data/.slide-image-full
 - 交互脚本
   - 维护当前索引 c，切换 active 类实现淡入淡出；构建进度点；监听键盘事件；支持全屏。
+
+**布局渲染修复**：现在所有布局都正确包裹在 `.inner` div 容器中，确保内容布局和样式的一致性。特别是 card 结构的 inner div 容器修复，提升了渲染质量。
 
 ```mermaid
 graph LR
@@ -279,7 +305,7 @@ P --> CFY["comfy.py (ComfyUI)"]
 - [pptgen.py:176-202](file://skills/pptgen/pptgen.py#L176-L202)
 
 章节来源
-- [pptgen.py:1-592](file://skills/pptgen/pptgen.py#L1-L592)
+- [pptgen.py:1-618](file://skills/pptgen/pptgen.py#L1-L618)
 
 ## 性能与扩展性
 - 性能特征
@@ -293,8 +319,6 @@ P --> CFY["comfy.py (ComfyUI)"]
   - 新增布局：在 render_slide 中添加新 layout 分支，并在模板 CSS 中补充样式。
   - 自定义细节：detail 支持 table/card/text/bar，可扩展更多类型。
 
-[本节为通用指导，不直接分析具体文件]
-
 ## 故障排查指南
 - LLM 未配置或返回空
   - 检查 config.yaml 的 llm.endpoint 与 model，或设置环境变量 LLM_ENDPOINT/LLM_MODEL。
@@ -306,6 +330,17 @@ P --> CFY["comfy.py (ComfyUI)"]
   - 确保 templates 目录下存在对应主题的 HTML 文件；未知 --style 会回退到 magazine。
 - 输出为空或损坏
   - 检查 slides 是否为空；确认输出目录权限；确认占位符替换成功。
+- **输出目录问题（已修复）**
+  - **更新**：默认输出目录现在是 `./output/`（当前项目目录），而不是技能安装目录。
+  - 如果遇到问题，检查当前工作目录是否有写入权限。
+  - 可以使用 `--output` 参数指定自定义输出路径。
+- **图像处理问题（已增强）**
+  - **更新**：现在支持多种图片输入格式：
+    - 字符串路径：直接使用现有图片
+    - 字典对象：`{"path": "..."}` 格式的现有图片引用
+    - Prompt生成：传统的 `{"prompt": "...", "style": "..."}` 格式
+  - 当图片生成失败时，会自动回退到现有图片路径。
+  - 检查缓存模式下图片路径的正确性。
 
 章节来源
 - [pptgen.py:102-171](file://skills/pptgen/pptgen.py#L102-L171)
@@ -314,9 +349,9 @@ P --> CFY["comfy.py (ComfyUI)"]
 - [pptgen.py:448-591](file://skills/pptgen/pptgen.py#L448-L591)
 
 ## 结论
-PPTGen 以“本地 LLM + ComfyUI + HTML 模板”为核心，提供从零到一的交互式演示生成能力。其模块化设计使得主题扩展、布局增强、内容注入均具备良好可维护性。配合 tokens.json 的设计令牌与 gen_themes.py 的代码生成，能够快速迭代视觉风格，满足多样化场景需求。
+PPTGen 以"本地 LLM + ComfyUI + HTML 模板"为核心，提供从零到一的交互式演示生成能力。其模块化设计使得主题扩展、布局增强、内容注入均具备良好可维护性。配合 tokens.json 的设计令牌与 gen_themes.py 的代码生成，能够快速迭代视觉风格，满足多样化场景需求。
 
-[本节为总结，不直接分析具体文件]
+**重要改进**：输出目录配置已优化，现在默认保存到用户当前工作目录的 `./output/` 文件夹，大大提升了用户体验和文件管理便利性。同时增强了图像处理逻辑，支持多种输入格式和智能回退机制，提高了系统的健壮性和易用性。
 
 ## 附录：模板与样式定制指南
 
@@ -365,6 +400,8 @@ PPTGen 以“本地 LLM + ComfyUI + HTML 模板”为核心，提供从零到一
 - 为每张配图提供清晰的 prompt，并在 style_options 中给出理由，提升生成质量。
 - 新增布局时，同步完善模板 CSS 与渲染逻辑，保证一致性。
 - 使用 tokens.json 管理主题，避免硬编码样式。
-- 输出目录与 ComfyUI 输出目录需具备写入权限。
+- **输出目录管理**：生成的演示文稿默认保存在 `./output/` 目录，确保该目录有写入权限。
+- **文件组织**：建议在项目根目录创建 `output/` 文件夹来统一管理所有生成的演示文稿。
+- **图片处理**：充分利用新的图片处理功能，支持现有图片路径引用和智能回退机制。
 
 [本节为通用指导，不直接分析具体文件]

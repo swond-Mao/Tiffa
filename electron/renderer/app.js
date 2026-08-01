@@ -338,6 +338,8 @@ const minimap = {
     msgs.style.scrollBehavior = 'auto';
     msgs.scrollTop = ratio * (msgs.scrollHeight - msgs.clientHeight);
     msgs.style.scrollBehavior = prev;
+    // 拖 minimap 也是用户主动定位 -> 交出跟随权（拖到底时 scroll 监听会自动恢复）
+    followScroll.detach();
   },
 
   draw() {
@@ -386,10 +388,145 @@ const minimap = {
   },
 };
 
+// ── 自适应滚动跟随 ──
+// 三态行为：
+//   1) 默认粘底，视窗跟着流式输出往下走；
+//   2) 用户一旦主动上滚（滚轮/滚动条/minimap/键盘/触摸）立刻交出控制权，视窗听用户的；
+//   3) 滚回底部 或 点「回到底部」按钮 恢复跟随；每次发送新消息无条件复位为跟随。
+//
+// 恢复阈值取"严格到底"（RESUME_EPS）而非宽松的 nearBottom：
+// 否则用户往上滚一点点就会被 scroll 事件判定成"还在底部"而立即拉回，导致滚不动。
+const followScroll = {
+  follow: true,
+  btn: null,
+  pending: false,
+  RESUME_EPS: 4, // 距底 <= 4px 视为已到底（留出缩放产生的小数误差）
+  BTN_SHOW: 80,  // 距底 > 80px 且已脱离跟随时才显示按钮
+
+  init() {
+    const el = dom.messages;
+    const panel = document.getElementById('chatPanel');
+    if (!el || !panel) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'scrollToBottomBtn';
+    btn.type = 'button';
+    btn.title = '回到最新消息';
+    btn.setAttribute('aria-label', '回到最新消息');
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+    btn.addEventListener('click', () => this.attach());
+    panel.appendChild(btn);
+    this.btn = btn;
+
+    // ── 用户主动滚动意图 -> 脱离跟随 ──
+    // 只认"向上"，向下不处理：滚到底时下面的 scroll 监听会自动恢复
+    el.addEventListener('wheel', (e) => { if (e.deltaY < 0) this.detach(); }, { passive: true });
+    // 点在原生滚动条区域（内容宽度之外）= 拖动/点击滚动条
+    el.addEventListener('mousedown', (e) => { if (e.offsetX > el.clientWidth) this.detach(); });
+    // 触摸：手指下滑 = 看上文
+    let touchY = 0;
+    el.addEventListener('touchstart', (e) => { touchY = e.touches[0] ? e.touches[0].clientY : 0; }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      const y = e.touches[0] ? e.touches[0].clientY : 0;
+      if (y > touchY + 2) this.detach();
+      touchY = y;
+    }, { passive: true });
+    // 键盘翻页（messages 不可聚焦，须挂 document；输入框内的按键不算）
+    document.addEventListener('keydown', (e) => {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (e.key === 'PageUp' || e.key === 'ArrowUp' || e.key === 'Home') this.detach();
+    });
+
+    // 滚动：到底则自动恢复跟随，同时刷新按钮显隐
+    el.addEventListener('scroll', () => {
+      if (this.distance() <= this.RESUME_EPS) this.follow = true;
+      this.updateBtn();
+    }, { passive: true });
+
+    // 内容变化（流式追加、工具卡展开、diff 渲染）-> 跟随
+    new MutationObserver(() => this.schedule()).observe(el, {
+      childList: true, subtree: true, characterData: true,
+    });
+    // 图片等媒体加载完成会撑高内容，load 不冒泡，用捕获阶段兜底
+    el.addEventListener('load', () => this.schedule(), true);
+    // 容器尺寸变化（输入框变高、侧边栏折叠）-> 同步按钮位置并重新贴底
+    new ResizeObserver(() => { this.syncPos(); this.schedule(); }).observe(el);
+
+    this.syncPos();
+    this.updateBtn();
+  },
+
+  distance() {
+    const el = dom.messages;
+    return el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
+  },
+
+  // rAF 节流：流式每个 token 都会触发，合并到每帧一次
+  schedule() {
+    if (this.pending) return;
+    this.pending = true;
+    requestAnimationFrame(() => { this.pending = false; this.tick(); });
+  },
+
+  tick() {
+    if (this.follow) this.jumpToBottom();
+    this.updateBtn();
+  },
+
+  // 程序滚动一律 instant：CSS 的 scroll-behavior:smooth 在流式高频写 scrollTop 时
+  // 会被反复打断，实际位置永远追不上疯长的 scrollHeight，跟随随即失效
+  jumpToBottom() {
+    const el = dom.messages;
+    if (!el) return;
+    const prev = el.style.scrollBehavior;
+    el.style.scrollBehavior = 'auto';
+    el.scrollTop = el.scrollHeight;
+    el.style.scrollBehavior = prev;
+  },
+
+  detach() {
+    if (!this.follow) return;
+    this.follow = false;
+    this.updateBtn();
+  },
+
+  // 回到底部并恢复跟随（按钮点击 / 强制场景）
+  attach() {
+    this.follow = true;
+    this.jumpToBottom();
+    this.updateBtn();
+  },
+
+  // 新一轮对话：无条件复位为默认跟随
+  reset() { this.attach(); },
+
+  // 切换会话/恢复历史位置后：停在底部才继续跟随，否则保持用户视角
+  sync() {
+    this.follow = this.distance() <= this.RESUME_EPS;
+    this.updateBtn();
+  },
+
+  updateBtn() {
+    if (!this.btn) return;
+    const far = this.distance() > this.BTN_SHOW;
+    this.btn.classList.toggle('visible', !this.follow && far);
+    // 脱离期间仍在生成 -> 提示有新内容
+    this.btn.classList.toggle('has-new', !this.follow && far && !!state.agentRunning);
+  },
+
+  syncPos() {
+    const el = dom.messages;
+    if (!this.btn || !el) return;
+    this.btn.style.top = (el.offsetTop + el.clientHeight - 46) + 'px';
+  },
+};
+
 // ── Initialize ──
 async function init() {
   state.workspacePath = await tiffaDesktop.getWorkspacePath();
   minimap.init();
+  followScroll.init();
 
   // 拦截本地文件路径链接点击，用 shell.openPath 打开
   dom.messages.addEventListener('click', (e) => {
@@ -1403,6 +1540,7 @@ async function selectProject(dirName) {
       if (cached) {
         dom.messages.innerHTML = cached.html;
         dom.messages.scrollTop = cached.scrollPos;
+        followScroll.sync(); // 恢复到历史位置：非底部则不跟随，避免被自动拉到底
         dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
         enhanceCodeBlocks(dom.messages);
         lazyHighlightCodeBlocks(dom.messages);
@@ -1474,6 +1612,20 @@ async function selectProject(dirName) {
       showWelcome();
     }
   }
+}
+
+// 删除/归档对话后统一清理该会话在前端的所有内存状态：
+// sessionModelMap（持久化）、agentRunning、消息缓存、活跃 tab、openTabs（localStorage）。
+// 不清理实例（main.js 的 _closeInstancesForSessionFile 负责），这里只管前端状态。
+function cleanupSessionMemory(sessionPath) {
+  if (state.sessionModelMap[sessionPath]) {
+    delete state.sessionModelMap[sessionPath];
+    saveModelMap();
+  }
+  state.sessionAgentRunning.delete(sessionPath);
+  state.sessionMessageCache.delete(sessionPath);
+  state.activeSessionPaths.delete(sessionPath);
+  saveOpenTabs();
 }
 
 async function loadSessions(dirName) {
@@ -1623,7 +1775,7 @@ function renderHistoryPanel() {
         const result = await tiffaDesktop.archiveSession(sessionPath);
         if (result.success) {
           addNotice('info', '对话已归档');
-          state.activeSessionPaths.delete(sessionPath);
+          cleanupSessionMemory(sessionPath);
           if (state.activeSessionPath === sessionPath) {
             state.activeSessionPath = null;
             const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
@@ -1653,7 +1805,7 @@ function renderHistoryPanel() {
         const result = await tiffaDesktop.deleteSession(sessionPath);
         if (result.success) {
           addNotice('info', '对话已删除');
-          state.activeSessionPaths.delete(sessionPath);
+          cleanupSessionMemory(sessionPath);
           // 如果删除的是当前活跃对话，切换到其他对话或欢迎页
           if (state.activeSessionPath === sessionPath) {
             state.activeSessionPath = null;
@@ -1969,6 +2121,7 @@ async function switchToSession(sessionPath) {
       if (cachedNew) {
         dom.messages.innerHTML = cachedNew.html;
         dom.messages.scrollTop = cachedNew.scrollPos;
+        followScroll.sync();
         dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
         enhanceCodeBlocks(dom.messages);
         lazyHighlightCodeBlocks(dom.messages);
@@ -2021,6 +2174,7 @@ async function switchToSession(sessionPath) {
         setTimeout(() => {
           dom.messages.innerHTML = cached.html;
           dom.messages.scrollTop = cached.scrollPos;
+          followScroll.sync();
           dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
           enhanceCodeBlocks(dom.messages);
           lazyHighlightCodeBlocks(dom.messages);
@@ -2028,6 +2182,7 @@ async function switchToSession(sessionPath) {
       } else {
         dom.messages.innerHTML = cached.html;
         dom.messages.scrollTop = cached.scrollPos;
+        followScroll.sync();
         dom.messages.querySelectorAll('pre').forEach(pre => { pre.dataset.enhanced = ''; });
         enhanceCodeBlocks(dom.messages);
         lazyHighlightCodeBlocks(dom.messages);
@@ -3276,7 +3431,8 @@ async function sendMessage() {
   // AI 重命名模式下不渲染用户消息（隐藏 prompt）
   if (!state.aiRenameMode) {
     dom.messages.appendChild(createMessageElement('user', message));
-    scrollToBottom();
+    // 新一轮对话开始：无条件复位为跟随，哪怕上一轮用户翻到了上面
+    followScroll.reset();
   }
   state.agentRunning = true;
   state.sessionAgentRunning.set(state.activeSessionPath, true);
@@ -4016,7 +4172,7 @@ async function archiveSessionFromTab(session) {
   const result = await tiffaDesktop.archiveSession(session.path);
   if (result.success) {
     addNotice('info', '对话已归档');
-    state.activeSessionPaths.delete(session.path);
+    cleanupSessionMemory(session.path);
     if (state.activeSessionPath === session.path) {
       state.activeSessionPath = null;
       const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
@@ -4041,7 +4197,7 @@ async function deleteSessionFromTab(session) {
   const result = await tiffaDesktop.deleteSession(session.path);
   if (result.success) {
     addNotice('info', '对话已删除');
-    state.activeSessionPaths.delete(session.path);
+    cleanupSessionMemory(session.path);
     if (state.activeSessionPath === session.path) {
       state.activeSessionPath = null;
       const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
@@ -4284,12 +4440,11 @@ function relTime(dateStr) {
 }
 
 function scrollToBottom(force = false) {
-  requestAnimationFrame(() => {
-    // 粘底滚动：仅在用户已接近底部时自动滚动，不抢用户翻页；force 用于历史加载等必须到底的场景
-    const el = dom.messages;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (force || nearBottom) el.scrollTop = el.scrollHeight;
-  });
+  // 统一委派给自适应跟随控制器（见 followScroll）：
+  // force=true 用于历史加载等必须到底的场景，强制到底并恢复跟随；
+  // 否则只在"仍处于跟随态"时贴底，绝不抢用户正在翻阅的视窗。
+  if (force) followScroll.attach();
+  else followScroll.schedule();
 }
 const path = {
   basename: (p) => (p || '').split(/[\\/]/).pop(),
@@ -4987,12 +5142,34 @@ function createProviderCard(provKey, provVal) {
     // 清理白名单中该供应商的孤儿 key
     if (enabledModels && enabledModels.some(k => k.startsWith(`${provKey}/`))) {
       enabledModels = enabledModels.filter(k => !k.startsWith(`${provKey}/`));
-      if (enabledModels.length === 0) enabledModels = undefined;
+      if (enabledModels.length === 0) {
+        enabledModels = undefined;
+      } else {
+        // 孤儿检测：剩余 key 的 provider 若都不在 models.yml 中 → 白名单整体失效，恢复全部显示
+        const aliveProviders = new Set(Object.keys(modelsConfigData.providers || {}));
+        const allOrphan = enabledModels.every(k => {
+          const prov = k.split('/')[0];
+          return prov && !aliveProviders.has(prov);
+        });
+        if (allOrphan) enabledModels = undefined;
+      }
       await saveEnabledModels();
+    } else if (enabledModels && enabledModels.length > 0) {
+      // 白名单中虽无该供应商 key，但若白名单整体已孤儿化（provider 全部不在 models.yml）→ 恢复全部显示
+      const aliveProviders = new Set(Object.keys(modelsConfigData.providers || {}));
+      const allOrphan = enabledModels.every(k => {
+        const prov = k.split('/')[0];
+        return prov && !aliveProviders.has(prov);
+      });
+      if (allOrphan) {
+        enabledModels = undefined;
+        await saveEnabledModels();
+      }
     }
     delete modelsConfigData.providers[provKey];
     card.remove();
     addNotice('success', `已删除供应商 ${provKey}`);
+    applyModelsConfigChange();
   });
   body.appendChild(delBtn);
   body.appendChild(createConfigField('baseUrl', 'API 地址', provVal.baseUrl || '', 'https://api.example.com/v1'));
@@ -5052,6 +5229,7 @@ function createProviderCard(provKey, provVal) {
       await saveModelConfig();
       document.getElementById('modelConfig').innerHTML = ''; renderModelConfig();
       addNotice('success', `已添加 ${toAdd.length} 个模型到 ${provKey}`);
+      applyModelsConfigChange();
     });
     confirmRow.appendChild(confirmAddBtn); fetchListDiv.appendChild(confirmRow);
   });
@@ -5105,6 +5283,7 @@ function addModelDialog(provKey, onDone) {
     close();
     onDone();
     await saveModelConfig();
+    applyModelsConfigChange();
   };
 
   box.querySelector('#dlgOk').addEventListener('click', submit);
@@ -5478,31 +5657,31 @@ function addProviderUI() {
     try {
       const result = await tiffaDesktop.writeTiffaProvider(pid.trim(), cfg);
       if (result.error) { addNotice('error', '写入失败: ' + result.error); return; }
-      // 手动 ID 直接入白名单
+      // 手动 ID 直接入白名单（仅当白名单已激活时合并；未配置时保持 undefined=全部显示，
+      // 避免添加供应商把列表意外收窄为只含新供应商 —— 全部显示由 models.yml 过滤兜底）
       const ids = manualIds.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
-      if (ids.length > 0) {
+      if (ids.length > 0 && enabledModels !== undefined) {
         const keys = ids.map(id => `${pid.trim()}/${id}`);
-        if (enabledModels !== undefined) {
-          enabledModels = [...new Set([...enabledModels, ...keys])];
-        } else {
-          enabledModels = keys;
-        }
+        enabledModels = [...new Set([...enabledModels, ...keys])];
         await saveEnabledModels();
       }
       addNotice('success', `供应商 ${pid} 已保存`);
       close();
       loadModelConfig();
       loadModelSwitcherList();
+      applyModelsConfigChange();
     } catch (e) { addNotice('error', '保存失败: ' + e.message); }
   }
 
   function pollModels(providerId, attempt = 0) {
     polling = true;
-    tiffaDesktop.getModels().then(result => {
-      const list = (result && result.models ? result.models : []).filter(m => m.provider === providerId);
-      if (list.length > 0) {
-        discovered = list;
-        checked = new Set(list.map(m => `${m.provider}/${m.id}`));
+    // 直接对端点做 ${baseUrl}/models 探测（与「从服务器拉取模型」按钮一致），
+    // 不依赖运行实例的模型注册表 —— 实例只在启动时读 models.yml，
+    // 刚写入的新供应商不会出现在 getModels() 里，导致「拉取失败」。
+    tiffaDesktop.fetchProviderModels(baseUrl.trim(), apiKey.trim()).then(result => {
+      if (!result.error && result.models && result.models.length > 0) {
+        discovered = result.models.map(m => ({ provider: providerId, id: m.id, name: m.name || m.id }));
+        checked = new Set(discovered.map(m => `${m.provider}/${m.id}`));
         polling = false;
         render();
       } else if (attempt < 6) {
@@ -5623,14 +5802,29 @@ function addProviderUI() {
         ...enabledModels.filter(k => !k.startsWith(providerPrefix)),
         ...allKeys,
       ])];
+      await saveEnabledModels();
     } else {
-      enabledModels = allKeys.length > 0 ? allKeys : undefined;
+      // enabledModels === undefined（未配置白名单=全部显示）：不激活白名单，
+      // 避免添加供应商把模型下拉意外收窄为只含新供应商；全部显示由 models.yml 过滤兜底。
+      // 落盘空数组以清除历史残留（loadEnabledModels 视空数组为未配置）。
+      await saveEnabledModels();
     }
-    await saveEnabledModels();
+
+    // 把选中的模型写入 models.yml —— 仅写白名单不够：白名单只过滤显示，
+    // 内核注册表只认 models.yml 里的 provider.models，不写进去重启后仍选不到。
+    const selectedIds = allKeys.map(k => k.split('/').slice(1).join('/'));
+    if (selectedIds.length > 0) {
+      const cfg = buildConfig();
+      cfg.models = selectedIds.map(id => ({ id, input: vision ? ['text', 'image'] : ['text'] }));
+      try { await tiffaDesktop.writeTiffaProvider(pid.trim(), cfg); }
+      catch (e) { addNotice('error', '写入模型失败: ' + e.message); }
+    }
+
     addNotice('success', `已保存 ${pid.trim()} 的模型白名单`);
     close();
     loadModelConfig();
     loadModelSwitcherList();
+    applyModelsConfigChange();
   }
 
   render();
@@ -5657,6 +5851,26 @@ async function saveModelConfig() {
     else { if (s) { s.textContent = '保存失败: ' + (result.error || ''); s.className = 'config-status error'; } }
   } catch (err) { if (s) { s.textContent = '保存失败: ' + err.message; s.className = 'config-status error'; } }
   setTimeout(() => { if (s) s.textContent = ''; }, 8000);
+}
+
+// 写入 models.yml 后让运行中的内核实例重新加载模型配置。
+// 内核只在实例启动时读 models.yml；UI 写入后必须重启实例，新供应商/模型
+// 才会进入 getModels()（决定模型切换器分组与实际能否选中该模型）。
+// agent 正在运行时不强行重启（避免中断任务），配置在下次重启/新对话时生效。
+async function applyModelsConfigChange() {
+  if (state.agentRunning) {
+    addNotice('info', '模型配置已保存，将在重启 / 新对话后生效（也可点「重启」立即生效）');
+    loadModelConfig();
+    loadModelSwitcherList();
+    return;
+  }
+  try {
+    await tiffaDesktop.restartTiffa();
+  } catch (e) {
+    addNotice('error', '重启实例失败: ' + e.message);
+  }
+  loadModelConfig();
+  loadModelSwitcherList();
 }
 
 function serializeModelsYaml(data) {
