@@ -62,6 +62,10 @@ electron/stderr.log
 *.bak*
 plugins/*.bak*
 
+# Unreferenced image backups (keep local, never push)
+electron/renderer/assets/tiffa-muse(1).png
+electron/renderer/assets/tiffa-musebak.png
+
 # Electron runtime
 electron/node_modules/
 electron/package-lock.json
