@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: per_user_data
-title: 用户级 Agent 持久化数据目录
+title: 用户数据持久化目录（Agent、会话、技能、记忆与缓存）
 scope:
     - data/
 source_files: []
