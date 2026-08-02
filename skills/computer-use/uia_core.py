@@ -753,7 +753,7 @@ def screenshot(window=None, region=None, annotate=False,
     if scale >= 1.0 and min_width and raw_w < min_width:
         # 上采样用 LANCZOS，小字边缘比双线性清晰得多；4x 封顶防显存爆炸
         scale = min(min_width / raw_w, 4.0)
-        if raw_px * scale * scale > max_pixels * 4:
+        if max_pixels and raw_px * scale * scale > max_pixels * 4:
             scale = ((max_pixels * 4) / raw_px) ** 0.5
 
     if scale != 1.0:

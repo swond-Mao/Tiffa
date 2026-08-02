@@ -27,7 +27,14 @@
     },
     "win": {
       "target": "portable",
-      "icon": null
+      "icon": "assets/tiffa-icon.ico"
+    },
+    "mac": {
+      "icon": "assets/icons/icon-512.png"
+    },
+    "linux": {
+      "icon": "assets/icons/icon-256.png",
+      "category": "Development"
     },
     "portable": {
       "artifactName": "tiffa-portable-${version}.exe"

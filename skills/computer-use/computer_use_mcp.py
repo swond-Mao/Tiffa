@@ -30,9 +30,17 @@ import ctypes
 from datetime import datetime
 from pathlib import Path
 
-# ── 导入核心层（含 DPI 初始化）──
+# ── 延迟导入核心层（含 DPI 初始化 + pywinauto/comtypes/win32com 重依赖）──
+# 进程启动只做轻量导入；uia_core 在首次工具调用时才加载，避免 MCP 进程
+# 启动慢拖垮 Tiffa 开机。开关关掉时该进程根本不会被拉起，这里再兜底一层。
 sys.path.insert(0, str(Path(__file__).parent))
-import uia_core as U
+U = None
+def _ensure_uia():
+    global U
+    if U is None:
+        import uia_core as U
+    return U
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -189,6 +197,7 @@ BLIND_THRESHOLD = 5
 
 
 def _grounding_analyze(img, window_hint: str = "", task_hint: str = "") -> list:
+    U = _ensure_uia()
     """
     调用轻量 VLM 分析截图，返回结构化可交互元素列表。
     返回: [{"name": str, "type": str, "x": int, "y": int}, ...]
@@ -352,6 +361,7 @@ def _text(text):
 
 
 def _image(img):
+    U = _ensure_uia()
     """PIL Image -> MCP image content block."""
     if img is None:
         return None
@@ -385,6 +395,113 @@ def _resolve_region_arg(args):
             return rr  # 形如 "x1,y1,x2,y2"
         return rr      # list[4]
     return args.get("region")  # 预设名字符串或 None
+
+
+def _set_clipboard(text: str):
+    """通过 Win32 API 设置剪贴板内容（支持中文）。"""
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+
+    # 64 位必须设置 restype/argtypes，否则指针被截断为 32 位 → 乱码
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+
+    user32.OpenClipboard(0)
+    user32.EmptyClipboard()
+    data = text.encode("utf-16-le") + b"\x00\x00"
+    h = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+    p = kernel32.GlobalLock(h)
+    ctypes.memmove(p, data, len(data))
+    kernel32.GlobalUnlock(h)
+    user32.SetClipboardData(CF_UNICODETEXT, h)
+    user32.CloseClipboard()
+
+
+def _sendinput_unicode(text: str) -> bool:
+    """
+    SendInput + KEYEVENTF_UNICODE 逐字符输入（可见打字效果，不污染剪贴板）。
+    返回是否全部字符都成功插入输入队列。检查 SendInput 返回值，避免静默失败。
+    """
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_KEYUP = 0x0002
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", ctypes.c_ushort),
+            ("wScan", ctypes.c_ushort),
+            ("dwFlags", ctypes.c_ulong),
+            ("time", ctypes.c_ulong),
+            ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ]
+
+    class _UNION(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_ulong), ("u", _UNION)]
+
+    SendInput = ctypes.windll.user32.SendInput
+    SendInput.restype = ctypes.c_uint  # 返回成功插入的事件数，必须检查
+
+    try:
+        all_ok = True
+        for ch in text:
+            code = ord(ch)
+            if code > 0xFFFF:
+                # BMP 外字符（emoji）用代理对
+                code -= 0x10000
+                codes = [0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF)]
+            else:
+                codes = [code]
+            for c in codes:
+                down = INPUT(INPUT_KEYBOARD, _UNION(KEYBDINPUT(0, c, KEYEVENTF_UNICODE, 0, None)))
+                up = INPUT(INPUT_KEYBOARD, _UNION(KEYBDINPUT(0, c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, None)))
+                events = (INPUT * 2)(down, up)
+                n = SendInput(2, ctypes.byref(events), ctypes.sizeof(INPUT))
+                if n != 2:
+                    all_ok = False  # 有事件没插进去 → 标记失败
+            time.sleep(0.05)  # 稍慢一点，给目标应用处理时间，减少丢字
+        return all_ok
+    except Exception as e:
+        log("type.sendinput.error", str(e)[:80])
+        return False
+
+
+def _type_text(text: str):
+    """
+    输入文本：
+    - 纯 ASCII → typewrite（快）
+    - 含中文/非 ASCII → 先等焦点稳定，再 SendInput 逐字符输入
+    - SendInput 有任何失败 → 回退剪贴板粘贴（原子操作，最稳）
+    """
+    import pyautogui
+    if text.isascii():
+        time.sleep(0.2)  # 焦点稳定
+        pyautogui.typewrite(text, interval=0.02)
+        return
+
+    # 关键：输入框刚激活（如 Ctrl+F 打开搜索框）时需要等焦点落定，
+    # 否则字符会发到旧焦点/丢失——这是“时好时坏”的主因
+    time.sleep(0.4)
+
+    if _sendinput_unicode(text):
+        time.sleep(0.2)
+        return
+
+    # SendInput 失败（焦点不稳/被拦截）→ 剪贴板粘贴兜底
+    log("type.fallback_clipboard", text[:20])
+    time.sleep(0.2)
+    _set_clipboard(text)
+    time.sleep(0.1)
+    pyautogui.hotkey("ctrl", "v")
+    time.sleep(0.2)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -741,6 +858,7 @@ TOOLS = {
 # ══════════════════════════════════════════════════════════════
 
 def handle_ui_inspect(args):
+    U = _ensure_uia()
     t0 = time.time()
     window = args.get("window")
     nf = args.get("name_filter")
@@ -781,6 +899,7 @@ def handle_ui_inspect(args):
 
 
 def handle_ui_act(args):
+    U = _ensure_uia()
     ref = args.get("ref", "")
     action = args.get("action", "invoke")
     text = args.get("text")
@@ -804,6 +923,7 @@ def handle_ui_act(args):
 
 
 def handle_ui_screenshot(args):
+    U = _ensure_uia()
     t0 = time.time()
     window = args.get("window")
     annotate = bool(args.get("annotate", False))
@@ -854,6 +974,7 @@ def handle_ui_screenshot(args):
 
 
 def handle_ui_ocr(args):
+    U = _ensure_uia()
     t0 = time.time()
     window = args.get("window")
     region = _resolve_region_arg(args)
@@ -878,6 +999,7 @@ def handle_ui_ocr(args):
 
 
 def handle_ui_find_text(args):
+    U = _ensure_uia()
     query = args.get("query", "")
     window = args.get("window")
     region = _resolve_region_arg(args)
@@ -911,6 +1033,7 @@ def handle_ui_find_text(args):
 
 
 def handle_ui_click_text(args):
+    U = _ensure_uia()
     query = args.get("query", "")
     window = args.get("window")
     region = _resolve_region_arg(args)
@@ -940,6 +1063,7 @@ def handle_ui_click_text(args):
 
 
 def handle_desktop_input(args):
+    U = _ensure_uia()
     import pyautogui
     atype = args.get("action", "")
     try:
@@ -964,7 +1088,7 @@ def handle_desktop_input(args):
 
         elif atype == "type":
             txt = str(args.get("text", ""))
-            pyautogui.typewrite(txt, interval=0.02)
+            _type_text(txt)
             return [_text(f"已输入: {txt[:50]}")], False
 
         elif atype == "key":
@@ -1016,6 +1140,7 @@ def handle_desktop_input(args):
 
 
 def handle_computer_use(args):
+    U = _ensure_uia()
     task = args.get("task", "")
 
     # 危险检查
@@ -1103,10 +1228,9 @@ def log_err(msg):
 
 
 def main():
-    log_err("Computer Use MCP Server v2 启动 (UIA 优先 + 四级降级)")
-    log_err(f"DPI aware: {U._DPI_READY}")
-    log_err(f"屏幕: {U.screen_size()}")
+    log_err("Computer Use MCP Server v2 启动 (UIA 优先 + 四级降级) [uia_core 懒加载]")
 
+    _logged_dpi = False
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -1134,6 +1258,14 @@ def main():
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": mid, "result": TOOLS})
         elif method == "tools/call":
+            if not _logged_dpi:
+                _logged_dpi = True
+                try:
+                    u = _ensure_uia()
+                    log_err(f"DPI aware: {u._DPI_READY}")
+                    log_err(f"屏幕: {u.screen_size()}")
+                except Exception as e:
+                    log_err(f"uia_core 懒加载失败: {e}")
             name = params.get("name", "")
             arguments = params.get("arguments", {})
             handler = HANDLERS.get(name)

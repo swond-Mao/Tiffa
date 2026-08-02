@@ -64,8 +64,8 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   switchSession: (sessionPath) => ipcRenderer.invoke('sessions:switch', sessionPath),
   newSession: () => ipcRenderer.invoke('sessions:new'),
   loadSessionHistory: (sessionPath) => ipcRenderer.invoke('sessions:loadHistory', sessionPath),
-  archiveProject: (dirName) => ipcRenderer.invoke('sessions:archiveProject', dirName),
-  deleteProject: (dirName) => ipcRenderer.invoke('sessions:deleteProject', dirName),
+  archiveProject: (dirName, cwd) => ipcRenderer.invoke('sessions:archiveProject', dirName, cwd),
+  deleteProject: (dirName, cwd) => ipcRenderer.invoke('sessions:deleteProject', dirName, cwd),
   listArchivedProjects: () => ipcRenderer.invoke('sessions:listArchived'),
   restoreProject: (dirName) => ipcRenderer.invoke('sessions:restoreProject', dirName),
   archiveSession: (sessionPath) => ipcRenderer.invoke('sessions:archiveSession', sessionPath),
@@ -103,6 +103,10 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   // ── XML 翻译开关 ──
   getXmlTranslationStatus: () => ipcRenderer.invoke('xml-translation:status'),
   toggleXmlTranslation: (enabled) => ipcRenderer.invoke('xml-translation:toggle', enabled),
+
+  // ── Computer Use（电脑控制）开关 ──
+  getComputerUseStatus: () => ipcRenderer.invoke('computer-use:status'),
+  toggleComputerUse: (enabled) => ipcRenderer.invoke('computer-use:toggle', enabled),
 
   // ── 渲染库 ──
   marked: (src) => marked.parse(src),

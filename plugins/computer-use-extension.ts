@@ -8,8 +8,8 @@
  *
  * 依赖：MCP Server (computer_use_mcp.py) 注册了 computer_use 工具
  */
-import { appendFileSync, existsSync, mkdirSync } from "node:fs"
-import { join } from "node:path"
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 
 const PLUGIN_DIR = import.meta.dir
 const PLUGIN_LOG = join(PLUGIN_DIR, "computer-use.log")
@@ -19,6 +19,18 @@ function log(category: string, payload: string | string[] | unknown) {
   const lines = Array.isArray(payload) ? payload : [payload]
   const text = lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join(" | ")
   try { appendFileSync(PLUGIN_LOG, `[${ts}] [${category}] ${text}\n`, "utf8") } catch {}
+}
+
+// 后台开关：data/agent/computer-use-enabled = "true" 才启用电脑控制。
+// 与 main.js 的开关共用同一标记文件（默认关 -> 启动不拉起 MCP、也不注入工具说明）。
+function computerUseEnabled(): boolean {
+  try {
+    const flag = resolve(import.meta.dir, "..", "data", "agent", "computer-use-enabled")
+    if (!existsSync(flag)) return false
+    return readFileSync(flag, "utf8").trim() === "true"
+  } catch {
+    return false
+  }
 }
 
 export default async function (pi: any) {
@@ -61,6 +73,10 @@ export default async function (pi: any) {
   // ── 系统提示词注入：告知模型 computer_use 工具的用法 ──
   pi.on("before_agent_start", async (event: any) => {
     try {
+      if (!computerUseEnabled()) {
+        log("before_agent_start", "computer-use disabled, skip tool instructions")
+        return
+      }
       const prompt = event.systemPrompt || []
       // 注入电脑控制工具使用说明（v2 原子工具集）
       const computerUsePrompt = [
@@ -114,6 +130,8 @@ export default async function (pi: any) {
   - 禁止跳过探测直接规划“点哪里、输什么”
   - 禁止对所有应用一视同仁，必须分类施策
   - 有后台通道的应用绝不走 GUI
+  - 禁止全屏 OCR/截图找内容：Tiffa 窗口里显示着对话内容（含任务关键词），全屏扫描会把对话文字误认为目标应用内容。必须始终指定 window 参数只扫目标窗口
+  - 输入中文用 desktop_input(action="type")，自动剪贴板粘贴，支持中文
   - 执行前会弹确认框，ESC 可随时中断`
         }
       ]

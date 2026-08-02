@@ -673,3 +673,19 @@ function getCurrentTheme() {
   const mode = localStorage.getItem(LS_MODE_KEY) || 'system'
   return { presetId, mode, resolvedMode: resolveMode(mode) }
 }
+
+// ── 早期注入：本脚本在 <head> 中同步执行，此处立即把主题变量写进 :root ──
+// 为什么必需：body 一开始渲染就要显示全屏启动遮罩 .startup-overlay，
+// 而 styles.css 的 :root fallback 硬编码为 Eucalyptus Dark。若等到
+// app.js 的 initTheme() 才注入，浅色主题用户会先看到一帧深色遮罩再跳变。
+// 这里只调 applyThemeToDOM：不写 localStorage、不注册 matchMedia 监听，
+// 完全无副作用，之后 app.js 再调 initTheme() 是幂等的。
+;(function applyThemeEarly() {
+  try {
+    const presetId = localStorage.getItem(LS_THEME_KEY) || DEFAULT_THEME_ID
+    const mode = localStorage.getItem(LS_MODE_KEY) || 'system'
+    applyThemeToDOM(presetId, resolveMode(mode))
+  } catch (_) {
+    // 兜底：任何异常都沿用 styles.css 里的 fallback 变量，不阻塞启动
+  }
+})()

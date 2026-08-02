@@ -2054,29 +2054,167 @@ body {
   pointer-events: none;
 }
 
-/* 点线侧脸背景视觉：克制、收敛、高级感 */
+/* 退场：让星光侧脸先自己溶到完全透明，再随遮罩一起清场。
+   必须 animation:none 解除 museDrift 的 both 填充（否则 0.42 终态会压过
+   opacity:0 声明），并用比遮罩略长的过渡，使星光领先面板一点点溶解，
+   收尾更干净。 */
+.startup-overlay.fade-out .startup-muse {
+  animation: none;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+.startup-overlay.fade-out .muse-layer {
+  animation-play-state: paused;
+}
+
+/* 点线侧脸背景视觉：克制、收敛、高级感
+   ─────────────────────────────────────────────────────────────────
+   结构：.startup-muse 只管漂移(transform)与总体浓度(opacity)，
+        内部 4 个 .muse-layer 承载同一张图，各自明暗呼吸。
+   为什么拆层：外层 opacity 已被 museDrift 占用，同一元素上两条动画
+        改同一属性会互相覆盖；拆层后父子 opacity 天然相乘，互不打架。
+   为什么 4 层：单层整幅呼吸人眼很迟钝。4 层周期两两不同
+        (4.18/4.73/5.28/5.83s，比值刻意不成整数)且相位错开，
+        合成后的明暗起伏是不规则拍频，看很久也察觉不到循环。
+   为什么 normal 混合：实测 screen/multiply/exclusion 都会把这张图
+        的细腻星线「融」进背景，只有 normal 才能保住侧脸轮廓。
+   为什么两张素材：tiffa-muse.png 是「暗底亮星」；tiffa-muse-light.png
+        是对称生成的「浅底暗星」，专供浅色主题——浅底上只有暗星才看得见，
+        且与暗色共用同一个 color 染色罩，两种模式轮廓都清晰。 */
 .startup-muse {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  /* 约 10s：初始放大到 1.42，先缓慢缩小并可见呼吸，后段提前加速溶解到完全透明
+     （约 9s 归零），不再撑满整段加载期；scale 始终≥1.08，边缘永远超出容器。 */
+  animation: museDrift 10s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.6s both;
+  /* 径向渐变遮罩：中心清晰，边缘融入背景，避免生硬边界 */
+  -webkit-mask-image: radial-gradient(ellipse 72% 72% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0) 100%);
+  mask-image: radial-gradient(ellipse 72% 72% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0) 100%);
+  pointer-events: none;
+  /* 令内部混合层只在本组内生效，不与页面底色相加 */
+  isolation: isolate;
+}
+
+.muse-layer {
   position: absolute;
   inset: 0;
   background-image: url('assets/tiffa-muse.png');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  opacity: 0;
-  /* 贯穿整个加载期：初始放大到 1.42，持续缓慢缩小但始终≥1.08（边缘永远超出容器，不会露出边界） */
-  animation: museDrift 16s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.8s both;
-  /* 径向渐变遮罩：中心清晰，边缘融入背景，避免生硬边界 */
-  -webkit-mask-image: radial-gradient(ellipse 72% 72% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0) 100%);
-  mask-image: radial-gradient(ellipse 72% 72% at center, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0) 100%);
+  /* 显式默认值：避免 animation 被设为 none 时（如无障碍减少动态效果），
+     浏览器把 opacity 回退到不可见状态。 */
+  opacity: 1;
+  filter: none;
+  mix-blend-mode: normal;
+  will-change: opacity, filter;
+}
+
+/* 负 delay = 动画从中途起播，四层开局就处在不同相位，不会齐步走 */
+.muse-layer.l0 { animation: musePulse0 4.18s ease-in-out     0s infinite; }
+.muse-layer.l1 { animation: musePulse1 4.73s ease-in-out -1.85s infinite; }
+.muse-layer.l2 { animation: musePulse2 5.28s ease-in-out -3.55s infinite; }
+.muse-layer.l3 { animation: musePulse3 5.83s ease-in-out -0.90s infinite; }
+
+/* 每层在「较暗 ↔ 正常偏亮」之间摆动；brightness 峰值让星点稍稍过曝，
+   暗部几乎不动， thus 闪烁只发生在星点上，不会整幅一起明暗 */
+@keyframes musePulse0 {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 1;    filter: brightness(1.3); }
+}
+@keyframes musePulse1 {
+  0%, 100% { opacity: 0.08; }
+  50%      { opacity: 1;    filter: brightness(1.3); }
+}
+@keyframes musePulse2 {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 1;    filter: brightness(1.3); }
+}
+@keyframes musePulse3 {
+  0%, 100% { opacity: 0.08; }
+  50%      { opacity: 1;    filter: brightness(1.3); }
+}
+
+/* 0-0.6s 延迟后浮现；约 1s 到达峰值，维持约 5.5s 可见呼吸，
+   随后提前加速溶解(约 5.5s→9s)到完全透明，终态 0 —— 10 秒左右彻底隐去，
+   不撑到遮罩退场。scale 全程 ≥1.08，边缘永远超出容器，配合径向遮罩不露边界。 */
+@keyframes museDrift {
+  0%   { opacity: 0;    transform: scale(1.42); }
+  8%   { opacity: 0.55; transform: scale(1.36); }
+  55%  { opacity: 0.45; transform: scale(1.12); }
+  90%  { opacity: 0;    transform: scale(1.08); }
+  100% { opacity: 0;    transform: scale(1.08); }
+}
+
+/* 染色罩：让星光呈现当前主题的强调色，7 套预设各有各的星光颜色。
+   用 mix-blend-mode: color —— 只取本层的色相与饱和度，明暗结构完全
+   来自下层，所以星点的疏密、四层错拍的呼吸起伏一点不受影响，
+   仅仅是换了颜色。它在四层之上、同处父层的 isolate 混合组内，
+   不会溢出去污染页面背景。 */
+.muse-tint {
+  position: absolute;
+  inset: 0;
+  background: hsl(var(--accent-main-100));
+  mix-blend-mode: color;
+  opacity: 0.45;
   pointer-events: none;
 }
 
-/* 0-2.2s 浮现；随后持续缩小(1.42→1.08)并变淡(0.42→0.10)。
-   终态 scale 1.08 > 1.0，图片边缘始终超出容器，配合径向遮罩永不露出边界 */
-@keyframes museDrift {
+/* ── 浅色主题适配 ─────────────────────────────────────────────
+   浅色下使用「浅底暗星」素材（暗星在浅底上才清晰），与暗色共用
+   同一套 color 染色罩：暗星被染成强调色暗星。浓度比暗色稍低，保持克制。 */
+html[data-mode="light"] .muse-layer {
+  background-image: url('assets/tiffa-muse-light.png');
+}
+html[data-mode="light"] .muse-layer.l0 { animation-name: musePulseLight0; }
+html[data-mode="light"] .muse-layer.l1 { animation-name: musePulseLight1; }
+html[data-mode="light"] .muse-layer.l2 { animation-name: musePulseLight2; }
+html[data-mode="light"] .muse-layer.l3 { animation-name: musePulseLight3; }
+
+@keyframes musePulseLight0 {
+  0%, 100% { opacity: 0.12; }
+  50%      { opacity: 0.85; filter: brightness(1.15); }
+}
+@keyframes musePulseLight1 {
+  0%, 100% { opacity: 0.05; }
+  50%      { opacity: 0.65; filter: brightness(1.15); }
+}
+@keyframes musePulseLight2 {
+  0%, 100% { opacity: 0.12; }
+  50%      { opacity: 0.85; filter: brightness(1.15); }
+}
+@keyframes musePulseLight3 {
+  0%, 100% { opacity: 0.05; }
+  50%      { opacity: 0.65; filter: brightness(1.15); }
+}
+
+html[data-mode="light"] .startup-muse {
+  animation-name: museDriftLight;
+}
+
+@keyframes museDriftLight {
   0%   { opacity: 0;    transform: scale(1.42); }
-  14%  { opacity: 0.42; transform: scale(1.36); }
-  100% { opacity: 0.10; transform: scale(1.08); }
+  8%   { opacity: 0.45; transform: scale(1.36); }
+  55%  { opacity: 0.32; transform: scale(1.12); }
+  90%  { opacity: 0;    transform: scale(1.08); }
+  100% { opacity: 0;    transform: scale(1.08); }
+}
+
+html[data-mode="light"] .muse-tint {
+  opacity: 0.42;
+}
+
+/* 无障碍：系统开启「减少动态效果」时停掉所有呼吸，只留静态图 */
+@media (prefers-reduced-motion: reduce) {
+  .muse-layer   { animation: none; filter: none; }
+  .muse-layer.l0 { opacity: 1; }
+  .muse-layer.l1,
+  .muse-layer.l2,
+  .muse-layer.l3 { opacity: 0; }
+  html[data-mode="light"] .muse-layer {
+    background-image: url('assets/tiffa-muse-light.png');
+  }
 }
 
 .startup-logo {
@@ -2312,6 +2450,15 @@ body {
 }
 .model-toggle input:checked + .model-toggle-slider::before {
   transform: translateX(12px);
+}
+.model-toggle-label {
+  position: absolute;
+  left: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 13px;
+  color: hsl(var(--text-200));
 }
 
 /* ── 模型列表 ── */
