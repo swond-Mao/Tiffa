@@ -1,4 +1,4 @@
-# Tiffa 一键安装脚本 (v3.0)
+﻿# Tiffa 一键安装脚本 (v3.0)
 # 使用国内镜像源，双击即安装全部依赖
 # 运行方式：powershell -ExecutionPolicy Bypass -File install.ps1
 
