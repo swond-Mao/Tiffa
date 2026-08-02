@@ -25,10 +25,41 @@ Write-Host "   Tiffa 安装向导 v3.0" -ForegroundColor White
 Write-Host "   便携式 AI 编程助手 · 国内镜像加速" -ForegroundColor White
 Write-Host "  ==============================================" -ForegroundColor White
 
+# 解析 npm 可执行文件：便携 node 目录优先，其次系统 PATH，最后用 node 直跑 npm-cli.js
+function Resolve-Npm {
+    $cands = @(
+        (Join-Path $ROOT "node\npm.cmd"),
+        (Join-Path $ROOT "node\npm.ps1")
+    )
+    foreach ($c in $cands) { if (Test-Path $c) { return $c } }
+    $sys = Get-Command npm -ErrorAction SilentlyContinue
+    if ($sys) { return $sys.Source }
+    $nodeExe = Join-Path $ROOT "node\node.exe"
+    $npmCli = Join-Path $ROOT "node\node_modules\npm\bin\npm-cli.js"
+    if ((Test-Path $nodeExe) -and (Test-Path $npmCli)) { return "$nodeExe|$npmCli" }
+    return $null
+}
+
+$NPM_CMD = Resolve-Npm
+
+function Invoke-Npm {
+    param([string[]]$Arguments)
+    if (-not $NPM_CMD) { INFO "未找到 npm，跳过该命令"; return 1 }
+    if ($NPM_CMD.Contains("|")) {
+        $parts = $NPM_CMD -split '\|'
+        & $parts[0] $parts[1] @Arguments
+    } else {
+        & $NPM_CMD @Arguments
+    }
+}
+
 # Step 1: 设置 npm 国内源
 Step 1 5 "设置 npm 国内镜像源"
-& npm config set registry $CHINA_NPM --location project 2>$null | Out-Null
-& npm config set registry $CHINA_NPM 2>$null | Out-Null
+if (-not $NPM_CMD) {
+    FAIL "未找到 npm，请先安装含 npm 的 Node.js：https://nodejs.org/  （便携版请解压到 $ROOT\node\）"
+}
+Invoke-Npm config set registry $CHINA_NPM --location project 2>$null | Out-Null
+Invoke-Npm config set registry $CHINA_NPM 2>$null | Out-Null
 $env:ELECTRON_MIRROR = $CHINA_ELECTRON
 OK "npm 镜像: $CHINA_NPM"
 OK "Electron 镜像: $CHINA_ELECTRON"
@@ -65,7 +96,7 @@ if (Test-Path $bunExe) {
     }
     Push-Location $npmGlobalDir
     try {
-        & npm install bun --save --loglevel=error 2>&1 | Out-Null
+        Invoke-Npm install bun --save --loglevel=error 2>&1 | Out-Null
         if (-not (Test-Path $bunExe)) { throw "bun not found" }
         $bv = & $bunExe --version 2>$null
         OK "Bun $bv 安装成功"
@@ -87,7 +118,7 @@ if (Test-Path $agentDir) {
     $npmGlobalDir = Join-Path $ROOT "npm-global"
     Push-Location $npmGlobalDir
     try {
-        & npm install @oh-my-pi/pi-coding-agent --save --loglevel=error 2>&1 | Out-Null
+        Invoke-Npm install @oh-my-pi/pi-coding-agent --save --loglevel=error 2>&1 | Out-Null
         if (-not (Test-Path $agentDir)) { throw "kernel not found" }
         $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
         OK "Tiffa 内核 v$ver 安装成功"
