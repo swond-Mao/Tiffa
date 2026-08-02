@@ -1113,6 +1113,8 @@ function setupIpc() {
   ipcMain.handle('tiffa:activate', async (event, cwd) => {
     try {
       const normalized = path.resolve(cwd);
+      // 显式用户操作：如果路径曾被删除，从黑名单移除（允许重新添加）
+      unremoveCwd(normalized);
       // 确保项目注册到 projects.json
       ensureProjectInJson(normalized);
       const result = await tiffaManager.activate(normalized);
@@ -1245,6 +1247,48 @@ function setupIpc() {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(XML_TRANSLATION_ENABLED_FILE, enabled ? 'true' : 'false', 'utf8');
       console.log(`[主进程] XML 翻译开关: ${enabled ? 'ON' : 'OFF'}`);
+      return { enabled };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ── Computer Use Toggle（后台开关：默认关，启动不拉起 MCP，开机更快）──
+  const COMPUTER_USE_ENABLED_FILE = path.join(PORTABLE_ROOT, 'data', 'agent', 'computer-use-enabled');
+  const COMPUTER_USE_MCP_JSON = path.join(PORTABLE_ROOT, 'data', 'agent', 'mcp.json');
+
+  function isComputerUseEnabled() {
+    try {
+      if (!fs.existsSync(COMPUTER_USE_ENABLED_FILE)) return false; // 默认关，启动快
+      return fs.readFileSync(COMPUTER_USE_ENABLED_FILE, 'utf8').trim() === 'true';
+    } catch { return false; }
+  }
+
+  function syncComputerUseMcp(enabled) {
+    try {
+      const p = COMPUTER_USE_MCP_JSON;
+      if (!fs.existsSync(p)) return;
+      const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (cfg.mcpServers && cfg.mcpServers['computer-use']) {
+        cfg.mcpServers['computer-use'].enabled = enabled;
+        fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+      }
+    } catch (err) {
+      console.error('[主进程] syncComputerUseMcp 失败:', err.message);
+    }
+  }
+
+  // 启动时把 mcp.json 同步到开关状态（默认关 -> 不拉起 Computer Use，开机快）
+  syncComputerUseMcp(isComputerUseEnabled());
+
+  ipcMain.handle('computer-use:status', async () => ({ enabled: isComputerUseEnabled() }));
+  ipcMain.handle('computer-use:toggle', async (event, enabled) => {
+    try {
+      const dir = path.dirname(COMPUTER_USE_ENABLED_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(COMPUTER_USE_ENABLED_FILE, enabled ? 'true' : 'false', 'utf8');
+      syncComputerUseMcp(enabled);
+      console.log(`[主进程] Computer Use 开关: ${enabled ? 'ON' : 'OFF'}`);
       return { enabled };
     } catch (err) {
       return { error: err.message };
@@ -1407,6 +1451,8 @@ function setupIpc() {
         return { error: '路径为空' };
       }
       let resolved = path.resolve(newCwd);
+      // 显式用户操作：如果路径曾被删除，从黑名单移除（允许重新添加）
+      unremoveCwd(resolved);
       // workspace 下的项目如果目录不存在，自动创建
       if (!fs.existsSync(resolved)) {
         const wsSuffix = extractWorkspaceSuffix(resolved);
@@ -1443,6 +1489,38 @@ function setupIpc() {
     fs.writeFileSync(REMOVED_CWDS_FILE, JSON.stringify(list), 'utf8');
   }
 
+  // 判断路径是否被用户明确删除过（支持 workspace 后缀匹配：
+  // 便携包从 E:\Tiffa 迁到 G:\Tiffa 后，旧路径的删除记录仍然生效）
+  function isRemovedCwd(absPath) {
+    const removedList = readRemovedCwds();
+    const lower = absPath.toLowerCase();
+    if (removedList.some(c => c.toLowerCase() === lower)) return true;
+    const mySuffix = extractWorkspaceSuffix(absPath);
+    if (mySuffix) {
+      return removedList.some(c => {
+        const theirSuffix = extractWorkspaceSuffix(c);
+        return theirSuffix && theirSuffix.toLowerCase() === mySuffix.toLowerCase();
+      });
+    }
+    return false;
+  }
+
+  // 从删除黑名单中移除匹配条目（用户显式重新选择时调用，含同后缀条目）
+  function unremoveCwd(absPath) {
+    const removedList = readRemovedCwds();
+    const lower = absPath.toLowerCase();
+    const mySuffix = extractWorkspaceSuffix(absPath);
+    const filtered = removedList.filter(c => {
+      if (c.toLowerCase() === lower) return false;
+      if (mySuffix) {
+        const theirSuffix = extractWorkspaceSuffix(c);
+        if (theirSuffix && theirSuffix.toLowerCase() === mySuffix.toLowerCase()) return false;
+      }
+      return true;
+    });
+    if (filtered.length !== removedList.length) writeRemovedCwds(filtered);
+  }
+
   // 递归删除目录
   function rimraf(dirPath) {
     if (!fs.existsSync(dirPath)) return;
@@ -1452,6 +1530,23 @@ function setupIpc() {
       else fs.unlinkSync(full);
     }
     fs.rmdirSync(dirPath);
+  }
+
+  // 带重试的递归删除：Windows 上进程刚被杀死时文件句柄可能尚未释放（EBUSY/EPERM）
+  async function rimrafWithRetry(dirPath, maxRetries = 3) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        rimraf(dirPath);
+        return;
+      } catch (err) {
+        if (attempt < maxRetries && (err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'EACCES')) {
+          console.log(`[rimraf] 文件锁未释放，${400 * (attempt + 1)}ms 后重试 (${attempt + 1}/${maxRetries}): ${dirPath}`);
+          await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 
   // ── projects.json 读写 ──
@@ -1480,6 +1575,10 @@ function setupIpc() {
     const normalized = path.resolve(cwd);
     // workspace 根目录不作为项目
     if (normalized === DEFAULT_WORKSPACE_DIR) return normalized;
+    // 用户明确删除过的项目：永不注册、永不重建目录（防止「删了又复活」）
+    if (isRemovedCwd(normalized)) {
+      return normalized;
+    }
     // 防御：路径在磁盘上不存在则不注册（避免幽灵项目）
     // workspace 下的项目：仅当有会话记录时才自动重建目录（换盘符场景）
     if (!fs.existsSync(normalized)) {
@@ -1572,6 +1671,8 @@ function setupIpc() {
     const valid = projects.filter((p, i) => {
       // 排除 workspace 根目录
       if (path.resolve(p.cwd) === DEFAULT_WORKSPACE_DIR) return false;
+      // 排除用户明确删除过的项目（防残留条目复活）
+      if (isRemovedCwd(path.resolve(p.cwd))) return false;
       // 去重：相同 normalized cwd 只保留第一条（保留最早 addedAt）
       const normalized = path.resolve(p.cwd).toLowerCase();
       if (seen.has(normalized)) return false;  // 重复，只保留第一条
@@ -1712,6 +1813,13 @@ function setupIpc() {
           console.log(`[migrate] 跳过不匹配的目录: ${dir.name} (decoded: ${normalized}, re-encoded: ${encodeSessionDirName(normalized)})`);
           continue;
         }
+
+        // 用户明确删除过的项目：清理残留会话目录，绝不复活
+        if (isRemovedCwd(normalized)) {
+          console.log(`[migrate] 清理已删除项目的残留会话目录: ${dir.name}`);
+          try { rimraf(dirPath); } catch {}
+          continue;
+        }
         
         // 验证 cwd 路径存在于磁盘（排除歧义 decode 产生的幽灵路径）
         // 但对于 workspace 下的项目，即使路径不存在也保留（换电脑后子目录可能还没创建）
@@ -1824,6 +1932,13 @@ function setupIpc() {
 
       const newCwd = path.join(currentWorkspace, workspaceSuffix);
       const newDirName = encodeSessionDirName(newCwd);
+
+      // 用户明确删除过的项目：清理残留会话目录，不迁移不复活
+      if (isRemovedCwd(path.resolve(newCwd))) {
+        console.log(`[migrate-path] 清理已删除项目的残留会话目录: ${dir.name}`);
+        try { rimraf(dirPath); } catch {}
+        continue;
+      }
 
       // 已经匹配当前路径 → 无需迁移
       if (dir.name === newDirName) continue;
@@ -2274,10 +2389,77 @@ function setupIpc() {
     return { project: null, allProjects: projects, normalized: null };
   }
 
-  ipcMain.handle('sessions:archiveProject', async (event, dirName) => {
+  // 判断会话文件(.jsonl)是否属于指定 cwd（读取 header 中的 cwd 字段）
+  function sessionFileBelongsToCwd(filePath, cwdLower) {
     try {
-      // 在 projects.json 中标记 archived
-      const { project, allProjects, normalized } = findProjectByDirName(dirName);
+      const header = parseSessionHeader(filePath);
+      return header && header.cwd && path.resolve(header.cwd).toLowerCase() === cwdLower;
+    } catch { return false; }
+  }
+
+  // 外科手术式删除：只删会话目录中属于指定 cwd 的 .jsonl（编码碰撞场景：
+  // logo\design 与 logo-design 编码后目录名相同，不能整目录删），并清理空目录
+  function deleteSessionFilesForCwd(sessionDir, projectCwd) {
+    if (!fs.existsSync(sessionDir)) return;
+    const cwdLower = projectCwd.toLowerCase();
+    for (const entry of fs.readdirSync(sessionDir, { withFileTypes: true })) {
+      const full = path.join(sessionDir, entry.name);
+      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (sessionFileBelongsToCwd(full, cwdLower)) {
+          try { fs.unlinkSync(full); } catch {}
+        }
+      } else if (entry.isDirectory()) {
+        // 子目录模式：*_<uuid>/<name>.jsonl
+        for (const sub of fs.readdirSync(full)) {
+          if (!sub.endsWith('.jsonl')) continue;
+          const subFull = path.join(full, sub);
+          if (sessionFileBelongsToCwd(subFull, cwdLower)) {
+            try { fs.unlinkSync(subFull); } catch {}
+          }
+        }
+        try { if (fs.readdirSync(full).length === 0) fs.rmdirSync(full); } catch {}
+      }
+    }
+    try { if (fs.readdirSync(sessionDir).length === 0) fs.rmdirSync(sessionDir); } catch {}
+  }
+
+  // 外科手术式移动：只把属于指定 cwd 的 .jsonl 移到目标目录（编码碰撞场景的归档）
+  function moveSessionFilesForCwd(srcDir, destDir, projectCwd) {
+    const cwdLower = projectCwd.toLowerCase();
+    for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      const full = path.join(srcDir, entry.name);
+      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (sessionFileBelongsToCwd(full, cwdLower)) {
+          try { fs.renameSync(full, path.join(destDir, entry.name)); } catch {}
+        }
+      } else if (entry.isDirectory()) {
+        for (const sub of fs.readdirSync(full)) {
+          if (!sub.endsWith('.jsonl')) continue;
+          const subFull = path.join(full, sub);
+          if (sessionFileBelongsToCwd(subFull, cwdLower)) {
+            const subDest = path.join(destDir, entry.name);
+            if (!fs.existsSync(subDest)) fs.mkdirSync(subDest, { recursive: true });
+            try { fs.renameSync(subFull, path.join(subDest, sub)); } catch {}
+          }
+        }
+        try { if (fs.readdirSync(full).length === 0) fs.rmdirSync(full); } catch {}
+      }
+    }
+    try { if (fs.readdirSync(srcDir).length === 0) fs.rmdirSync(srcDir); } catch {}
+  }
+
+  ipcMain.handle('sessions:archiveProject', async (event, dirName, cwd) => {
+    try {
+      // 在 projects.json 中标记 archived（优先按 cwd 精确匹配，避免编码碰撞误伤）
+      const allProjects = readProjectsJson();
+      let project = null;
+      if (cwd) {
+        const normalized = path.resolve(cwd);
+        project = allProjects.find(p => path.resolve(p.cwd) === normalized) || null;
+        // cwd 已指定时不回退 dirName 匹配（防碰撞场景误归档兄弟项目）
+      } else {
+        project = findProjectByDirName(dirName).project;
+      }
       if (project) {
         project.archived = true;
         project.archivedAt = new Date().toISOString();
@@ -2287,12 +2469,24 @@ function setupIpc() {
       // 仍然移动目录到归档区（保留物理数据以便恢复）
       const srcDir = path.join(SESSIONS_DIR, dirName);
       if (fs.existsSync(srcDir)) {
+        const projectCwd = (project ? path.resolve(project.cwd) : null) || (cwd ? path.resolve(cwd) : null);
+        // 编码碰撞检测：是否还有活跃项目共享此会话目录
+        const hasSibling = projectCwd && allProjects.some(p =>
+          !p.archived && path.resolve(p.cwd) !== projectCwd &&
+          encodeSessionDirName(path.resolve(p.cwd)) === dirName);
         if (!fs.existsSync(ARCHIVE_DIR)) fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
-        let destDir = path.join(ARCHIVE_DIR, dirName);
-        if (fs.existsSync(destDir)) {
-          destDir = path.join(ARCHIVE_DIR, dirName + '-' + Date.now());
+        const destDir = path.join(ARCHIVE_DIR, dirName);
+        if (hasSibling) {
+          // 碰撞：只移走本项目的会话文件，兄弟项目的留下
+          if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+          moveSessionFilesForCwd(srcDir, destDir, projectCwd);
+        } else {
+          let finalDest = destDir;
+          if (fs.existsSync(finalDest)) {
+            finalDest = path.join(ARCHIVE_DIR, dirName + '-' + Date.now());
+          }
+          fs.renameSync(srcDir, finalDest);
         }
-        fs.renameSync(srcDir, destDir);
       }
       return { success: true };
     } catch (err) {
@@ -2300,49 +2494,92 @@ function setupIpc() {
     }
   });
 
-  ipcMain.handle('sessions:deleteProject', async (event, dirName) => {
+  ipcMain.handle('sessions:deleteProject', async (event, dirName, cwd) => {
     try {
+      // 定位项目（优先按 cwd 精确匹配：编码有损，logo\design 与 logo-design 的 dirName 相同）
+      const allProjects = readProjectsJson();
+      let project = null, normalized = null;
+      if (cwd) {
+        normalized = path.resolve(cwd);
+        project = allProjects.find(p => path.resolve(p.cwd) === normalized) || null;
+        // cwd 已指定时不回退 dirName 匹配：记录已不存在（重复删除）也不能误删兄弟项目
+      } else {
+        const found = findProjectByDirName(dirName);
+        project = found.project;
+        normalized = found.normalized;
+      }
       // 从 projects.json 中删除记录
-      const { project, allProjects, normalized } = findProjectByDirName(dirName);
+      let hasSibling = false;
       if (normalized) {
         const filtered = allProjects.filter(p => path.resolve(p.cwd) !== normalized);
         writeProjectsJson(filtered);
+        // 碰撞检测：删除后是否仍有其他项目共享同一会话目录名
+        hasSibling = filtered.some(p => encodeSessionDirName(path.resolve(p.cwd)) === dirName);
       }
 
-      // 先关闭该项目的 Tiffa 实例（释放文件锁，否则 Windows 上 rmdir 会 EBUSY）
-      if (project && project.cwd) {
-        const projectCwd = path.resolve(project.cwd);
-        tiffaManager.close(projectCwd);
-      }
+      const projectCwd = normalized || ((project && project.cwd) ? path.resolve(project.cwd) : null);
 
-      // 物理删除会话目录
-      const srcDir = path.join(SESSIONS_DIR, dirName);
-      if (fs.existsSync(srcDir)) {
-        rimraf(srcDir);
-      }
-
-      // 同时删除 workspace 下的项目物理目录（否则 discoverWorkspaceProjects 会重新发现它）
-      if (project && project.cwd) {
-        const projectCwd = path.resolve(project.cwd);
-        // 安全检查：只删 workspace 子目录，不删 workspace 根目录本身
-        const wsSuffix = extractWorkspaceSuffix(projectCwd);
-        if (wsSuffix && fs.existsSync(projectCwd)) {
-          rimraf(projectCwd);
-          console.log(`[deleteProject] 已删除 workspace 目录: ${projectCwd}`);
+      // ── 第一步：加入 removedCwds（必须在文件删除之前，即使后续步骤失败也不复活） ──
+      if (projectCwd) {
+        const removedList = readRemovedCwds();
+        const lower = projectCwd.toLowerCase();
+        if (!removedList.includes(lower)) {
+          removedList.push(lower);
+          writeRemovedCwds(removedList);
         }
       }
 
-      // 加入 removedCwds 列表，防止 discoverWorkspaceProjects 再次发现
-      if (project && project.cwd) {
-        const projectCwd = path.resolve(project.cwd);
-        const removedList = (() => {
-          try { return fs.existsSync(REMOVED_CWDS_FILE) ? JSON.parse(fs.readFileSync(REMOVED_CWDS_FILE, 'utf8')) : []; }
-          catch { return []; }
-        })();
-        const normalized = projectCwd.toLowerCase();
-        if (!removedList.includes(normalized)) {
-          removedList.push(normalized);
-          fs.writeFileSync(REMOVED_CWDS_FILE, JSON.stringify(removedList), 'utf8');
+      // ── 第二步：同步杀死该项目的所有实例（userKilled 防自动重启） ──
+      if (projectCwd) {
+        const keysToDelete = [];
+        for (const [key, inst] of tiffaManager.instances) {
+          if (inst.cwd === projectCwd) {
+            inst.kill(true); // 同步树杀，确保进程已死、文件句柄释放
+            keysToDelete.push(key);
+          }
+        }
+        for (const key of keysToDelete) {
+          tiffaManager.instances.delete(key);
+        }
+        if (tiffaManager.activeCwd === projectCwd) {
+          tiffaManager.activeKey = null;
+          tiffaManager.activeCwd = null;
+        }
+        // 等待操作系统释放文件句柄
+        if (keysToDelete.length > 0) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+
+      // ── 第三步：物理删除会话数据（带重试，防 Windows 文件锁残留） ──
+      // 编码碰撞时只删本项目的会话文件，兄弟项目的保留
+      const srcDir = path.join(SESSIONS_DIR, dirName);
+      const archiveSrcDir = path.join(ARCHIVE_DIR, dirName);
+      if (hasSibling && projectCwd) {
+        console.log(`[deleteProject] 编码碰撞，仅删除 ${projectCwd} 的会话文件`);
+        deleteSessionFilesForCwd(srcDir, projectCwd);
+        deleteSessionFilesForCwd(archiveSrcDir, projectCwd);
+      } else {
+        await rimrafWithRetry(srcDir);
+        // 归档区的数据也一并清理（永久删除归档项目时走这里）
+        await rimrafWithRetry(archiveSrcDir);
+      }
+
+      // ── 第四步：删除 workspace 下的项目物理目录（否则 discover 会重新发现） ──
+      if (projectCwd) {
+        // 安全检查：只删 workspace 子目录，不删 workspace 根目录本身
+        const wsSuffix = extractWorkspaceSuffix(projectCwd);
+        if (wsSuffix) {
+          // 嵌套项目保护：目录内还有其他注册项目时不删物理目录
+          // （否则 ensureProjectInJson 会因嵌套项目的会话记录立即重建父目录）
+          const prefix = projectCwd.toLowerCase() + path.sep;
+          const hasNested = readProjectsJson().some(p => path.resolve(p.cwd).toLowerCase().startsWith(prefix));
+          if (hasNested) {
+            console.log(`[deleteProject] 目录内存在嵌套项目，跳过物理删除: ${projectCwd}`);
+          } else {
+            await rimrafWithRetry(projectCwd);
+            console.log(`[deleteProject] 已删除 workspace 目录: ${projectCwd}`);
+          }
         }
       }
 

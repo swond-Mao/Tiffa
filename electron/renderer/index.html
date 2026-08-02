@@ -8,12 +8,24 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" id="hljs-dark" href="../node_modules/highlight.js/styles/atom-one-dark.min.css">
   <link rel="stylesheet" id="hljs-light" href="../node_modules/highlight.js/styles/atom-one-light.min.css" disabled>
+  <!-- 主题引擎必须在 <head> 同步加载：body 一渲染就是全屏启动遮罩，
+       若放到 </body> 前，遮罩会先用 styles.css 的 Eucalyptus Dark fallback
+       画一帧再跳到用户主题。themes.js 末尾有早期注入 IIFE 负责立即写入变量。 -->
+  <script src="themes.js"></script>
 </head>
 <body>
   <!-- 启动全屏遮罩：覆盖一切，加载完成后移除 -->
   <div id="startupOverlay" class="startup-overlay">
-    <!-- 点线侧脸背景视觉（克制低透明度，缓慢浮现） -->
-    <div class="startup-muse" aria-hidden="true"></div>
+    <!-- 点线侧脸背景视觉（克制低透明度，缓慢浮现）
+         四层同源图错拍叠加出不规则明暗起伏，样式见 styles.css 的 .muse-layer -->
+    <div class="startup-muse" aria-hidden="true">
+      <div class="muse-layer l0"></div>
+      <div class="muse-layer l1"></div>
+      <div class="muse-layer l2"></div>
+      <div class="muse-layer l3"></div>
+      <!-- 染色罩：把星光染成当前主题的强调色相，7 套主题各有各的星光颜色 -->
+      <div class="muse-tint"></div>
+    </div>
     <div class="startup-logo">Tiffa</div>
     <div class="startup-title">与万物对弈，共时间同行</div>
     <div class="startup-ripple">
@@ -227,8 +239,17 @@
             <div id="themeModeSelector" class="theme-mode-selector"></div>
           </div>
           <div class="settings-section">
+            <div class="settings-section-title">Computer Use（电脑控制）</div>
+            <div class="settings-section-desc">开启后启动时拉起电脑控制 MCP（含 UIA 依赖，开机较慢）；关闭则开机更快。修改后需重启 Tiffa 生效</div>
+            <label class="model-toggle">
+              <input type="checkbox" id="chkComputerUse">
+              <span class="model-toggle-slider"></span>
+              <span class="model-toggle-label" id="computerUseLabel">已关闭</span>
+            </label>
+          </div>
+          <div class="settings-section">
             <div class="settings-section-title">约束规则</div>
-            <div class="settings-section-desc">编辑 constraints.md 管理弱模型输出约束</div>
+            <div class="settings-section-desc">编辑 constraints-inject.md 管理弱模型输出约束</div>
             <div id="constraintsPreview" class="constraints-preview">加载中...</div>
             <button class="settings-btn" id="btnOpenConstraints">用记事本打开约束文件</button>
           </div>
@@ -274,7 +295,7 @@
     <div id="slashPopup"></div>
   </div>
 
-  <script src="themes.js"></script>
+  <!-- themes.js 已提前到 <head> 同步加载，此处不再重复引入 -->
   <script src="app.js"></script>
 </body>
 </html>

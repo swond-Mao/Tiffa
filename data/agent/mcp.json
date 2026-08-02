@@ -3,12 +3,15 @@
     "computer-use": {
       "type": "stdio",
       "command": "G:/Tiffa/python/python.exe",
-      "args": ["-u", "G:/Tiffa/skills/computer-use/computer_use_mcp.py"],
+      "args": [
+        "-u",
+        "G:/Tiffa/skills/computer-use/computer_use_mcp.py"
+      ],
       "env": {
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUNBUFFERED": "1"
       },
-      "enabled": true,
+      "enabled": false,
       "timeout": 300000
     }
   }

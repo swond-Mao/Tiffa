@@ -120,6 +120,8 @@ const state = {
   sessionModelMap: {},
   // XML 翻译开关
   xmlTranslationEnabled: false,
+  // Computer Use 开关
+  computerUseEnabled: false,
   // 每个实例(cwd)的 agentRunning 状态，切换项目时保存/恢复
   instanceAgentRunning: new Map(),
   // 每个对话(sessionPath)的 agentRunning 状态，切换对话时保存/恢复
@@ -263,6 +265,8 @@ const dom = {
   modelList: document.getElementById('modelList'),
   constraintsPreview: document.getElementById('constraintsPreview'),
   btnOpenConstraints: document.getElementById('btnOpenConstraints'),
+  chkComputerUse: document.getElementById('chkComputerUse'),
+  computerUseLabel: document.getElementById('computerUseLabel'),
   modelSwitcher: document.getElementById('modelSwitcher'),
   modelSwitcherList: document.getElementById('modelSwitcherList'),
 };
@@ -616,6 +620,7 @@ async function init() {
   setupModelConfig();
   setupThemeToggle();
   setupXmlTranslation();
+  setupComputerUse();
   setupApprovalMode();
   // 先标记 welcomePhase=done，让 loadProjects 里的会话恢复不走 5.5s 延迟
   state.welcomePhase = 'done';
@@ -660,7 +665,8 @@ async function init() {
       await new Promise(r => setTimeout(r, 6000));
     }
     overlay.classList.add('fade-out');
-    setTimeout(() => { overlay.remove(); }, 400);
+    // 等遮罩过渡(1s)与星光溶出(1.2s)都走完再移除，避免未完全隐去就被硬拽掉
+    setTimeout(() => { overlay.remove(); }, 1300);
   }
   // 如果没有恢复到历史会话，显示欢迎页
   if (dom.messages.children.length === 0) showWelcome();
@@ -1293,7 +1299,7 @@ async function archiveProject(project) {
   const confirmed = confirm(`归档项目「${project.displayName || project.cwd}」？\n\n项目会话将移至归档区，可随时恢复。`);
   if (!confirmed) return;
   try {
-    const result = await tiffaDesktop.archiveProject(project.dirName);
+    const result = await tiffaDesktop.archiveProject(project.dirName, project.cwd);
     if (result.error) {
       addNotice('error', `归档失败: ${result.error}`);
       return;
@@ -1318,7 +1324,7 @@ async function deleteProject(project) {
   const doubleCheck = confirm(`再次确认：删除「${project.displayName}」的全部数据？此操作不可撤销。`);
   if (!doubleCheck) return;
   try {
-    const result = await tiffaDesktop.deleteProject(project.dirName);
+    const result = await tiffaDesktop.deleteProject(project.dirName, project.cwd);
     if (result.error) {
       addNotice('error', `删除失败: ${result.error}`);
       return;
@@ -1397,7 +1403,7 @@ async function hardDeleteArchivedProject(project) {
   const confirmed = confirm(`永久删除归档项目「${project.displayName || project.cwd}」？\n\n所有数据将丢失，无法恢复！`);
   if (!confirmed) return;
   try {
-    const result = await tiffaDesktop.deleteProject(project.dirName);
+    const result = await tiffaDesktop.deleteProject(project.dirName, project.cwd);
     if (result && result.error) {
       addNotice('error', `删除失败: ${result.error}`);
       return;
@@ -4524,6 +4530,40 @@ async function setupXmlTranslation() {
   });
 }
 
+// ── Computer Use（电脑控制）开关 ──
+// 开关状态落在 data/agent/computer-use-enabled；main.js 启动时同步进 mcp.json，
+// 故修改后必须重启 Tiffa 才生效（进程拉起时机在启动早期）。
+async function setupComputerUse() {
+  try {
+    const result = await tiffaDesktop.getComputerUseStatus();
+    if (result && result.enabled) {
+      state.computerUseEnabled = true;
+      dom.chkComputerUse.checked = true;
+      dom.computerUseLabel.textContent = '已开启（重启 Tiffa 后生效）';
+    }
+  } catch {}
+
+  dom.chkComputerUse.addEventListener('change', async () => {
+    const enabled = dom.chkComputerUse.checked;
+    state.computerUseEnabled = enabled;
+    dom.computerUseLabel.textContent = enabled ? '已开启（重启 Tiffa 后生效）' : '已关闭';
+    try {
+      await tiffaDesktop.toggleComputerUse(enabled);
+    } catch {}
+  });
+}
+
+// 打开设置时重新读取开关文件，确保 UI 与磁盘状态一致（可能被外部修改）
+async function refreshComputerUseToggle() {
+  try {
+    const result = await tiffaDesktop.getComputerUseStatus();
+    const enabled = !!(result && result.enabled);
+    state.computerUseEnabled = enabled;
+    dom.chkComputerUse.checked = enabled;
+    dom.computerUseLabel.textContent = enabled ? '已开启（重启 Tiffa 后生效）' : '已关闭';
+  } catch {}
+}
+
 // ── Approval Mode（per-workspace 工具审批模式） ──
 // 'normal' = 逐条确认, 'auto' = 自动批准读、确认写, 'yolo' = 全自动
 const APPROVAL_MODES = ['normal', 'auto', 'yolo'];
@@ -4613,11 +4653,12 @@ function setupSettings() {
     dom.settingsOverlay.classList.toggle('hidden');
     if (!dom.settingsOverlay.classList.contains('hidden')) {
       loadConstraintsPreview(); loadModelConfig(); loadModelList(); renderThemePresets();
+      refreshComputerUseToggle();
     }
   });
   dom.btnCloseSettings.addEventListener('click', () => dom.settingsOverlay.classList.add('hidden'));
   dom.settingsOverlay.addEventListener('click', (e) => { if (e.target === dom.settingsOverlay) dom.settingsOverlay.classList.add('hidden'); });
-  dom.btnOpenConstraints.addEventListener('click', async () => { tiffaDesktop.openPath((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints.md'); });
+  dom.btnOpenConstraints.addEventListener('click', async () => { tiffaDesktop.openPath((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints-inject.md'); });
 }
 
 function renderThemePresets() {
@@ -4959,7 +5000,7 @@ async function restoreLastModelIfNeeded() {
 
 async function loadConstraintsPreview() {
   try {
-    const result = await tiffaDesktop.readFile((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints.md');
+    const result = await tiffaDesktop.readFile((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints-inject.md');
     if (result && result.content) {
       const lines = result.content.split('\n').filter(l => l.trim());
       dom.constraintsPreview.innerHTML = `<pre class="constraints-text">${escapeHtml(lines.slice(0, 15).join('\n'))}${lines.length > 15 ? '\n...' : ''}</pre>`;

@@ -65,6 +65,20 @@ plugins/*.bak*
 # Unreferenced image backups (keep local, never push)
 electron/renderer/assets/tiffa-muse(1).png
 electron/renderer/assets/tiffa-musebak.png
+electron/renderer/assets/bak/
+electron/renderer/assets/resources/
+
+# Computer Use 运行日志（本地调试产物，不推送）
+computer-use-logs/
+
+# Computer Use 一次性调试脚本与截图（非 skill 代码，不推送）
+skills/computer-use/click_search.py
+skills/computer-use/click_text_search.py
+skills/computer-use/find_text_query.py
+skills/computer-use/ocr_query.py
+skills/computer-use/screenshot_query.py
+skills/computer-use/sidebar_ocr.py
+skills/computer-use/xhs_step1.png
 
 # Electron runtime
 electron/node_modules/
