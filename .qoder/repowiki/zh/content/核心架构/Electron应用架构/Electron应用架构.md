@@ -10,6 +10,8 @@
 - [electron/renderer/themes.js](file://electron/renderer/themes.js)
 - [electron/package.json](file://electron/package.json)
 - [README.md](file://README.md)
+- [开发文档.md](file://开发文档.md)
+- [AGENTS.md](file://AGENTS.md)
 </cite>
 
 ## 更新摘要
@@ -23,6 +25,8 @@
 - **新增**：改进的错误处理机制，增强异常捕获和恢复能力
 - **新增**：优化的前端交互体验，包括启动遮罩状态管理和用户反馈
 - **最新**：品牌图标集成与窗口尺寸优化，提升用户体验和视觉一致性
+- **新增**：FollowScroll三态机实现，提供智能滚动跟随行为
+- **新增**：tiffa-desktop.exe启动器已嵌入品牌图标资源
 
 ## 目录
 1. [简介](#简介)
@@ -45,7 +49,7 @@
 - 三进程通信关系与数据流向的架构图
 - 面向初学者的 Electron 基础概念，以及面向高级开发者的安全最佳实践与性能优化建议
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验。**最新优化**：集成了品牌图标资源，优化了窗口初始尺寸（1600x1000）和最小尺寸限制（1100x720），提升了应用的专业性和用户体验。
+**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验。**最新优化**：集成了品牌图标资源，优化了窗口初始尺寸（1600x1000）和最小尺寸限制（1100x720），提升了应用的专业性和用户体验。同时实现了FollowScroll三态机，提供智能滚动跟随行为，并在tiffa-desktop.exe启动器中嵌入了品牌图标资源。
 
 ## 项目结构
 Tiffa 采用典型的 Electron 多进程架构：
@@ -68,6 +72,7 @@ S["styles.css<br/>样式与主题变量"]
 T["themes.js<br/>主题切换/变量注入"]
 O["startupOverlay<br/>启动遮罩"]
 A["assets/<br/>品牌图标资源"]
+F["followScroll<br/>三态滚动控制器"]
 end
 M --> |创建窗口/加载页面| H
 M --> |设置 preload| P
@@ -80,6 +85,7 @@ H --> O
 R --> S
 R --> T
 R --> O
+R --> F
 ```
 
 **图表来源** 
@@ -88,6 +94,7 @@ R --> O
 - [electron/renderer/index.html:13-19](file://electron/renderer/index.html#L13-L19)
 - [electron/renderer/styles.css:1-200](file://electron/renderer/styles.css#L1-L200)
 - [electron/renderer/themes.js:1-200](file://electron/renderer/themes.js#L1-L200)
+- [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
 
 **章节来源**
 - [electron/main.js:813-831](file://electron/main.js#L813-L831)
@@ -110,6 +117,7 @@ R --> O
   - 主题切换、样式管理、Minimap 滚动条、拖拽图片上传、输入框行为等
   - 与 tiffaDesktop 交互完成所有系统级操作
   - **新增**：启动遮罩显示后端就绪状态，改进会话切换逻辑，内存召回模式
+  - **新增**：FollowScroll三态机实现智能滚动跟随行为
 
 **章节来源**
 - [electron/main.js:813-831](file://electron/main.js#L813-L831)
@@ -144,6 +152,7 @@ M->>I : JSONL 写入 stdin (prompt)
 I-->>M : stdout 逐行返回事件(JSONL)
 M-->>R : mainWindow.webContents.send('tiffa : event', event)
 R->>R : 渲染消息/工具调用/Todo/预览
+R->>R : FollowScroll三态机处理滚动
 U->>R : 点击停止/切换模型/打开文件
 R->>P : 调用其他 tiffaDesktop.*
 P->>M : ipcRenderer.invoke(...)
@@ -154,6 +163,7 @@ M-->>R : 返回结果或事件
 - [electron/main.js:882-997](file://electron/main.js#L882-L997)
 - [electron/preload.js:24-134](file://electron/preload.js#L24-L134)
 - [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-L524)
+- [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
 
 ## 详细组件分析
 
@@ -209,12 +219,12 @@ TiffaInstanceManager --> TiffaInstance : "管理多个实例"
 
 **图表来源** 
 - [electron/main.js:149-465](file://electron/main.js#L149-L465)
-- [electron/main.js:471-787](file://electron/main.js#L471-L787)
+- [electron/main.js:471-787](file://electron/main.js#L471-787)
 
 **章节来源**
 - [electron/main.js:813-831](file://electron/main.js#L813-L831)
 - [electron/main.js:149-465](file://electron/main.js#L149-L465)
-- [electron/main.js:471-787](file://electron/main.js#L471-L787)
+- [electron/main.js:471-787](file://electron/main.js#L471-787)
 - [electron/main.js:882-997](file://electron/main.js#L882-L997)
 
 ### 预加载脚本（preload.js）安全桥接
@@ -250,6 +260,7 @@ Result --> Render["渲染进程更新 UI"]
   - 通过 themes.js 动态注入 CSS 变量，支持多套预设与日夜模式
   - styles.css 定义布局、颜色变量、组件样式
 - **新增功能**：启动遮罩显示后端就绪状态，改进会话切换逻辑，内存召回模式
+- **新增功能**：FollowScroll三态机实现智能滚动跟随
 
 ```mermaid
 sequenceDiagram
@@ -270,11 +281,13 @@ R->>R : 移除遮罩，显示主界面
 R->>P : tiffaDesktop.onEvent(callback)
 M-->>R : 'tiffa : event' 推送事件
 R->>R : 根据事件类型渲染消息/工具/Todo/预览
+R->>R : FollowScroll三态机处理滚动行为
 ```
 
 **图表来源** 
 - [electron/renderer/app.js:387-524](file://electron/renderer/app.js#L387-L524)
 - [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-L524)
+- [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
 
 **章节来源**
 - [electron/renderer/app.js:387-524](file://electron/renderer/app.js#L387-L524)
@@ -303,6 +316,7 @@ T --> S
 A --> S
 A --> T
 A --> O
+A --> F["followScroll"]
 ```
 
 **图表来源** 
@@ -432,9 +446,48 @@ Render --> Display["显示记忆内容、来源、时间等信息"]
   - 应用启动时显示品牌图标，增强视觉一致性
   - 窗口尺寸适配不同屏幕分辨率
   - 最小尺寸保证基本功能可用性
+- **新增**：tiffa-desktop.exe启动器已嵌入品牌图标资源
 
 **章节来源**
 - [electron/main.js:813-831](file://electron/main.js#L813-L831)
+
+### 新增功能：FollowScroll三态机实现
+- 三态行为设计
+  - 默认粘底：视窗跟着流式输出往下走
+  - 用户主动上滚：立刻交出控制权，视窗听用户的
+  - 滚回底部或点「回到底部」按钮：恢复跟随；每次发送新消息无条件复位为跟随
+- 技术实现
+  - follow对象包含follow状态、按钮引用、pending标志和阈值常量
+  - 通过wheel、mousedown、touchmove、keydown等事件监听用户意图
+  - 使用MutationObserver监听内容变化，ResizeObserver监听容器尺寸变化
+  - requestAnimationFrame节流处理，避免频繁DOM操作
+- 用户体验优化
+  - 距底≤4px才自动恢复跟随，避免误判
+  - 脱离跟随且距底>80px时显示「回到底部」按钮
+  - 程序滚动强制instant模式，避免CSS smooth动画干扰
+
+```mermaid
+flowchart TD
+Init["followScroll.init()"] --> Events["绑定事件监听器"]
+Events --> Wheel{"用户滚轮事件"}
+Wheel --> |向上滚| Detach["detach() - 脱离跟随"]
+Wheel --> |向下滚| Ignore["忽略"]
+Detach --> Scroll{"滚动事件"}
+Scroll --> |距底≤4px| Attach["attach() - 恢复跟随"]
+Scroll --> |距底>4px| Stay["保持脱离"]
+Attach --> UpdateBtn["updateBtn() - 更新按钮状态"]
+Stay --> UpdateBtn
+UpdateBtn --> Schedule["schedule() - rAF节流"]
+Schedule --> Tick["tick() - 执行跟随逻辑"]
+Tick --> JumpToBottom["jumpToBottom() - 跳到最底部"]
+JumpToBottom --> End["结束"]
+```
+
+**图表来源** 
+- [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
+
+**章节来源**
+- [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
 
 ## 依赖关系分析
 - package.json
@@ -476,6 +529,7 @@ Main --> Assets["assets/tiffa-icon.ico"]
   - 会话消息缓存（sessionMessageCache）与 loadEpoch 防竞态，快速切换会话时恢复 DOM 子树
   - 卡住检测与首次响应超时提示，改善用户感知
   - **新增**：启动遮罩防止用户在后端就绪前进行无效操作
+  - **新增**：FollowScroll三态机使用rAF节流，避免频繁DOM操作
 - **新增优化**：内存召回直接查询 SQLite FTS，避免经过内核进程的网络开销
 - **新增优化**：WebP图片转换使用Electron原生模块，无需额外依赖，性能优异
 - **最新优化**：合理的窗口尺寸配置，减少不必要的重绘和布局计算
@@ -497,6 +551,7 @@ Main --> Assets["assets/tiffa-icon.ico"]
 - **新增排查**：内存召回失败检查 Python 环境和 mnemopi 数据库文件完整性
 - **新增排查**：WebP图片转换失败检查Electron版本和图片数据格式
 - **最新排查**：品牌图标不显示检查 assets/tiffa-icon.ico 文件是否存在且路径正确
+- **新增排查**：FollowScroll三态机异常检查事件监听器是否正确绑定
 
 **章节来源**
 - [electron/main.js:1001-1012](file://electron/main.js#L1001-L1012)
@@ -506,7 +561,7 @@ Main --> Assets["assets/tiffa-icon.ico"]
 ## 结论
 Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进程的职责，通过 contextIsolation 与最小化 API 暴露实现安全通信。主进程集中管理子进程与 IPC，预加载脚本作为可信桥接层，渲染进程专注于 UI 与交互。该设计兼顾安全性与性能，适合初学者理解 Electron 基础，也为高级开发者提供了可扩展的安全与优化空间。
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验，进一步提升了用户体验和系统稳定性。**最新优化**：品牌图标集成和窗口尺寸优化，提升了应用的专业性和用户体验的一致性。
+**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验，进一步提升了用户体验和系统稳定性。**最新优化**：品牌图标集成和窗口尺寸优化，提升了应用的专业性和用户体验的一致性。同时实现了FollowScroll三态机，提供了智能的滚动跟随行为，并在tiffa-desktop.exe启动器中嵌入了品牌图标资源。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -529,5 +584,6 @@ Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进�
 - **新增建议**：利用内存召回功能直接查询 SQLite FTS，提高搜索性能
 - **新增建议**：使用Electron内置nativeImage进行图片处理，避免额外依赖
 - **最新建议**：合理设置窗口尺寸和图标资源，提升应用专业性和用户体验
+- **新增建议**：使用FollowScroll三态机管理滚动行为，提升用户体验
 
 [本节为通用指导，不直接分析具体文件]
