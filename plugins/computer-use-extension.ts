@@ -12,7 +12,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 const PLUGIN_DIR = import.meta.dir
-const PLUGIN_LOG = join(PLUGIN_DIR, "computer-use.log")
+// 日志统一写入 data/log（便携目录），避免污染插件目录
+const PORTABLE_ROOT = resolve(PLUGIN_DIR, "..")
+const PLUGIN_LOG = join(PORTABLE_ROOT, "data", "log", "computer-use.log")
 
 function log(category: string, payload: string | string[] | unknown) {
   const ts = new Date().toISOString()
@@ -117,6 +119,7 @@ export default async function (pi: any) {
   - 多应用任务分段执行，每段独立验证
 
 【工具速查】
+  ui_foreground(window, ensure?) → 确保窗口在前台（任何操作第一步，Win32检测不看截图）
   ui_inspect(window?) → 枚举控件（探测用）
   ui_act(ref, action) → 操作元素
   ui_screenshot(annotate?) → 截图验证
@@ -124,6 +127,7 @@ export default async function (pi: any) {
   ui_ocr(window?) → OCR识别（盲窗用）
   ui_find_text(query, window?) → OCR模糊匹配
   ui_click_text(query, window?) → OCR找字点击
+  ui_tars(task, window?, execute?) → 专用视觉模型定位点击（语义难题/盲窗输入框）
   computer_use(task) → 简单任务便利入口
 
 【关键规则】
@@ -132,6 +136,9 @@ export default async function (pi: any) {
   - 有后台通道的应用绝不走 GUI
   - 禁止全屏 OCR/截图找内容：Tiffa 窗口里显示着对话内容（含任务关键词），全屏扫描会把对话文字误认为目标应用内容。必须始终指定 window 参数只扫目标窗口
   - 输入中文用 desktop_input(action="type")，自动剪贴板粘贴，支持中文
+  - 【输入铁律】desktop_input(type) 之前必须先 ui_tars(task="点击XX输入框", execute=true) 点击输入框获得焦点，自主执行不等提醒。没焦点输入必败
+  - 【前台铁律】操作任何窗口前先 ui_foreground(window="目标") 确保在前台（Win32 检测，不看截图）。窗口“露个角”不等于前台，截图里看得见不代表持有焦点。不在前台会自动置前
+  - 【反幻觉】禁止谎报成功：没调 ui_ocr/ui_screenshot 验证过就不许说“已发送/截图显示”。发送后必须 ui_ocr 确认消息文本真实出现才能报成功
   - 执行前会弹确认框，ESC 可随时中断`
         }
       ]

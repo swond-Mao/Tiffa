@@ -1784,6 +1784,8 @@ function renderHistoryPanel() {
           cleanupSessionMemory(sessionPath);
           if (state.activeSessionPath === sessionPath) {
             state.activeSessionPath = null;
+            // 必须同步清空 activeSessionId，否则事件路由保持严格模式，项目级事件被过滤
+            state.activeSessionId = null;
             const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
             if (remaining.length > 0) {
               switchToSession(remaining[remaining.length - 1].path);
@@ -2040,6 +2042,8 @@ function renderSessionTabs() {
         state.activeSessionPaths.delete(session.path);
         if (state.activeSessionPath === session.path) {
           state.activeSessionPath = null;
+          // 必须同步清空 activeSessionId，否则事件路由保持严格模式，项目级事件被过滤
+          state.activeSessionId = null;
           const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
           if (remaining.length > 0) {
             const adjacent = remaining[remaining.length - 1];
@@ -4206,6 +4210,8 @@ async function deleteSessionFromTab(session) {
     cleanupSessionMemory(session.path);
     if (state.activeSessionPath === session.path) {
       state.activeSessionPath = null;
+      // 必须同步清空 activeSessionId，否则事件路由保持严格模式，项目级事件被过滤
+      state.activeSessionId = null;
       const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
       if (remaining.length > 0) {
         switchToSession(remaining[remaining.length - 1].path);
@@ -4263,26 +4269,8 @@ async function aiRenameSession(session) {
     return;
   }
 
-  // 1. 获取对话上下文（手动重命名用更丰富的上下文，反映当前主题）
-  let context = '';
-
-  // 优先读 gap-fill 文件（compaction 后的高密度摘要）
-  if (!session.path.startsWith('__new__')) {
-    try {
-      const sid = extractSessionId(session.path);
-      if (sid) {
-        const gapFill = await tiffaDesktop.readFile(`G:/Tiffa/data/memory/inbox/gap-fill-${sid}.md`);
-        if (gapFill && gapFill.content && gapFill.content.length > 10) {
-          context = gapFill.content.substring(0, 800);
-        }
-      }
-    } catch {}
-  }
-
-  // 其次：firstMessage（内存中直接取，零延迟）
-  if (!context) {
-    context = session.firstMessage || '';
-  }
+  // 1. 获取对话上下文（标题上下文来源：firstMessage，内存中直接取，零延迟）
+  let context = session.firstMessage || '';
   if (!context) {
     addNotice('warning', '对话没有内容，无法生成标题');
     return;

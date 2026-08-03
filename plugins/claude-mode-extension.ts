@@ -13,10 +13,10 @@
  * - memory_write 工具 -> Mnemopi 原生 retain
  * - memory_search 工具 -> Mnemopi 原生 recall
  * - skill 工具 -> Tiffa 内核原生 manage_skill + managed-skills 目录
- * - gap-fill 断片补救 -> Mnemopi autoRecall 覆盖
  * - constraints.md 注入 -> TTSR 规则 + AGENTS.md 覆盖
  *
  * 保留（Tiffa 内核不覆盖）：
+ * - gap-fill 断片补救（压缩时提取断片并立即注入上下文，不落盘）
  * - 危险路径/配置文件/扩展自身 拦截
  * - .env / 密钥文件读取拦截
  * - 堆栈/路径泄露拦截
@@ -26,7 +26,7 @@
  * - hub 工具移除
  * - PROJECT.md 生成 + 确定性注入（before_agent_start：项目根目录首次对话自动生成脚手架，每会话开头注入 system prompt）
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 // ── 路径常量 ──
@@ -35,10 +35,8 @@ const AGENT_DIR = process.env.PI_CODING_AGENT_DIR || join(process.env.HOME || pr
 const PORTABLE_ROOT = resolve(AGENT_DIR, "..", "..")
 const DATA_DIR = resolve(AGENT_DIR, "..")
 const MEMORY_DIR = join(DATA_DIR, "memory")
-const INBOX_DIR = join(MEMORY_DIR, "inbox")
 const LOG_DIR_PATH = join(DATA_DIR, "log")
-const PLUGIN_LOG = join(PLUGIN_DIR, "claude-mode.log")
-const GAPFILL_MAX_AGE_MS = 60 * 60 * 1000
+const PLUGIN_LOG = join(LOG_DIR_PATH, "claude-mode.log")
 
 // ── 日志 ──
 function log(category: string, payload: string | string[] | unknown) {
@@ -96,42 +94,10 @@ function hasStackLeak(text: string): boolean {
   return false
 }
 
-// ── gap-fill 清理（60 分钟） ──
-function cleanupGapFills(sessionID: string) {
-  try {
-    if (!existsSync(INBOX_DIR)) return
-    const files = readdirSync(INBOX_DIR).filter(
-      (n) => (n.startsWith("gap-fill-") && n.endsWith(".md")) || (n.startsWith("compact-") && n.endsWith(".txt"))
-    )
-    const now = Date.now()
-    for (const f of files) {
-      const full = join(INBOX_DIR, f)
-      let remove = false
-      let reason = ""
-      const isCompactDump = f.startsWith("compact-")
-      if (!isCompactDump && sessionID && f !== `gap-fill-${sessionID}.md`) {
-        remove = true; reason = "old-session"
-      }
-      if (!remove) {
-        try {
-          const stat = statSync(full)
-          if (now - stat.mtimeMs > GAPFILL_MAX_AGE_MS) { remove = true; reason = "age" }
-        } catch {}
-      }
-      if (remove) {
-        try { unlinkSync(full); log("gapfill.cleanup", `removed ${f} (${reason})`) }
-        catch (e: any) { log("gapfill.cleanup.error", `${f}: ${e?.message}`) }
-      }
-    }
-  } catch (e: any) { log("gapfill.cleanup.error", e?.message) }
-}
-
 // ═══════════════════════════════════════════════════════════
 // 扩展入口
 // ═══════════════════════════════════════════════════════════
 export default async function (pi: any) {
-  ensureDir(INBOX_DIR)
-
   let agentTurnCount = 0
   let silentToolCallCount = 0
   let consecutiveBlockCount = 0  // 连续被拦截次数（熔断用）
@@ -190,9 +156,9 @@ export default async function (pi: any) {
 
   // 技能脚本 -> 对应 skill 名 + 是否必须先问用户
   const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean }> = [
-    { pattern: /comfy\.py\b/, skill: "comfyui-image-gen", requireAsk: true },
-    { pattern: /craftman\.py\b/, skill: "craftman", requireAsk: true },
-    { pattern: /computer_use\.py\b/, skill: "computer-use", requireAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?comfy\.py/i, skill: "comfyui-image-gen", requireAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?craftman\.py/i, skill: "craftman", requireAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?computer_use\.py/i, skill: "computer-use", requireAsk: true },
   ]
 
   log("init", [
@@ -571,38 +537,17 @@ export default async function (pi: any) {
     consecutiveBlockCount = 0
   })
 
-  // ── 3. session.compacting ── gap-fill 断片提取 + compact dump + 立即注入
+  // ── 3. session.compacting ── gap-fill 断片提取 + 立即注入（不落盘）
   pi.on("session.compacting", async (event: any, ctx?: any) => {
     try {
       const sessionID = event.sessionId || ""
       log("session.compacting", `=== fired === sessionID: ${sessionID}`)
 
-      cleanupGapFills(sessionID)
-
       const messages: any[] = event.messages || []
       if (messages.length === 0) return
 
-      // compact dump：落盘最近 50 条消息原文
-      try {
-        ensureDir(INBOX_DIR)
-        const inboxPath = join(INBOX_DIR, `compact-${sessionID}-${Date.now()}.txt`)
-        const formatted = messages.slice(-50).map((m) => {
-          const role = m.role || "unknown"
-          const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")
-          const truncated = content.length > 2000 ? content.slice(0, 2000) + "..." : content
-          return `[${role}] ${truncated}`
-        }).join("\n\n")
-        writeFileSync(inboxPath, formatted, "utf8")
-        log("session.compacting.dump", `wrote ${inboxPath}`)
-      } catch (err: any) {
-        log("session.compacting.dump.error", err?.message || String(err))
-      }
-
       // gap-fill 提取：改动文件 / 关键命令 / 决策要点 / 已读文件
       try {
-        const gapFillPath = join(INBOX_DIR, `gap-fill-${sessionID}.md`)
-        try { if (existsSync(gapFillPath)) unlinkSync(gapFillPath) } catch {}
-
         const entries: string[] = []
         const fileSet = new Set<string>()
         const readFileSet = new Set<string>()
@@ -659,14 +604,11 @@ export default async function (pi: any) {
             cmdSet.size > 0 ? `${cmdSet.size} 命令` : "",
             decisionLines.size > 0 ? `${decisionLines.size} 决策` : "",
           ].filter(Boolean).join("、")
-          const body = `# Gap-fill (断片补救) - ${sessionID}\n\n> 由 compacting hook 自动提取，60 分钟后清理。\n\n${uniq.join("\n")}\n`
-          writeFileSync(gapFillPath, body, "utf8")
-          log("session.compacting.gapfill", `wrote ${uniq.length} entries to ${gapFillPath} [${stats}]`)
-
+          const body = `# Gap-fill (断片补救) - ${sessionID}\n\n${uniq.join("\n")}\n`
           // 可观测性：通知用户 gap-fill 已触发及提取摘要
           try {
             if (ctx?.ui?.notify) {
-              ctx.ui.notify(`断片补救已触发：提取 ${stats || "0 项"}，详见 inbox/gap-fill-${sessionID}.md`, "info")
+              ctx.ui.notify(`断片补救已触发：提取 ${stats || "0 项"}，已注入上下文`, "info")
             }
           } catch (e: any) { log("session.compacting.notify.error", e?.message || String(e)) }
 

@@ -287,6 +287,120 @@ def _format_grounding(elements: list) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
+# UI-TARS 专用 grounding（动作预测型）
+# ══════════════════════════════════════════════════════════════
+# 与上方 _grounding_analyze（元素列举）不同：UI-TARS 是专用定位模型，
+# 给定截图+任务直接输出“该点哪里”的坐标（0~1000 归一化），
+# 能区分语义相近的元素（如微信搜索里的真群聊 vs 历史/网页链接）。
+
+UITARS_PROMPT = """You are a GUI agent operating a Windows computer. You will see a screenshot and receive a task. Output the single next action to take.
+
+Output format (strictly follow):
+Thought: <one line reasoning>
+Action: <action>
+
+Action space:
+- click(start_box='(x1,y1,x2,y2)') : click the target element
+- double_click(start_box='(x1,y1,x2,y2)')
+- type(content='text to type')
+- hotkey(key='ctrl+c')
+- scroll(direction='up'/'down'/'left'/'right')
+- wait()
+- finish(content='result message')
+
+Coordinates are normalized to 0-1000 relative to the screenshot. Pick the precise element that fulfills the task. For chat/messaging apps, only click the real chat entry (with avatar), not search-history or web-search links."""
+
+
+def _parse_uitars_action(text, pw, ph):
+    """解析 UI-TARS 输出。坐标 0~1000 归一化中心，再按物理尺寸还原。"""
+    import re
+    result = {"raw": text, "action": None, "x": None, "y": None,
+              "text": None, "thought": None}
+
+    m = re.search(r"Thought:\s*(.+?)(?:\nAction:|\n|$)", text, re.S)
+    if m:
+        result["thought"] = m.group(1).strip()[:120]
+
+    # click / double_click(start_box='(x1,y1,x2,y2)')  —— UI-TARS 方框格式
+    m = re.search(r"(double_click|click)\s*\(\s*start_box\s*=\s*['\"]\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)['\"]", text)
+    if m:
+        x1, y1, x2, y2 = map(float, m.groups()[1:])
+        result["action"] = m.group(1)
+        result["x"] = int((x1 + x2) / 2 / 1000 * pw)
+        result["y"] = int((y1 + y2) / 2 / 1000 * ph)
+        return result
+
+    # click(start_box='<point>x y</point>')  —— doubao-seed 点格式
+    m = re.search(r"(double_click|click)\s*\(\s*start_box\s*=\s*['\"]<point>\s*([\d.]+)[\s,]+([\d.]+)\s*</point>['\"]", text)
+    if m:
+        x, y = float(m.group(2)), float(m.group(3))
+        result["action"] = m.group(1)
+        result["x"] = int(x / 1000 * pw)
+        result["y"] = int(y / 1000 * ph)
+        return result
+
+    # type/content 输入动作——兼容多种格式：
+    #   type(content='...') / type(content="...") / type(text='...') / input(content='...')
+    m = (re.search(r"(?:type|input)\s*\(\s*(?:content|text)\s*=\s*'(.*?)'\s*\)", text, re.S)
+         or re.search(r'(?:type|input)\s*\(\s*(?:content|text)\s*=\s*"(.*?)"\s*\)', text, re.S))
+    if m:
+        result["action"] = "type"
+        result["text"] = m.group(1)
+        return result
+    m = re.search(r"hotkey\s*\(\s*key\s*=\s*['\"](.*?)['\"]\s*\)", text)
+    if m:
+        result["action"] = "hotkey"
+        result["text"] = m.group(1)
+        return result
+
+    m = re.search(r"scroll\s*\(\s*direction\s*=\s*['\"](.*?)['\"]\s*\)", text)
+    if m:
+        result["action"] = "scroll"
+        result["text"] = m.group(1)
+        return result
+
+    if "finish" in text:
+        result["action"] = "finish"
+    return result
+
+
+def _uitars_action(img, task, pw, ph):
+    """截图+任务 → UI-TARS → 动作+物理坐标。失败返回 None。"""
+    U = _ensure_uia()
+    if not GROUNDING_ENABLED or not GROUNDING_API_BASE:
+        return None
+    try:
+        b64 = U.img_to_b64(img, fmt="JPEG")
+        if not b64:
+            return None
+        req_body = json.dumps({
+            "model": GROUNDING_MODEL,
+            "messages": [
+                {"role": "system", "content": UITARS_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": f"任务：{task}"}
+                ]}
+            ],
+            "max_tokens": 300,
+            "temperature": 0,
+        }).encode()
+        headers = {"Content-Type": "application/json"}
+        if GROUNDING_API_KEY and GROUNDING_API_KEY != "sk-no-key":
+            headers["Authorization"] = f"Bearer {GROUNDING_API_KEY}"
+        req = urllib.request.Request(
+            f"{GROUNDING_API_BASE}/chat/completions", data=req_body, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=45)
+        data = json.loads(resp.read().decode())
+        content = data["choices"][0]["message"]["content"]
+        log("uitars", task[:30], content[:80].replace("\n", " "))
+        return _parse_uitars_action(content, pw, ph)
+    except Exception as e:
+        log("uitars.error", str(e)[:120])
+        return None
+
+
+# ══════════════════════════════════════════════════════════════
 # 安全拦截
 # ══════════════════════════════════════════════════════════════
 
@@ -337,7 +451,8 @@ def _confirm(task):
 # 日志
 # ══════════════════════════════════════════════════════════════
 
-LOG = Path(__file__).parent / "computer-use.log"
+# 日志统一写入 data/log（便携目录），避免污染技能目录
+LOG = Path(os.environ.get("PORTABLE_ROOT", Path(__file__).resolve().parents[2])) / "data" / "log" / "computer-use.log"
 
 
 def log(cat, *args):
@@ -477,27 +592,30 @@ def _sendinput_unicode(text: str) -> bool:
 def _type_text(text: str):
     """
     输入文本：
-    - 纯 ASCII → typewrite（快）
-    - 含中文/非 ASCII → 先等焦点稳定，再 SendInput 逐字符输入
-    - SendInput 有任何失败 → 回退剪贴板粘贴（原子操作，最稳）
+    - 纯 ASCII → typewrite（快，可见打字）
+    - 含中文/非 ASCII → SendInput 逐字符（KEYEVENTF_UNICODE）为主，剪贴板粘贴兜底
+
+    实测结论：微信聊天框（富文本）接受 SendInput 逐字符输入（可见打字效果），
+    但不接受剪贴板 Ctrl+V 粘贴。故中文以 SendInput 为主。SendInput 偊尔因焦点/
+    时序问题失败（返回值可检测），失败时重试一次，仍失败再降级剪贴板兜底。
     """
     import pyautogui
+    time.sleep(0.4)  # 焦点稳定（输入框刚被点击激活时需要）
     if text.isascii():
-        time.sleep(0.2)  # 焦点稳定
         pyautogui.typewrite(text, interval=0.02)
         return
-
-    # 关键：输入框刚激活（如 Ctrl+F 打开搜索框）时需要等焦点落定，
-    # 否则字符会发到旧焦点/丢失——这是“时好时坏”的主因
-    time.sleep(0.4)
-
+    # 非 ASCII：SendInput 逐字符（微信聊天框验证有效的方式）
     if _sendinput_unicode(text):
         time.sleep(0.2)
         return
-
-    # SendInput 失败（焦点不稳/被拦截）→ 剪贴板粘贴兜底
+    # 重试一次（偊尔的焦点/时序抖动）
+    log("type.sendinput.retry", text[:20])
+    time.sleep(0.3)
+    if _sendinput_unicode(text):
+        time.sleep(0.2)
+        return
+    # 实在不行→剪贴板兜底
     log("type.fallback_clipboard", text[:20])
-    time.sleep(0.2)
     _set_clipboard(text)
     time.sleep(0.1)
     pyautogui.hotkey("ctrl", "v")
@@ -510,6 +628,30 @@ def _type_text(text: str):
 
 TOOLS = {
     "tools": [
+        {
+            "name": "ui_foreground",
+            "description": (
+                "[任何窗口操作前必须先调] 程序化检测并确保目标窗口在前台。"
+                "用 Win32 GetForegroundWindow 判断，不依赖视觉——窗口“露个角”不等于前台。"
+                "默认 ensure=true：不在前台会自动置前（最小化会先恢复）。"
+                "返回是否在前台/置前是否成功。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "window": {
+                        "type": "string",
+                        "description": "目标窗口标题片段（如 '微信'）"
+                    },
+                    "ensure": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "true=不在前台时自动置前；false=只检测不置前"
+                    },
+                },
+                "required": ["window"]
+            }
+        },
         {
             "name": "ui_inspect",
             "description": (
@@ -849,6 +991,34 @@ TOOLS = {
                 "required": ["task"]
             }
         },
+        {
+            "name": "ui_tars",
+            "description": (
+                "[专用定位模型] 给截图+任务，由 UI-TARS 专用 grounding 模型直接输出该点哪里/该输什么。"
+                "适用于语义相近、OCR 分不清的元素（如微信搜索里区分真群聊 vs 历史/网页链接）、"
+                "纯图标按钮、未知应用界面。比 ui_click_text 更懂界面语义。"
+                "返回动作+坐标；设 execute=true 可直接执行点击/输入。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "要完成的具体操作，如 '点击群聊三jian客' / '点击发送按钮' / '在搜索框输入xxx'"
+                    },
+                    "window": {
+                        "type": "string",
+                        "description": "目标窗口标题片段；不填=全屏"
+                    },
+                    "execute": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "是否直接执行预测出的点击/输入（false=只返回坐标供主模型决策）"
+                    },
+                },
+                "required": ["task"]
+            }
+        },
     ]
 }
 
@@ -856,6 +1026,37 @@ TOOLS = {
 # ══════════════════════════════════════════════════════════════
 # 工具处理器
 # ══════════════════════════════════════════════════════════════
+
+def handle_ui_foreground(args):
+    """程序化检测/确保目标窗口在前台。任何窗口操作前必须先调这个。
+
+    窗口“露个角”不等于前台。只有 GetForegroundWindow 返回的窗口才是真正持有
+    焦点的。不传 ensure 只检测；ensure=true 时不在前台会自动置前。
+    """
+    U = _ensure_uia()
+    window = args.get("window")
+    ensure = bool(args.get("ensure", True))
+    if not window:
+        return [_text("缺少 window 参数")], True
+
+    ok, err = U.is_foreground(window)
+    if err:
+        return [_text(f"检测失败: {err}")], True
+
+    if ok:
+        return [_text(f"✅ 窗口「{window}」正在前台（持有键盘焦点），可以直接操作。")], False
+
+    if not ensure:
+        return [_text(f"⚠️ 窗口「{window}」不在前台（可能被遮挡或最小化）。不要继续操作，先置前。")], False
+
+    # 不在前台 → 自动置前（最小化会先恢复）
+    ok2, err2 = U.bring_to_foreground(window)
+    if err2:
+        return [_text(f"置前失败: {err2}")], True
+    if ok2:
+        return [_text(f"✅ 窗口「{window}」原本不在前台，已自动置前，现在可以操作了。")], False
+    return [_text(f"⚠️ 窗口「{window}」置前后仍未获得焦点，可能被其他弹窗/置顶窗遮挡。请先处理遮挡物。")], True
+
 
 def handle_ui_inspect(args):
     U = _ensure_uia()
@@ -1200,11 +1401,81 @@ def handle_computer_use(args):
     return [_text(summary)] + results, False
 
 
+def handle_ui_tars(args):
+    """专用 grounding 模型动作预测：截图+任务 → 该点哪里/该输什么。"""
+    U = _ensure_uia()
+    task = args.get("task", "")
+    window = args.get("window")
+    execute = bool(args.get("execute", False))
+
+    if not GROUNDING_ENABLED or not GROUNDING_API_BASE:
+        return [_text("UI-TARS 未启用：grounding.json 需配置 api_base 且 enabled=1")], True
+    if not task:
+        return [_text("缺少 task 参数")], True
+
+    # 截图（保留物理尺寸 + 偏移，用于坐标换算）
+    img, meta, err = U.screenshot(window=window, annotate=False, max_width=1280)
+    if err:
+        return [_text(f"截图失败: {err}")], True
+
+    try:
+        pw, ph = map(int, meta.get("physical_size", "0x0").split("x"))
+    except Exception:
+        pw, ph = img.width, img.height
+    offset = meta.get("offset", (0, 0))
+
+    result = _uitars_action(img, task, pw, ph)
+    if not result or not result.get("action"):
+        raw = result.get("raw", "无响应") if result else "无响应"
+        return [_text(f"UI-TARS 未解析出动作。原始输出：\n{raw}")], True
+
+    act = result["action"]
+    lines = ["[UI-TARS 决策]"]
+    if result.get("thought"):
+        lines.append(f"思考：{result['thought']}")
+
+    if act in ("click", "double_click"):
+        # 窗口截图时 x,y 是区域物理坐标，加上 offset 得屏幕绝对坐标
+        sx = offset[0] + result["x"]
+        sy = offset[1] + result["y"]
+        sw, sh = U.screen_size()
+        nx = sx / sw * 1000
+        ny = sy / sh * 1000
+        lines.append(f"动作：{act} 屏幕坐标({sx},{sy}) 归一化(nx={nx:.1f}, ny={ny:.1f})")
+        lines.append(f'执行：desktop_input(action="{"double_click" if act=="double_click" else "click"}", nx={nx:.1f}, ny={ny:.1f})')
+        if execute:
+            import pyautogui
+            if act == "double_click":
+                pyautogui.doubleClick(sx, sy)
+            else:
+                pyautogui.click(sx, sy)
+            lines.append("（已自动执行点击，请 ui_screenshot 验证）")
+    elif act == "type":
+        lines.append(f"动作：输入 \"{result['text']}\"")
+        lines.append(f'执行：desktop_input(action="type", text="{result["text"]}")')
+        if execute:
+            _type_text(result["text"])
+            lines.append("（已自动执行输入）")
+    elif act == "hotkey":
+        lines.append(f"动作：按键 {result['text']}")
+    elif act == "scroll":
+        lines.append(f"动作：滚动 {result['text']}")
+    elif act == "finish":
+        lines.append("动作：任务完成")
+
+    contents = [_text("\n".join(lines))]
+    ib = _image(img)
+    if ib:
+        contents.append(ib)
+    return contents, False
+
+
 # ══════════════════════════════════════════════════════════════
 # MCP Server 主循环
 # ══════════════════════════════════════════════════════════════
 
 HANDLERS = {
+    "ui_foreground": handle_ui_foreground,
     "ui_inspect": handle_ui_inspect,
     "ui_act": handle_ui_act,
     "ui_screenshot": handle_ui_screenshot,
@@ -1213,6 +1484,7 @@ HANDLERS = {
     "ui_click_text": handle_ui_click_text,
     "desktop_input": handle_desktop_input,
     "computer_use": handle_computer_use,
+    "ui_tars": handle_ui_tars,
 }
 
 

@@ -241,6 +241,46 @@ def get_foreground():
         return None, f"获取前台窗口失败: {e}"
 
 
+def is_foreground(window):
+    """判断指定窗口是否为当前前台窗口（Win32 程序化检测，不依赖视觉）。
+
+    窗口“露个角”不等于前台——只有 GetForegroundWindow 返回的才是真正持有
+    键盘焦点的顶层窗口。返回 (bool, error)。
+    """
+    el, err = find_window(window)
+    if err:
+        return False, err
+    try:
+        target_hwnd = el.CurrentNativeWindowHandle
+    except Exception:
+        return False, "无法获取目标窗口句柄"
+    try:
+        fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+    except Exception:
+        return False, "无法获取前台窗口句柄"
+    return bool(fg_hwnd == target_hwnd), None
+
+
+def bring_to_foreground(window):
+    """把指定窗口带到前台（最小化则先恢复）。返回 (是否成功, error)。"""
+    el, err = find_window(window)
+    if err:
+        return False, err
+    try:
+        hwnd = el.CurrentNativeWindowHandle
+    except Exception:
+        return False, "无法获取窗口句柄"
+    SW_RESTORE = 9
+    try:
+        ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+    except Exception as e:
+        return False, f"置前失败: {e}"
+    time.sleep(0.6)  # 等窗口动画/焦点落定
+    ok, _ = is_foreground(window)
+    return ok, None
+
+
 def find_window(title):
     """按标题模糊匹配窗口元素。"""
     wins, err = list_windows()
