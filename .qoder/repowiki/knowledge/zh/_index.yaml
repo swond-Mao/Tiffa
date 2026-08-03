@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: master
 nodes_managed: true
-exported_at: "2026-08-01T17:20:17Z"
+exported_at: "2026-08-02T15:25:37Z"
 modules:
     "":
-        dir_name: Tiffa 便携包根目录
-        title: Tiffa 便携包根目录
+        dir_name: Tiffa 便携包根目录（Electron + Bun 内核 + 用户数据 + 技能）
+        title: Tiffa 便携包根目录（Electron + Bun 内核 + 用户数据 + 技能）
         scope:
             - README.md
             - AGENTS.md
@@ -38,8 +38,8 @@ modules:
             - path: per_user_data
             - path: skills_computer_use
     per_user_data:
-        dir_name: 用户数据持久化目录（Agent、会话、技能、记忆与缓存）
-        title: 用户数据持久化目录（Agent、会话、技能、记忆与缓存）
+        dir_name: 用户数据持久化目录（Agent 运行时状态与资源）
+        title: 用户数据持久化目录（Agent 运行时状态与资源）
         scope:
             - data/
         source_files: []
@@ -49,8 +49,8 @@ modules:
             - path: electron_app
             - path: skills_computer_use
     skills_computer_use:
-        dir_name: AI 驱动的 Windows 桌面自动化技能（UIA + OCR + MCP）
-        title: AI 驱动的 Windows 桌面自动化技能（UIA + OCR + MCP）
+        dir_name: Windows 桌面自动化技能（UIA + OCR + MCP）
+        title: Windows 桌面自动化技能（UIA + OCR + MCP）
         scope:
             - skills/computer-use/SKILL.md
             - skills/computer-use/computer_use.py

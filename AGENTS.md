@@ -13,7 +13,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 
 | 路径 | 说明 |
 |------|------|
-| `G:\Tiffa\` | 便携包根目录（`PORTABLE_ROOT`） |
+|| `$ROOT` | 便携包根目录（`PORTABLE_ROOT`） |
 | `npm-global\node_modules\@oh-my-pi\pi-coding-agent\` | Tiffa 内核 (v17.0.7) |
 | `npm-global\node_modules\bun\bin\bun.exe` | Bun 运行时 (v1.3.14) |
 | `python\python.exe` / `node\node.exe` | Python / Node.js 运行时 |
@@ -178,7 +178,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 Tiffa 无自定义 `skill` 工具。技能通过内核原生 `read skill://<name>` 协议加载：
 
 - 模型用 `read` 工具读取 `skill://<技能名>` → 内核解析到 `skills/<技能名>/SKILL.md` → 返回完整内容
-- `skills.customDirectories` 设置（agent.db settings 表）指向 `G:/Tiffa/skills`
+- `skills.customDirectories` 设置（agent.db settings 表）指向 `$ROOT/skills`
 - `constraints-inject.md` 中列出触发词到 `read skill://` 路径的映射
 
 ### /omfg 命令
@@ -250,7 +250,7 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 
 ## Skills（19 个）
 
-Skills 目录：`G:\Tiffa\skills\`
+Skills 目录：`$ROOT/skills/`
 
 | Skill | 说明 |
 |-------|------|
@@ -287,7 +287,7 @@ Skills 目录：`G:\Tiffa\skills\`
 
 ### ComfyUI 生图速查（操作指令，非行为约束）
 
-**服务**：ComfyUI 运行在 `http://47.108.197.247:8188`（与 `skills/comfyui-image-gen/comfy.py` 默认地址及 SKILL.md 一致；可用 `COMFY_URL` 环境变量覆盖），输出目录 `E:\workspace\comfyui_out`。未运行时生图会失败，应提醒用户先启动。
+**服务**：ComfyUI 运行在 `http://47.108.197.247:8188`（与 `skills/comfyui-image-gen/comfy.py` 默认地址及 SKILL.md 一致；可用 `COMFY_URL` 环境变量覆盖），输出目录 `$ROOT/workspace/comfyui_out`。未运行时生图会失败，应提醒用户先启动。
 
 | 意图 | 管线 | 命令 |
 |------|------|------|
@@ -297,7 +297,7 @@ Skills 目录：`G:\Tiffa\skills\`
 | 写实/场景/静物/自由尺寸 | `klein` | `python comfy.py klein "<提示词>" --size 832x1216 --seed 0 --steps 8 --name klein` |
 | 改图/P图/编辑/换背景 | `edit` | `python comfy.py edit "<本地图片路径>" "<编辑指令>" --name edit` |
 
-- **路径**：`G:\Tiffa\skills\comfyui-image-gen\comfy.py`
+- **路径**：`$ROOT/skills/comfyui-image-gen/comfy.py`
 - **提示词扩写**：用户给简短需求后，先扩写成详细中文提示词再传给管线
 - **长宽比**：竖图默认 portrait，横图用 landscape
 - **输出**：命令最后打印 `RESULT:[路径]`，报告纯路径
@@ -309,7 +309,7 @@ Skills 目录：`G:\Tiffa\skills\`
 
 | 变量 | 值 | 说明 |
 |------|---|------|
-| `PORTABLE_ROOT` | `G:\Tiffa` | 便携包根目录 |
+|| `PORTABLE_ROOT` | `$ROOT` | 便携包根目录 |
 | `PI_CODING_AGENT_DIR` | `$ROOT/data/agent` | Agent 数据目录 |
 | `HOME` / `USERPROFILE` | `$ROOT/home` | 重定向到便携包内 |
 | `BUN_INSTALL` | `$ROOT` | Bun 安装根 |

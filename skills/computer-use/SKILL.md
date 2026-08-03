@@ -14,6 +14,11 @@ description_cn: "AI 驱动的 Windows 桌面自动化 v3（应用探测 + 策略
 3. **禁止对所有应用一视同仁。** 不同软件的交互方式天差地别，必须分类施策。
 4. **禁止对全屏做 OCR/截图来找目标应用的内容。** Tiffa 自己的窗口里显示着对话内容（包含任务描述中的关键词），全屏扫描会把对话里的文字误认为目标应用的内容。**必须始终指定 window 参数**，只扫描目标应用窗口。
 5. **输入中文必须用 `desktop_input(action="type")`**，它会自动走剪贴板粘贴。禁止用 `pyautogui.typewrite`（不支持中文）。
+6. **绝对禁止谎报成功（最重要！）。** 不许凭想象声称“已发送/已完成/截图显示…”。每一个“成功”结论都必须有**本轮真实的工具调用返回**作为依据。没调 ui_screenshot/ui_ocr 验证过，就不许说成功。编造截图内容是最严重的错误。
+7. **发送/输入后必须验证。** 发完消息后，必须对聊天区域做 `ui_ocr(window="目标窗口")`，确认消息文本**真实出现**在 OCR 结果里，才能报告发送成功。OCR 里找不到该文本 = 发送失败，要如实报告并重试。
+8. **工具返回失败就是失败。** ui_tars 返回“无响应/未解析出动作”、desktop_input 报错，都是失败信号。不许把失败美化成“部分成功”然后继续，必须停下来换方法或如实报告。
+9. **输入前必须先点击输入框（自主执行，不等用户提醒）。** 任何 `desktop_input(action="type")` 之前，必须先 `ui_tars(task="点击XXX输入框", execute=true)` 精确点击目标输入框获得焦点。输入框没焦点，输入必然失败。盲窗（微信等）的输入框尤其要用 ui_tars 定位，不许猜坐标、不许假设已有焦点。
+10. **操作任何窗口前必须先 `ui_foreground(window="目标")` 确保它在前台（程序化检测，不看截图）。** 窗口“露个角”不等于在前台——截图上看得见不代表它持有键盘焦点。只有 ui_foreground 返回“在前台”才能继续操作；不在前台它会自动置前。禁止用“截图里能看到”来判断前台。
 
 ## 安全流程
 
@@ -106,7 +111,19 @@ ui_inspect(window="desktop")        # 看目标窗口是否存在/已启动
 
 ---
 
-## MCP 工具集（8 个原子工具）
+## MCP 工具集（10 个原子工具）
+
+### 0. `ui_foreground` — 确保窗口在前台（任何操作的第一步！）
+
+程序化检测并确保目标窗口在前台。**用 Win32 判断，不依赖视觉**——窗口“露个角”不等于前台。
+
+```
+ui_foreground(window="微信")              # 默认 ensure=true：不在前台会自动置前（最小化先恢复）
+ui_foreground(window="微信", ensure=false) # 只检测不置前
+```
+
+返回：“✅ 在前台，可操作” / “✅ 已自动置前” / “⚠️ 置前失败（被遮挡）”。
+**只有返回在前台，才能继续后续操作。**
 
 ### 1. `ui_inspect` — 枚举可交互控件（探测阶段核心）
 
@@ -212,6 +229,33 @@ OCR 找文本并直接点击其物理中心。可选 `verify_title` 校验点击
 ```
 ui_click_text(query="三jian客", window="微信", scope="group")
 ui_click_text(query="三jian客", verify_title="三jian客")
+```
+
+### 9. `ui_tars` — 专用视觉模型定位（语义难题杀手锏）
+
+给截图+任务，由云端视觉模型（doubao-seed）直接输出“该点哪里”的坐标。
+**专门解决 OCR 分不清的语义难题**：微信挑群聊（区分真群聊 vs 历史/网页链接）、纯图标按钮、未知应用界面。
+
+```
+ui_tars(task="点击群聊三jian客", window="微信")             # 返回坐标，你自己决定点不点
+ui_tars(task="点击发送按钮", window="微信", execute=true)   # 直接执行点击
+ui_tars(task="在搜索框输入xxx", window="微信", execute=true) # 直接执行输入
+```
+
+**使用原则**：
+- 优先用 UIA/OCR（免费、快）；只有它们搞不定的语义难题才调 ui_tars（云端模型，少量费用）
+- **ui_tars 的强项是“定位+点击”，不是“输入”**。要输入文字时，先用 ui_tars 点击输入框获得焦点，再用 `desktop_input(action="type", text="...")` 直接输入（比让 ui_tars 输出 type 动作稳得多）
+- 不确定时先 `execute=false` 看它给的坐标对不对，再决定是否执行
+- 执行后照样要 `ui_screenshot`/`ui_ocr` 验证结果
+
+**推荐混合工作流（微信发消息）：**
+```
+1. ui_tars(task="点击群聊三jian客", window="微信", execute=true)  # 定位+点击进群
+2. ui_ocr(window="微信") → 确认标题栏是目标群
+3. ui_tars(task="点击消息输入框", window="微信", execute=true)    # 定位+点击输入框
+4. desktop_input(action="type", text="消息内容")              # 直接输入（不用 ui_tars）
+5. desktop_input(action="key", keys=["enter"])                  # 发送
+6. ui_ocr(window="微信") → 确认消息文本真实出现 → 才能报告成功
 ```
 
 ---

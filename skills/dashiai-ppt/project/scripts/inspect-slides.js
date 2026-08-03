@@ -1,6 +1,17 @@
+const fs = require("fs");
+const path = require("path");
 const manifest = require("./layout-manifest.json");
 const layouts = manifest.layouts || {};
-const goal = require("G:/workspace/goal.json");
+// 便携路径：禁止硬编码盘符。goal.json 路径依次从 argv / GOAL_JSON 环境变量 / cwd 解析
+function resolveGoal() {
+  const candidates = [process.argv[2], process.env.GOAL_JSON, path.join(process.cwd(), "goal.json")].filter(Boolean);
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return JSON.parse(fs.readFileSync(c, "utf8"));
+  }
+  console.error("goal.json not found. Pass path as argv[1] or set GOAL_JSON env.");
+  process.exit(1);
+}
+const goal = resolveGoal();
 const slides = goal.slides || [];
 
 slides.forEach((slide, idx) => {

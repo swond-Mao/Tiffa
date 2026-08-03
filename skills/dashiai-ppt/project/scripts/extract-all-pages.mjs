@@ -1,6 +1,9 @@
 import { readFileSync, writeFileSync } from 'fs';
+import path from 'node:path';
 
-const raw = readFileSync('G:/Agent/portable-opencode/data/config/opencode/skills/dashiai-ppt/project/src/components/themes/theme09/metadata.js');
+// 便携路径：禁止硬编码盘符。源 metadata.js 依次从 argv[2] / THEMES_METADATA 环境变量 / cwd 相对路径解析
+const metaFile = process.argv[2] || process.env.THEMES_METADATA || path.join(process.cwd(), 'src', 'components', 'themes', 'theme09', 'metadata.js');
+const raw = readFileSync(metaFile);
 let m = raw.toString('utf8');
 const idx = m.indexOf('export const pages');
 const rest = m.substring(idx);
@@ -53,5 +56,6 @@ const result = pages.map(p => ({
   controls: p.controls ? p.controls.map(c => ({key: c.key, type: c.type})) : [],
   defaultProps: Object.keys(p.defaultProps || {})
 }));
-writeFileSync('G:/Agent/portable-opencode/data/config/opencode/skills/dashiai-ppt/project/scripts/pages-props.json', JSON.stringify(result, null, 2), 'utf8');
-console.log('Saved to pages-props.json');
+const outFile = process.argv[3] || path.join(process.cwd(), 'pages-props.json');
+writeFileSync(outFile, JSON.stringify(result, null, 2), 'utf8');
+console.log('Saved to ' + outFile);
