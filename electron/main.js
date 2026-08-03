@@ -849,6 +849,14 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
+  // F12 切换 DevTools（生产环境排障用）
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F12') {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
+
   // ── 兜底：防止外部链接在 app 窗口内导航导致页面卡死 ──
   // 即使前端漏拦截，这里也会把 http/https 导航重定向到系统浏览器
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -2233,13 +2241,31 @@ function setupIpc() {
       const projectPath = path.join(SESSIONS_DIR, projectDirName);
       if (!fs.existsSync(projectPath)) return [];
 
-      const files = fs.readdirSync(projectPath)
-        .filter(f => f.endsWith('.jsonl'))
-        .sort(); // Sort by filename (which starts with ISO timestamp), oldest first
+      // 递归收集所有 .jsonl（含分支会话子目录 *_<uuid>/ 内的），修复分支会话丢失
+      const files = [];
+      const walk = (dir) => {
+        let entries;
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+          } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+            files.push(full);
+          }
+        }
+      };
+      walk(projectPath);
+      // 按文件名（ISO 时间戳前缀）正序，最旧在前；分支子目录与顶层混排时按 basename 比较保持时间序
+      files.sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
 
       const sessions = [];
       for (const file of files) {
-        const session = parseSessionHeader(path.join(projectPath, file));
+        const session = parseSessionHeader(file);
         sessions.push(session);
       }
 
@@ -2710,6 +2736,140 @@ function setupIpc() {
     } catch (err) {
       return { error: err.message };
     }
+  });
+
+  // ── 轻量模型补全（AI 重命名等小任务） ──
+  // 降级链：豆包（grounding.json）→ 主模型旁路（当前模型或 config.yml default 的 provider，普通 completion 直调）
+  // 读取 config.yml modelRoles 拿默认 provider/model
+  function resolveDefaultModelFromConfig() {
+    try {
+      const cfgPath = path.join(PORTABLE_ROOT, 'data', 'agent', 'config.yml');
+      if (!fs.existsSync(cfgPath)) return null;
+      const cfg = yaml.load(fs.readFileSync(cfgPath, 'utf8'));
+      const roles = cfg && cfg.modelRoles;
+      const ref = (roles && roles.default) || (roles && roles.slow) || null;
+      if (!ref || typeof ref !== 'string' || !ref.includes('/')) return null;
+      const [provider, model] = ref.split('/');
+      return { provider, model };
+    } catch {
+      return null;
+    }
+  }
+
+  // 从 models.yml 找 provider 配置
+  function findProviderConfig(providerId) {
+    try {
+      const raw = fs.readFileSync(path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml'), 'utf8');
+      const data = yaml.load(raw);
+      const providers = data && data.providers;
+      const p = providers && providers[providerId];
+      if (!p || !p.baseUrl) return null;
+      return {
+        baseUrl: p.baseUrl,
+        apiKey: p.apiKey || '',
+        model: (p.models && p.models[0] && p.models[0].id) || '',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // 单次 completion 调用（带 20s 超时）
+  async function callCompletion(baseUrl, model, apiKey, prompt, maxTokens) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const isDoubao = String(baseUrl).includes('ark');
+      const body = {
+        model,
+        messages: [{ role: 'user', content: String(prompt || '') }],
+        max_tokens: maxTokens || 40,
+        temperature: 0.3,
+        // 关 llama.cpp qwen3 系思考：实测默认思考占满 max_tokens 导致 content 空（空响应误判失败）
+        // 云端 OpenAI 兼容 API 忽略未知字段
+        chat_template_kwargs: { enable_thinking: false },
+      };
+      if (isDoubao) body.thinking = { type: 'disabled' };  // 仅豆包需要关思考（实测 16s→1.9s）
+      const resp = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(apiKey && apiKey !== 'none' ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const bodyText = await resp.text().catch(() => '');
+        return { error: `HTTP ${resp.status}: ${bodyText.slice(0, 200)}` };
+      }
+      const data = await resp.json();
+      const text = (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+      return text.trim() ? { text: String(text).trim() } : { error: '空响应' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  ipcMain.handle('ai:complete', async (event, { prompt, maxTokens, providerHint, modelHint }) => {
+    const candidates = [];
+    const seen = new Set();
+    const push = (c) => {
+      const key = `${c.baseUrl}|${c.model}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        candidates.push(c);
+      }
+    };
+    // 1. 主模型旁路：前端当前模型优先（主力经常变，跟随当前；local 开着就用免费的本地，没开快速失败落下一级）
+    let ref = null;
+    if (providerHint && modelHint) {
+      ref = { provider: providerHint, model: modelHint };
+    } else {
+      ref = resolveDefaultModelFromConfig();
+    }
+    if (ref) {
+      const pc = findProviderConfig(ref.provider);
+      if (pc && pc.baseUrl) {
+        push({ name: ref.provider, baseUrl: pc.baseUrl, model: ref.model || pc.model, apiKey: pc.apiKey });
+      }
+    }
+    // 2. 豆包（computer-use grounding.json）
+    try {
+      const cfgPath = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (cfg && cfg.api_base && cfg.model && cfg.api_key) {
+        push({ name: 'doubao', baseUrl: cfg.api_base, model: cfg.model, apiKey: cfg.api_key });
+      }
+    } catch {}
+    // 3. models.yml 里其他有 apiKey 的 provider（兜底：单一模型欠费/限流时仍可用）
+    try {
+      const data = yaml.load(fs.readFileSync(path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml'), 'utf8'));
+      const providers = data && data.providers;
+      if (providers) {
+        for (const [pid, p] of Object.entries(providers)) {
+          if (!p || !p.baseUrl) continue;
+          if (p.apiKey && p.apiKey !== 'none') {
+            push({ name: pid, baseUrl: p.baseUrl, model: (p.models && p.models[0] && p.models[0].id) || '', apiKey: p.apiKey });
+          }
+        }
+      }
+    } catch {}
+    if (candidates.length === 0) {
+      return { error: '无可用模型配置（models.yml 无可用 provider 且豆包 grounding.json 缺失）' };
+    }
+    let lastErr = null;
+    for (const c of candidates) {
+      try {
+        const result = await callCompletion(c.baseUrl, c.model, c.apiKey, prompt, maxTokens);
+        if (result && result.text) {
+          return { text: result.text, model: c.name, modelId: c.model };  // 返回实际命中模型，前端可显示
+        }
+        lastErr = `${c.name}: ${result.error}`;
+      } catch (err) {
+        lastErr = `${c.name}: ${err.message}`;
+      }
+    }
+    return { error: `所有模型调用失败：${lastErr}` };
   });
 
   // ── 列出归档的会话（单会话级别）

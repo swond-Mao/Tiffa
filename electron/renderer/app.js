@@ -113,8 +113,11 @@ const state = {
   sessions: [],          // 当前项目全部会话（含活跃和非活跃）
   activeSessionPath: null,
   activeSessionId: null,    // 当前活跃对话的 sessionId（从 sessionPath 提取 UUID）
-  activeSessionPaths: new Set(),  // 顶栏活跃tab（最多8个，持久化到 localStorage）
-  historyCollapsed: true,         // 历史对话面板折叠状态
+  activeSessionPaths: new Set(),  // 顶栏活跃tab（最多8个，跨项目全局，持久化到 localStorage）
+  projectSessions: {},     // { dirName: Session[] } 项目会话缓存（树懒加载）
+  expandedProjects: new Set(),  // 树中已展开的项目 dirName
+  activeTabMeta: new Map(),     // path -> {dirName, title, firstMessage, messageCount, sessionId} 跨项目 tab 元数据
+  autoNamedSessions: new Set(), // 已自动豆包重命名过的会话 path（防重复触发）
   workspacePath: '',
   // 每个对话记住的模型 { provider, modelId }
   sessionModelMap: {},
@@ -180,6 +183,170 @@ function findSessionPathById(sessionId) {
   }
   return null;
 }
+// ── 项目会话树辅助 ──
+
+// 从 sessionPath 提取所属项目的编码目录名（--E--...-- 段）
+// 分支会话位于 *_<uuid>/ 子目录，需向上找第一个 -- 包裹的段
+function dirNameFromSessionPath(sessionPath) {
+  if (!sessionPath || sessionPath.startsWith('__new__')) return null;
+  const parts = sessionPath.split(/[\\/]/);
+  for (let i = parts.length - 2; i >= 0; i--) {
+    const seg = parts[i];
+    if (seg && seg.startsWith('--') && seg.endsWith('--')) return seg;
+  }
+  return parts[parts.length - 2] || null;
+}
+
+// 把 session 对象写入跨项目 tab 元数据（同时维护 activeSessionPaths）
+function upsertTabMeta(session) {
+  if (!session || !session.path) return;
+  state.activeSessionPaths.add(session.path);
+  state.activeTabMeta.set(session.path, {
+    dirName: dirNameFromSessionPath(session.path) || state.activeProjectDirName,
+    title: session.title || session.firstMessage || '新对话',
+    firstMessage: session.firstMessage || '',
+    messageCount: session.messageCount || 0,
+    sessionId: session.sessionId,
+  });
+}
+
+// 轻量版：只有 path + dirName 时构建 meta（会话对象不在缓存里的兜底）
+function upsertTabMetaLite(sessionPath, dirName) {
+  if (!sessionPath) return;
+  state.activeSessionPaths.add(sessionPath);
+  state.activeTabMeta.set(sessionPath, {
+    dirName: dirName || dirNameFromSessionPath(sessionPath) || state.activeProjectDirName,
+    title: '新对话',
+    firstMessage: '',
+    messageCount: 0,
+    sessionId: extractSessionId(sessionPath) || null,
+  });
+}
+
+// 只刷新树节点的选中/打开标记（比全量 renderProjects 轻，tab 快速切换时用）
+function refreshTreeSelection() {
+  document.querySelectorAll('.session-item').forEach(el => {
+    const path = el.dataset.path;
+    el.classList.toggle('active', path === state.activeSessionPath);
+    el.classList.toggle('open', !!path && state.activeSessionPaths.has(path));
+  });
+  // 项目 active 态
+  document.querySelectorAll('.project-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.dirname === state.activeProjectDirName);
+  });
+}
+
+// 渲染单个项目的会话子树到容器
+function renderSessionTreeInto(container, dirName, sessions) {
+  container.innerHTML = '';
+  container.dataset.dirname = dirName;
+  const real = (sessions || []).filter(s => !s.path.startsWith('__new__'));
+  if (real.length === 0) {
+    container.innerHTML = '<div class="session-tree-empty">暂无对话</div>';
+    return;
+  }
+  for (const session of real) {
+    const item = document.createElement('div');
+    item.className = 'session-item';
+    if (state.activeSessionPaths.has(session.path)) item.classList.add('open');
+    if (session.path === state.activeSessionPath) item.classList.add('active');
+    const title = session.title || session.firstMessage || '新对话';
+    const ts = session.modified || session.mtime;
+    const timeStr = ts ? relTime(ts) : '';
+    item.dataset.path = session.path;
+    item.title = title;
+    item.innerHTML = `
+      <span class="session-item-dot"></span>
+      <span class="session-item-title">${escapeHtml(title.length > 18 ? title.substring(0, 18) + '...' : title)}</span>
+      ${timeStr ? `<span class="session-item-meta">${escapeHtml(timeStr)}</span>` : ''}`;
+    item.addEventListener('click', () => openSessionFromTree(session.path));
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showSessionTabContextMenu(e, session);
+    });
+    container.appendChild(item);
+  }
+}
+
+// 树中点击会话：打开（或切换到）对应 tab
+function openSessionFromTree(sessionPath) {
+  if (!sessionPath) return;
+  if (!state.activeTabMeta.has(sessionPath)) {
+    const dir = dirNameFromSessionPath(sessionPath) || state.activeProjectDirName;
+    const list = (dir && state.projectSessions[dir]) || [];
+    const sess = list.find(s => s.path === sessionPath);
+    if (sess) upsertTabMeta(sess);
+    else upsertTabMetaLite(sessionPath, dir);
+  }
+  switchToSession(sessionPath);
+}
+
+// 展开/折叠项目（懒加载会话）
+async function toggleExpandProject(dirName, forceOpen) {
+  const willOpen = forceOpen === true ? true : (forceOpen === false ? false : !state.expandedProjects.has(dirName));
+  if (willOpen) {
+    state.expandedProjects.add(dirName);
+    renderProjects();
+    if (!state.projectSessions[dirName]) {
+      await loadSessions(dirName);  // 懒加载；loadSessions 内部局部刷新树
+    }
+  } else {
+    state.expandedProjects.delete(dirName);
+    renderProjects();
+  }
+}
+
+// 跨项目上下文切换（tab 跨项目激活时用）：只切项目实例与高亮，不激活会话
+// 返回 true=成功；false=项目不存在（已归档/删除），调用方应中止切换
+async function ensureProjectContext(dirName) {
+  if (!dirName || dirName === state.activeProjectDirName) return true;
+  const project = state.projects.find(p => p.dirName === dirName);
+  if (!project || !project.cwd) return false;
+  const oldCwd = state.workspacePath;
+  if (oldCwd) state.instanceAgentRunning.set(oldCwd, state.agentRunning);
+  stopStallCheck();
+  if (project.cwd !== state.workspacePath) {
+    updateStatus('切换项目...');
+    try {
+      const result = await tiffaDesktop.activateInstance(project.cwd);
+      if (result.error) {
+        addNotice('error', `切换项目失败: ${result.error}`);
+        updateStatus('就绪');
+        return false;
+      }
+      state.workspacePath = result.cwd || project.cwd;
+      state.fileTreeRoot = null;
+      state.tiffaReady = result.ready !== false;
+    } catch (err) {
+      addNotice('error', `切换项目失败: ${err.message}`);
+      updateStatus('就绪');
+      return false;
+    }
+  }
+  state.activeProjectDirName = dirName;
+  restoreApprovalMode(state.workspacePath);
+  try {
+    const instances = await tiffaDesktop.getInstances();
+    const current = instances.find(i => i.cwd === state.workspacePath);
+    if (current) {
+      state.instanceAgentRunning.set(state.workspacePath, current.agentRunning);
+      state.agentRunning = current.agentRunning;
+    }
+  } catch {}
+  if (state.agentRunning) { startStallCheck(); updateStatus('思考中...'); }
+  else { stopStallCheck(); updateStatus('就绪'); }
+  state.expandedProjects.add(dirName);
+  renderProjects();
+  loadMemoryContent();
+  if (!state.sidebarCollapsed && !dom.panelFiles.classList.contains('hidden')) {
+    loadFileTree(state.workspacePath);
+  }
+  if (!state.projectSessions[dirName]) {
+    await loadSessions(dirName);
+  }
+  return true;
+}
+
 // ── sessionModelMap 持久化 ──
 const MODEL_MAP_FILE = 'session-model-map.json';
 async function saveModelMap() {
@@ -755,9 +922,14 @@ function handleEvent(event) {
           if (!targetSession.path.startsWith('__new__')) {
             tiffaDesktop.renameSession(targetSession.path, title).catch(() => {});
           }
-          renderSessionTabs();
-          renderHistoryPanel();
-          addNotice('success', `已重命名：${title}`);
+        renderSessionTabs();
+        // 同步跨项目 tab 元数据中的标题
+        if (state.activeTabMeta.has(targetSession.path)) {
+          state.activeTabMeta.get(targetSession.path).title = title;
+        }
+        saveOpenTabs();
+        refreshTreeSelection();
+        addNotice('success', `已重命名：${title}`);
         } else {
           addNotice('warning', 'AI 未能生成标题');
         }
@@ -777,18 +949,37 @@ function handleEvent(event) {
       // agent 结束后自动发送排队消息（短暂延迟确保后端就绪）
       setTimeout(() => flushPendingQueue(), 300);
       if (state.activeProjectDirName) loadSessions(state.activeProjectDirName).then(() => saveOpenTabs());
-      // 自动重命名：第一次对话结束后，直接用 firstMessage 截断作标题（零算力，不调 AI）
+      // 自动重命名：每会话触发一次豆包文艺标题（覆盖内核 session_info_update 的工程标题；
+      // 豆包会判断原标题是否贴切，用户手动命名的会保留）
       {
         const sess = state.sessions.find(s => s.path === state.activeSessionPath);
-        if (sess && !sess.path.startsWith('__new__') && (!sess.title || sess.title === '新对话' || sess.title === sess.firstMessage)) {
-          const autoTitle = (sess.firstMessage || '').replace(/\n+/g, ' ').trim().substring(0, 20);
-          if (autoTitle && autoTitle !== sess.title) {
-            sess.title = autoTitle;
-            if (!sess.path.startsWith('__new__')) {
-              tiffaDesktop.renameSession(sess.path, autoTitle).catch(() => {});
-            }
-            renderSessionTabs();
-            renderHistoryPanel();
+        console.log('[自动重命名] agent_end 检查:', {
+          activePath: state.activeSessionPath,
+          sessFound: !!sess,
+          sessPath: sess && sess.path,
+          isNew: sess && sess.path.startsWith('__new__'),
+          alreadyNamed: state.autoNamedSessions.has(state.activeSessionPath),
+        });
+        if (sess && !state.autoNamedSessions.has(sess.path)) {
+          if (sess.path.startsWith('__new__')) {
+            // 临时路径尚未迁移：轮询等 session_switch 落盘（最多 10s，每 1.5s 查一次）
+            console.log('[自动重命名] 临时路径，轮询等待迁移');
+            let attempts = 0;
+            const poll = () => {
+              attempts++;
+              const s2 = state.sessions.find(x => x.path === state.activeSessionPath);
+              console.log('[自动重命名] 轮询:', { attempts, s2Found: !!s2, s2Path: s2 && s2.path, isNew: s2 && s2.path.startsWith('__new__'), alreadyNamed: s2 && state.autoNamedSessions.has(s2.path) });
+              if (s2 && !s2.path.startsWith('__new__') && !state.autoNamedSessions.has(s2.path)) {
+                autoRenameWithLightModel(s2);
+              } else if (s2 && s2.path.startsWith('__new__') && attempts < 6) {
+                setTimeout(poll, 1500);
+              } else {
+                console.log('[自动重命名] 10s 内未完成迁移，放弃本次自动命名');
+              }
+            };
+            setTimeout(poll, 1500);
+          } else {
+            autoRenameWithLightModel(sess);
           }
         }
       }
@@ -908,6 +1099,11 @@ function handleEvent(event) {
           // 迁移 activeSessionPaths
           state.activeSessionPaths.delete(oldPath);
           state.activeSessionPaths.add(newPath);
+          // 迁移 activeTabMeta（跨项目 tab 元数据）
+          if (state.activeTabMeta.has(oldPath)) {
+            state.activeTabMeta.set(newPath, state.activeTabMeta.get(oldPath));
+            state.activeTabMeta.delete(oldPath);
+          }
           // 迁移 sessionMessageCache（切走后缓存的 DOM 也要跟新路径走）
           if (state.sessionMessageCache.has(oldPath)) {
             state.sessionMessageCache.set(newPath, state.sessionMessageCache.get(oldPath));
@@ -1087,6 +1283,45 @@ function showWelcome() {
 function setupProjectPanel() {
   dom.btnRefreshProjects.addEventListener('click', () => loadProjects());
   dom.btnNewProject.addEventListener('click', openNewProjectFolder);
+  setupProjectPanelResizer();
+}
+
+// 项目栏拖拽调宽（localStorage 持久化）
+const PANEL_MIN_WIDTH = 160;
+const PANEL_MAX_WIDTH = 420;
+const PANEL_WIDTH_KEY = 'tiffa:projectPanelWidth';
+function setupProjectPanelResizer() {
+  const resizer = document.getElementById('projectPanelResizer');
+  const panel = document.getElementById('projectPanel');
+  if (!resizer || !panel) return;
+  // 恢复持久化宽度
+  try {
+    const saved = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10);
+    if (saved && !isNaN(saved)) {
+      panel.style.width = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, saved)) + 'px';
+    }
+  } catch {}
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    resizer.classList.add('dragging');
+    panel.classList.remove('collapsed');
+    const startX = e.clientX;
+    const startW = panel.getBoundingClientRect().width;
+    const onMove = (ev) => {
+      const w = Math.max(PANEL_MIN_WIDTH, Math.min(PANEL_MAX_WIDTH, startW + (ev.clientX - startX)));
+      panel.style.width = w + 'px';
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      resizer.classList.remove('dragging');
+      try {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(parseInt(panel.style.width, 10) || PANEL_MIN_WIDTH));
+      } catch {}
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 async function openNewProjectFolder() {
@@ -1153,10 +1388,18 @@ async function loadProjects() {
     const archivedResult = await tiffaDesktop.listArchivedProjects();
     state.archivedProjects = (archivedResult && !archivedResult.error) ? archivedResult : [];
   } catch { state.archivedProjects = []; }
+  // 恢复全局 tab（跨项目）并据此默认展开有 tab 的项目
+  restoreOpenTabs();
   renderProjects();
-  // Auto-select first project and restore open tabs
+  // 自动选中项目：有恢复的激活 tab → 定位其项目；否则第一个项目
   if (state.projects.length > 0 && !state.activeProjectDirName) {
-    await selectProject(state.projects[0].dirName);
+    let first = state.projects[0].dirName;
+    if (state.activeSessionPath) {
+      const dir = dirNameFromSessionPath(state.activeSessionPath);
+      const proj = dir ? state.projects.find(p => p.dirName === dir) : null;
+      if (proj) first = proj.dirName;
+    }
+    await selectProject(first);
   }
 }
 
@@ -1172,20 +1415,54 @@ function renderProjects() {
     dom.projectList.appendChild(hint);
   } else {
     for (const project of state.projects) {
+      const dirName = project.dirName;
       const item = document.createElement('div');
       item.className = 'project-item';
-      if (project.dirName === state.activeProjectDirName) item.classList.add('active');
+      if (dirName === state.activeProjectDirName) item.classList.add('active');
+      item.dataset.dirname = dirName;
       const initial = (project.displayName || '?')[0].toUpperCase();
       const name = project.displayName || '未知项目';
       const count = project.sessionCount || 0;
-      item.innerHTML = `<span class="project-item-icon">${escapeHtml(initial)}</span><span class="project-item-name">${escapeHtml(name)}</span>${count > 0 ? `<span class="project-item-sessioncount">${count}</span>` : ''}`;
+      const expanded = state.expandedProjects.has(dirName);
+      item.innerHTML = `
+        <span class="project-item-arrow ${expanded ? 'expanded' : ''}">${expanded ? '▾' : '▸'}</span>
+        <span class="project-item-icon">${escapeHtml(initial)}</span>
+        <span class="project-item-name">${escapeHtml(name)}</span>
+        ${count > 0 ? `<span class="project-item-sessioncount">${count}</span>` : ''}`;
       item.title = project.cwd || project.displayName;
-      item.addEventListener('click', () => selectProject(project.dirName));
+      // 箭头：展开/折叠（懒加载会话）
+      const arrow = item.querySelector('.project-item-arrow');
+      arrow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleExpandProject(dirName);
+      });
+      item.addEventListener('click', () => selectProject(dirName));
       item.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showProjectContextMenu(e, project);
       });
       dom.projectList.appendChild(item);
+      // 展开的项目 → 会话树
+      if (expanded) {
+        const tree = document.createElement('div');
+        tree.className = 'session-tree';
+        tree.dataset.dirname = dirName;
+        const sessions = state.projectSessions[dirName];
+        if (sessions) {
+          renderSessionTreeInto(tree, dirName, sessions);
+        } else {
+          tree.innerHTML = '<div class="session-tree-loading">加载中...</div>';
+          dom.projectList.appendChild(tree);
+          // 懒加载：完成后局部刷新该树，避免全量重绘
+          loadSessions(dirName).then(() => {
+            const el = dom.projectList.querySelector(`.session-tree[data-dirname="${CSS.escape(dirName)}"]`);
+            if (el && state.expandedProjects.has(dirName) && state.projectSessions[dirName]) {
+              renderSessionTreeInto(el, dirName, state.projectSessions[dirName]);
+            }
+          });
+        }
+        if (sessions) dom.projectList.appendChild(tree);
+      }
     }
   }
 
@@ -1304,12 +1581,35 @@ async function archiveProject(project) {
       addNotice('error', `归档失败: ${result.error}`);
       return;
     }
-    // 归档后清空聊天区并显示欢迎页面
-    state.activeProjectDirName = null;
-    state.activeSessionPath = null;
-    state.activeSessionPaths.clear();
-    dom.messages.innerHTML = '';
-    showWelcome();
+    // 清理该项目的全局 tab（其他项目不受影响）
+    const dirTabs = [...state.activeTabMeta.entries()].filter(([, m]) => m.dirName === project.dirName);
+    for (const [p] of dirTabs) {
+      state.activeTabMeta.delete(p);
+      state.activeSessionPaths.delete(p);
+    }
+    delete state.projectSessions[project.dirName];
+    // 若当前激活会话属于该项目，切到其他 tab 或回欢迎页
+    if (state.activeSessionPath && dirTabs.some(([p]) => p === state.activeSessionPath)) {
+      const remaining = [...state.activeTabMeta.keys()];
+      if (remaining.length > 0) {
+        await switchToSession(remaining[remaining.length - 1]);
+      } else {
+        state.activeSessionPath = null;
+        state.activeSessionId = null;
+        dom.messages.innerHTML = '';
+        showWelcome();
+      }
+    }
+    if (project.dirName === state.activeProjectDirName) {
+      state.activeProjectDirName = null;
+      state.activeSessionPath = null;
+      state.activeSessionId = null;
+      if (!state.activeTabMeta.size) {
+        dom.messages.innerHTML = '';
+        showWelcome();
+      }
+    }
+    saveOpenTabs();
     addNotice('info', `已归档: ${project.displayName}`);
     await loadProjects();
   } catch (err) {
@@ -1333,12 +1633,28 @@ async function deleteProject(project) {
     if (project.cwd) {
       try { await tiffaDesktop.addRemovedCwd(project.cwd); } catch {}
     }
+    // 清理该项目的全局 tab 与会话缓存
+    const dirTabs = [...state.activeTabMeta.entries()].filter(([, m]) => m.dirName === project.dirName);
+    for (const [p] of dirTabs) {
+      state.activeTabMeta.delete(p);
+      state.activeSessionPaths.delete(p);
+    }
+    delete state.projectSessions[project.dirName];
+    if (state.activeSessionPath && dirTabs.some(([p]) => p === state.activeSessionPath)) {
+      const remaining = [...state.activeTabMeta.keys()];
+      if (remaining.length > 0) {
+        await switchToSession(remaining[remaining.length - 1]);
+      } else {
+        state.activeSessionPath = null;
+        state.activeSessionId = null;
+        dom.messages.innerHTML = '';
+        showWelcome();
+      }
+    }
     if (project.dirName === state.activeProjectDirName) {
       state.activeProjectDirName = null;
-      state.activeSessionPath = null;
-      dom.messages.innerHTML = '';
-      showWelcome();
     }
+    saveOpenTabs();
     addNotice('info', `已删除: ${project.displayName}`);
     await loadProjects();
   } catch (err) {
@@ -1473,11 +1789,13 @@ async function selectProject(dirName) {
   }
 
   state.activeProjectDirName = dirName;
+  // tab 全局化：不再清空/重置活跃 tab
   if (!isReselect) {
     state.activeSessionPath = null;
     state.activeSessionId = null;
-    state.activeSessionPaths.clear();  // 切换项目时重置活跃tab
   }
+  // 默认展开当前激活项目
+  state.expandedProjects.add(dirName);
   restoreApprovalMode(state.workspacePath);
 
   // 恢复新实例的 agentRunning 状态
@@ -1510,34 +1828,26 @@ async function selectProject(dirName) {
   }
   await loadSessions(dirName);
 
-  // 恢复上次打开的所有标签（懒加载：只加载活跃对话内容，其余点击时再加载）
-  const realSessions = state.sessions.filter(s => !s.path.startsWith('__new__'));
-  const savedTabs = restoreOpenTabs(dirName, realSessions);
-
+  // 目标会话：优先激活该项目在全局 tab 中最近打开的；无 tab 则回退最新会话
+  const realSessions = (state.sessions || []).filter(s => !s.path.startsWith('__new__'));
+  const projectTabs = [...state.activeTabMeta.entries()].filter(([, m]) => m.dirName === dirName);
   let targetPath = null;
-  if (savedTabs) {
-    // 恢复所有已保存的标签
-    for (const p of savedTabs.paths) state.activeSessionPaths.add(p);
-    targetPath = savedTabs.active;
-    // 确保活跃路径在 sessions 列表中有对应对象（防御性）
-    const sessionPaths = new Set(state.sessions.map(s => s.path));
-    for (const p of savedTabs.paths) {
-      if (!sessionPaths.has(p)) {
-        const real = realSessions.find(s => s.path === p);
-        if (real) state.sessions.push(real);
-      }
-    }
+  if (state.activeSessionPath && state.activeTabMeta.has(state.activeSessionPath)
+      && state.activeTabMeta.get(state.activeSessionPath).dirName === dirName) {
+    targetPath = state.activeSessionPath;
+  } else if (projectTabs.length > 0) {
+    targetPath = projectTabs[projectTabs.length - 1][0];
   } else if (realSessions.length > 0) {
-    // 无保存记录：回退为只打开最新会话
+    // 无 tab：回退为打开最新会话
     targetPath = realSessions[realSessions.length - 1].path;
-    state.activeSessionPaths.add(targetPath);
+    const latest = realSessions[realSessions.length - 1];
+    upsertTabMeta(latest);
   }
 
   if (targetPath) {
     state.activeSessionPath = targetPath;
     state.activeSessionId = extractSessionId(targetPath) || targetPath;
     renderSessionTabs();
-    renderHistoryPanel();  // 重新渲染历史面板（此时 activeSessionPaths 已填充，能正确过滤已打开的 tab）
     saveOpenTabs();
 
     const doLoad = async () => {
@@ -1631,53 +1941,68 @@ function cleanupSessionMemory(sessionPath) {
   state.sessionAgentRunning.delete(sessionPath);
   state.sessionMessageCache.delete(sessionPath);
   state.activeSessionPaths.delete(sessionPath);
+  state.activeTabMeta.delete(sessionPath);
+  // 立即从项目会话缓存移除（树不残留已删会话，不依赖 loadSessions 异步刷新）
+  const dir = dirNameFromSessionPath(sessionPath) || state.activeProjectDirName;
+  if (dir && state.projectSessions[dir]) {
+    state.projectSessions[dir] = state.projectSessions[dir].filter(s => s.path !== sessionPath);
+  }
   saveOpenTabs();
+  renderProjects();
 }
 
 async function loadSessions(dirName) {
   const result = await tiffaDesktop.listSessions(dirName);
+  let sessions = [];
+  const isCurrent = dirName === state.activeProjectDirName;
   if (result.error) {
-    state.sessions = [];
+    sessions = [];
   } else {
-    // 兜底迁移：session_switch 事件可能因用户已切走 tab 而未处理，
-    // 导致 __new__ tab 停留在临时路径。通过实例的 sessionFilePath 匹配磁盘会话自动迁移。
-    const newTabsToMigrate = state.sessions.filter(s => s.path.startsWith('__new__') && s.sessionId);
-    if (newTabsToMigrate.length > 0) {
-      let instances = null;
-      try { instances = await tiffaDesktop.getInstances(); } catch {}
-      if (instances && Array.isArray(instances)) {
-        for (const nt of newTabsToMigrate) {
-          // 用临时 sessionId 查找实例，获取真实的 sessionFilePath
-          const inst = instances.find(i => i.sessionId === nt.sessionId);
-          if (inst && inst.sessionFilePath) {
-            // 用 sessionFilePath 在磁盘会话列表中查找匹配
-            const realSession = result.find(rs => {
-              // 规范化比较：统一为小写并替换正斜杠为反斜杠（Windows）
-              const norm = s => s ? s.replace(/\//g, '\\').toLowerCase() : '';
-              return norm(rs.path) === norm(inst.sessionFilePath);
-            });
-            if (realSession) {
-              const oldPath = nt.path;
-              const newPath = realSession.path;
-              // 迁移所有引用旧路径的状态
-              if (state.sessionModelMap[oldPath]) {
-                state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
-                delete state.sessionModelMap[oldPath];
-                saveModelMap();
-              }
-              if (state.sessionAgentRunning.has(oldPath)) {
-                state.sessionAgentRunning.set(newPath, state.sessionAgentRunning.get(oldPath));
-                state.sessionAgentRunning.delete(oldPath);
-              }
-              if (state.sessionMessageCache.has(oldPath)) {
-                state.sessionMessageCache.set(newPath, state.sessionMessageCache.get(oldPath));
-                state.sessionMessageCache.delete(oldPath);
-              }
-              state.activeSessionPaths.delete(oldPath);
-              state.activeSessionPaths.add(newPath);
-              if (state.activeSessionPath === oldPath) {
-                state.activeSessionPath = newPath;
-                state.activeSessionId = extractSessionId(newPath) || nt.sessionId;
+    if (isCurrent) {
+      // 兜底迁移：session_switch 事件可能因用户已切走 tab 而未处理，
+      // 导致 __new__ tab 停留在临时路径。通过实例的 sessionFilePath 匹配磁盘会话自动迁移。
+      const newTabsToMigrate = state.sessions.filter(s => s.path.startsWith('__new__') && s.sessionId);
+      if (newTabsToMigrate.length > 0) {
+        let instances = null;
+        try { instances = await tiffaDesktop.getInstances(); } catch {}
+        if (instances && Array.isArray(instances)) {
+          for (const nt of newTabsToMigrate) {
+            // 用临时 sessionId 查找实例，获取真实的 sessionFilePath
+            const inst = instances.find(i => i.sessionId === nt.sessionId);
+            if (inst && inst.sessionFilePath) {
+              // 用 sessionFilePath 在磁盘会话列表中查找匹配
+              const realSession = result.find(rs => {
+                // 规范化比较：统一为小写并替换正斜杠为反斜杠（Windows）
+                const norm = s => s ? s.replace(/\//g, '\\').toLowerCase() : '';
+                return norm(rs.path) === norm(inst.sessionFilePath);
+              });
+              if (realSession) {
+                const oldPath = nt.path;
+                const newPath = realSession.path;
+                // 迁移所有引用旧路径的状态
+                if (state.sessionModelMap[oldPath]) {
+                  state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
+                  delete state.sessionModelMap[oldPath];
+                  saveModelMap();
+                }
+                if (state.sessionAgentRunning.has(oldPath)) {
+                  state.sessionAgentRunning.set(newPath, state.sessionAgentRunning.get(oldPath));
+                  state.sessionAgentRunning.delete(oldPath);
+                }
+                if (state.sessionMessageCache.has(oldPath)) {
+                  state.sessionMessageCache.set(newPath, state.sessionMessageCache.get(oldPath));
+                  state.sessionMessageCache.delete(oldPath);
+                }
+                state.activeSessionPaths.delete(oldPath);
+                state.activeSessionPaths.add(newPath);
+                if (state.activeTabMeta.has(oldPath)) {
+                  state.activeTabMeta.set(newPath, state.activeTabMeta.get(oldPath));
+                  state.activeTabMeta.delete(oldPath);
+                }
+                if (state.activeSessionPath === oldPath) {
+                  state.activeSessionPath = newPath;
+                  state.activeSessionId = extractSessionId(newPath) || nt.sessionId;
+                }
               }
             }
           }
@@ -1685,186 +2010,46 @@ async function loadSessions(dirName) {
       }
     }
     // 保留未迁移的 __new__ 临时 tab（已迁移的会被磁盘列表自然替代）
-    const newTabs = state.sessions.filter(s => s.path.startsWith('__new__') && state.activeSessionPaths.has(s.path));
+    const newTabs = isCurrent
+      ? state.sessions.filter(s => s.path.startsWith('__new__') && state.activeSessionPaths.has(s.path))
+      : [];
     // 建立内存中已有标题的映射：path -> title（非空才保留）
     // agent_end 后 loadSessions 重新读磁盘时，标题可能还没写入/异步延迟，
     // 用内存中的实时标题避免被磁盘空标题覆盖
     const memTitles = new Map();
-    for (const s of state.sessions) {
+    for (const s of (isCurrent ? state.sessions : [])) {
       if (s.title) memTitles.set(s.path, s.title);
     }
     // 合并后按 path 去重（磁盘版本优先，信息更完整）
     const seen = new Set();
-    state.sessions = [...result, ...newTabs].filter(s => {
+    sessions = [...result, ...newTabs].filter(s => {
       if (seen.has(s.path)) return false;
       seen.add(s.path);
       return true;
     });
     // 磁盘读到的 title 为空但内存中有实时标题 -> 保留内存标题
-    for (const s of state.sessions) {
+    for (const s of sessions) {
       if (!s.title && memTitles.has(s.path)) {
         s.title = memTitles.get(s.path);
       }
     }
   }
+  // 项目会话缓存（树懒加载复用）
+  state.projectSessions[dirName] = sessions;
+  if (isCurrent) state.sessions = sessions;
+  // 同步跨项目 tab 元数据（标题/计数/首条消息更新）
+  for (const [p, meta] of state.activeTabMeta) {
+    const found = sessions.find(s => s.path === p);
+    if (found) {
+      meta.title = found.title || found.firstMessage || '新对话';
+      meta.messageCount = found.messageCount || 0;
+      meta.firstMessage = found.firstMessage || meta.firstMessage || '';
+    }
+  }
   renderSessionTabs();
-  renderHistoryPanel();
+  renderProjects();
 }
 
-// ── History Panel (左侧项目栏下方的可折叠历史对话区域) ──
-
-// 事件委托只绑一次
-let _historyPanelBound = false;  // 已废弃，保留避免引用错误
-
-function renderHistoryPanel() {
-  const container = document.getElementById('historyPanel');
-  if (!container) return;
-
-  const nonActiveSessions = state.sessions.filter(s => !state.activeSessionPaths.has(s.path));
-
-  let html = `<div class="history-header" id="historyToggle">
-    <span class="history-toggle-icon">${state.historyCollapsed ? '▶' : '▼'}</span>
-    <span>历史对话</span>
-    <span class="history-count">${nonActiveSessions.length}</span>
-  </div>`;
-
-  if (!state.historyCollapsed) {
-    html += '<div class="history-list">';
-    if (nonActiveSessions.length === 0) {
-      html += '<div class="history-empty">暂无历史对话</div>';
-    } else {
-      for (const session of nonActiveSessions) {
-        const title = session.title || session.firstMessage || '新对话';
-        const msgCount = session.messageCount || 0;
-        const timeStr = session.mtime ? relTime(session.mtime) : '';
-        html += `<div class="history-item" data-path="${escapeHtml(session.path)}">
-          <div class="history-item-info" data-path="${escapeHtml(session.path)}">
-            <span class="history-item-title">${escapeHtml(title.length > 25 ? title.substring(0, 25) + '...' : title)}</span>
-            <span class="history-item-meta">${msgCount}条${timeStr ? ' · ' + escapeHtml(timeStr) : ''}</span>
-          </div>
-          <div class="history-item-actions">
-            <button class="history-btn history-btn-archive" data-path="${escapeHtml(session.path)}" title="归档">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
-            </button>
-            <button class="history-btn history-btn-delete" data-path="${escapeHtml(session.path)}" title="删除">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
-          </div>
-        </div>`;
-      }
-    }
-    html += '</div>';
-  }
-
-  container.innerHTML = html;
-
-  // 折叠/展开（每次重新绑，因为 toggle 元素被 innerHTML 重建了）
-  const toggle = document.getElementById('historyToggle');
-  if (toggle) {
-    toggle.addEventListener('click', () => {
-      state.historyCollapsed = !state.historyCollapsed;
-      renderHistoryPanel();
-    });
-  }
-
-  // 事件绑定（用 .onclick= 赋值而非 addEventListener，自动替换旧处理器，避免累积）
-  container.onclick = async (e) => {
-    // 用 closest 查找按钮（SVG 子元素点击时 target 不是 button 本身）
-    const archiveBtn = e.target.closest('.history-btn-archive');
-    const deleteBtn = e.target.closest('.history-btn-delete');
-
-    // 归档按钮
-    if (archiveBtn) {
-      e.stopPropagation();
-      const sessionPath = archiveBtn.dataset.path;
-      if (sessionPath) {
-        const result = await tiffaDesktop.archiveSession(sessionPath);
-        if (result.success) {
-          addNotice('info', '对话已归档');
-          cleanupSessionMemory(sessionPath);
-          if (state.activeSessionPath === sessionPath) {
-            state.activeSessionPath = null;
-            // 必须同步清空 activeSessionId，否则事件路由保持严格模式，项目级事件被过滤
-            state.activeSessionId = null;
-            const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
-            if (remaining.length > 0) {
-              switchToSession(remaining[remaining.length - 1].path);
-            } else {
-              dom.messages.innerHTML = '';
-              showWelcome();
-              setTimeout(() => dom.input.focus(), 50);
-            }
-          }
-          await loadSessions(state.activeProjectDirName);
-          updateInputState();
-        } else {
-          addNotice('error', `归档失败: ${result.error || '未知错误'}`);
-        }
-      }
-      return;
-    }
-
-    // 删除按钮
-    if (deleteBtn) {
-      e.stopPropagation();
-      const sessionPath = deleteBtn.dataset.path;
-      if (sessionPath) {
-        if (!(await showModalConfirm('删除对话', '确定要删除这个对话吗？删除后无法恢复。'))) return;
-        const result = await tiffaDesktop.deleteSession(sessionPath);
-        if (result.success) {
-          addNotice('info', '对话已删除');
-          cleanupSessionMemory(sessionPath);
-          // 如果删除的是当前活跃对话，切换到其他对话或欢迎页
-          if (state.activeSessionPath === sessionPath) {
-            state.activeSessionPath = null;
-            const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
-            if (remaining.length > 0) {
-              switchToSession(remaining[remaining.length - 1].path);
-            } else {
-              dom.messages.innerHTML = '';
-              showWelcome();
-              setTimeout(() => dom.input.focus(), 50);
-            }
-          }
-          await loadSessions(state.activeProjectDirName);
-          updateInputState();
-        } else {
-          addNotice('error', `删除失败: ${result.error || '未知错误'}`);
-        }
-      }
-      return;
-    }
-
-    // 点击历史项 → 恢复到活跃tab
-    const itemInfo = e.target.closest('.history-item-info');
-    if (itemInfo) {
-      const sessionPath = itemInfo.dataset.path;
-      if (sessionPath) {
-        // 如果已在活跃tab中，直接切换到该tab
-        if (state.activeSessionPaths.has(sessionPath)) {
-          switchToSession(sessionPath);
-        } else {
-          state.activeSessionPaths.add(sessionPath);
-          switchToSession(sessionPath);
-          renderHistoryPanel();  // 从历史列表中移除
-        }
-      }
-    }
-  };
-
-  // 历史面板右键菜单
-  container.oncontextmenu = (e) => {
-    const itemInfo = e.target.closest('.history-item-info');
-    if (!itemInfo) return;
-    e.preventDefault();
-    const sessionPath = itemInfo.dataset.path;
-    if (!sessionPath) return;
-    const session = state.sessions.find(s => s.path === sessionPath);
-    if (session) {
-      showSessionTabContextMenu(e, session);
-    }
-  };
-}
 
 // ── Session Tabs ──
 
@@ -1928,7 +2113,7 @@ function setupSessionTabs() {
       state.sessions.push(newSession);
       state.activeSessionPath = tempSessionPath;
       state.activeSessionId = tempSessionId;
-      state.activeSessionPaths.add(tempSessionPath);
+      upsertTabMeta(newSession);  // 跨项目 tab 元数据
       if (state.currentProvider && state.currentModel) {
         state.sessionModelMap[tempSessionPath] = { provider: state.currentProvider, modelId: state.currentModel };
         saveModelMap();
@@ -1971,43 +2156,66 @@ function setupSessionTabs() {
   });
 }
 
-// ── 标签持久化：记住打开的对话标签，重启后恢复 ──
+// ── 标签持久化：记住打开的对话标签（跨项目全局），重启后恢复 ──
+
+const OPEN_TABS_KEY = 'tiffa:openTabs';
 
 function saveOpenTabs() {
-  if (!state.activeProjectDirName) return;
-  const key = `tiffa:openTabs:${state.activeProjectDirName}`;
+  const tabs = [];
+  for (const [path, meta] of state.activeTabMeta) {
+    if (path.startsWith('__new__')) continue;
+    tabs.push({
+      path,
+      dirName: meta.dirName,
+      title: meta.title,
+      firstMessage: meta.firstMessage,
+      messageCount: meta.messageCount,
+      sessionId: meta.sessionId,
+    });
+  }
   const data = {
-    paths: [...state.activeSessionPaths].filter(p => !p.startsWith('__new__')),
+    tabs,
     active: state.activeSessionPath && !state.activeSessionPath.startsWith('__new__') ? state.activeSessionPath : null,
   };
-  localStorage.setItem(key, JSON.stringify(data));
+  localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(data));
 }
 
 /**
- * 从 localStorage 恢复已打开的标签。
- * 返回 { paths: string[], active: string|null }，已过滤不存在的会话。
+ * 从 localStorage 恢复跨项目已打开的标签（全局）。
+ * 填充 activeSessionPaths / activeTabMeta / activeSessionPath，
+ * 并默认展开有 tab 的项目。启动时调用一次。
  */
-function restoreOpenTabs(dirName, sessions) {
-  const key = `tiffa:openTabs:${dirName}`;
+function restoreOpenTabs() {
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
+    const raw = localStorage.getItem(OPEN_TABS_KEY);
+    if (!raw) return;
     const data = JSON.parse(raw);
-    if (!data || !Array.isArray(data.paths) || data.paths.length === 0) return null;
-    const validPaths = new Set(sessions.map(s => s.path));
-    // 过滤 __new__ 临时路径（防御性：即使 saveOpenTabs 已过滤，localStorage 可能残留旧数据）
-    const paths = data.paths.filter(p => validPaths.has(p) && !p.startsWith('__new__'));
-    if (paths.length === 0) return null;
-    const active = (data.active && paths.includes(data.active)) ? data.active : paths[paths.length - 1];
-    return { paths, active };
-  } catch { return null; }
+    if (!data || !Array.isArray(data.tabs) || data.tabs.length === 0) return;
+    for (const t of data.tabs) {
+      if (!t || !t.path || t.path.startsWith('__new__')) continue;
+      state.activeSessionPaths.add(t.path);
+      const dir = t.dirName || dirNameFromSessionPath(t.path) || '';
+      state.activeTabMeta.set(t.path, {
+        dirName: dir,
+        title: t.title || '新对话',
+        firstMessage: t.firstMessage || '',
+        messageCount: t.messageCount || 0,
+        sessionId: t.sessionId || extractSessionId(t.path),
+      });
+      if (dir) state.expandedProjects.add(dir);  // 默认展开有 tab 的项目
+    }
+    if (data.active && state.activeTabMeta.has(data.active)) {
+      state.activeSessionPath = data.active;
+      state.activeSessionId = extractSessionId(data.active) || data.active;
+    }
+  } catch {}
 }
 
 function renderSessionTabs() {
   dom.sessionTabs.innerHTML = '';
 
-  // 顶栏只显示活跃的tab
-  const activeTabs = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
+  // 顶栏显示全部活跃 tab（跨项目全局）
+  const activeTabs = [...state.activeTabMeta.entries()].map(([path, meta]) => ({ path, ...meta }));
 
   if (activeTabs.length === 0) {
     const empty = document.createElement('div');
@@ -2019,35 +2227,38 @@ function renderSessionTabs() {
     return;
   }
 
-  for (const session of activeTabs) {
+  for (const meta of activeTabs) {
     const tab = document.createElement('button');
     tab.className = 'session-tab';
-    if (session.path === state.activeSessionPath) tab.classList.add('active');
-    if (state.sessionAgentRunning.get(session.path)) tab.classList.add('running');
-    const title = session.title || session.firstMessage || '新对话';
-    const msgCount = session.messageCount || 0;
+    if (meta.path === state.activeSessionPath) tab.classList.add('active');
+    if (state.sessionAgentRunning.get(meta.path)) tab.classList.add('running');
+    const title = meta.title || '新对话';
+    const msgCount = meta.messageCount || 0;
     tab.innerHTML = `
       <span class="session-tab-name">${escapeHtml(title.length > 12 ? title.substring(0, 12) + '…' : title)}</span>
       ${msgCount > 0 ? `<span class="session-tab-msgcount">${msgCount}</span>` : ''}
       <span class="session-tab-close" title="关闭标签（不删除对话）">&#10005;</span>`;
     tab.title = title;
+    tab.dataset.dirname = meta.dirName || '';
     tab.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showSessionTabContextMenu(e, session);
+      // 构造 session 对象供右键菜单使用
+      const sess = { path: meta.path, title: meta.title, firstMessage: meta.firstMessage, messageCount: meta.messageCount, sessionId: meta.sessionId };
+      showSessionTabContextMenu(e, sess);
     });
     tab.addEventListener('click', (e) => {
       if (e.target.classList.contains('session-tab-close')) {
         e.stopPropagation();
-        // 关闭标签：从活跃tab移除
-        state.activeSessionPaths.delete(session.path);
-        if (state.activeSessionPath === session.path) {
+        // 关闭标签：从活跃tab移除（不删除对话）
+        state.activeSessionPaths.delete(meta.path);
+        state.activeTabMeta.delete(meta.path);
+        if (state.activeSessionPath === meta.path) {
           state.activeSessionPath = null;
           // 必须同步清空 activeSessionId，否则事件路由保持严格模式，项目级事件被过滤
           state.activeSessionId = null;
-          const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
+          const remaining = [...state.activeTabMeta.keys()];
           if (remaining.length > 0) {
-            const adjacent = remaining[remaining.length - 1];
-            switchToSession(adjacent.path);
+            switchToSession(remaining[remaining.length - 1]);
           } else {
             dom.messages.innerHTML = '';
             showWelcome();
@@ -2056,9 +2267,10 @@ function renderSessionTabs() {
         }
         renderSessionTabs();
         saveOpenTabs();
+        refreshTreeSelection();  // 树中 open 标记同步
         return;
       }
-      switchToSession(session.path);
+      switchToSession(meta.path);
     });
     dom.sessionTabs.appendChild(tab);
   }
@@ -2074,6 +2286,24 @@ async function switchToSession(sessionPath) {
   if (state.sessionSwitching) return;
   state.sessionSwitching = true;
   updateInputState();
+
+  // 跨项目 tab 切换：先切项目上下文（实例 + 高亮 + 懒加载会话缓存）
+  const targetDir = dirNameFromSessionPath(sessionPath);
+  if (targetDir && targetDir !== state.activeProjectDirName) {
+    const ok = await ensureProjectContext(targetDir);
+    if (!ok) {
+      // 项目不存在（已归档/删除）：移除该 tab 并中止
+      state.activeTabMeta.delete(sessionPath);
+      state.activeSessionPaths.delete(sessionPath);
+      state.sessionSwitching = false;
+      updateInputState();
+      renderSessionTabs();
+      saveOpenTabs();
+      refreshTreeSelection();
+      return;
+    }
+  }
+
   const oldSessionPath = state.activeSessionPath;
 
   // 切换对话时丢弃未发送的排队消息
@@ -2089,7 +2319,16 @@ async function switchToSession(sessionPath) {
   stopFirstResponseCheck();
 
   state.activeSessionPath = sessionPath;
-  state.activeSessionPaths.add(sessionPath);
+  // 打开 tab：确保元数据存在（树节点点击或历史恢复路径可能已 upsert，这里兜底）
+  if (!state.activeTabMeta.has(sessionPath)) {
+    const dir = targetDir || state.activeProjectDirName;
+    const list = (dir && state.projectSessions[dir]) || state.sessions || [];
+    const sessObj = list.find(s => s.path === sessionPath);
+    if (sessObj) upsertTabMeta(sessObj);
+    else upsertTabMetaLite(sessionPath, dir);
+  } else {
+    state.activeSessionPaths.add(sessionPath);
+  }
 
   // 提取目标对话的 sessionId
   // __new__ tab：从 session 对象取存储的 tempSessionId（实例 key 用的是这个 UUID）
@@ -2101,17 +2340,19 @@ async function switchToSession(sessionPath) {
   }
   state.activeSessionId = targetSessionId || sessionPath;  // 实在没有才用 path 自身作 id
 
-  // 活跃tab上限8个，超过时移除最早未激活的
-  const activeList = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
+  // 活跃tab上限8个（全局），超过时移除最早未激活的
+  const activeList = [...state.activeTabMeta.keys()];
   if (activeList.length > 8) {
-    for (const s of activeList) {
-      if (s.path !== sessionPath) {
-        state.activeSessionPaths.delete(s.path);
+    for (const p of activeList) {
+      if (p !== sessionPath) {
+        state.activeSessionPaths.delete(p);
+        state.activeTabMeta.delete(p);
         break;
       }
     }
   }
   renderSessionTabs();
+  refreshTreeSelection();  // 树中当前会话高亮/标记
   try {
     // 缓存当前会话的消息 DOM
     if (oldSessionPath) {
@@ -2257,7 +2498,7 @@ async function switchToSession(sessionPath) {
     updateInputState();
   }
   saveOpenTabs();
-  renderHistoryPanel();
+  refreshTreeSelection();  // 树中当前会话高亮/标记同步
   state.sessionSwitching = false;
   updateInputState();
   restoreTodoPhases();  // 恢复目标会话的 Todo 面板
@@ -2430,10 +2671,13 @@ function updateSessionTabTitle(title) {
       tab.title = title;
     }
   }
-  // 同步到 state.sessions
+  // 同步到 state.sessions 与跨项目 tab 元数据
   if (state.activeSessionPath) {
     const session = state.sessions.find(s => s.path === state.activeSessionPath);
     if (session) session.title = title;
+    if (state.activeTabMeta.has(state.activeSessionPath)) {
+      state.activeTabMeta.get(state.activeSessionPath).title = title;
+    }
   }
 }
 
@@ -3407,7 +3651,7 @@ async function sendMessage() {
     state.sessions.push(newSession);
     state.activeSessionPath = tempPath;
     state.activeSessionId = tempSessionId;
-    state.activeSessionPaths.add(tempPath);
+    upsertTabMeta(newSession);  // 跨项目 tab 元数据
     renderSessionTabs();
     saveOpenTabs();
     // 激活对话级实例
@@ -3424,6 +3668,17 @@ async function sendMessage() {
     } catch (err) {
       addNotice('error', `创建对话失败: ${err.message}`);
       return;
+    }
+  }
+
+  // 新建会话（__new__ 阶段）：同步首条消息作为 firstMessage，让手动/自动重命名有标题上下文
+  if (state.activeSessionPath && state.activeSessionPath.startsWith('__new__')) {
+    const ns = state.sessions.find(s => s.path === state.activeSessionPath);
+    if (ns && !ns.firstMessage && message) {
+      ns.firstMessage = message.substring(0, 100);
+      if (state.activeTabMeta.has(state.activeSessionPath)) {
+        state.activeTabMeta.get(state.activeSessionPath).firstMessage = ns.firstMessage;
+      }
     }
   }
 
@@ -4185,9 +4440,9 @@ async function archiveSessionFromTab(session) {
     cleanupSessionMemory(session.path);
     if (state.activeSessionPath === session.path) {
       state.activeSessionPath = null;
-      const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
+      const remaining = [...state.activeTabMeta.keys()];
       if (remaining.length > 0) {
-        switchToSession(remaining[remaining.length - 1].path);
+        switchToSession(remaining[remaining.length - 1]);
       } else {
         dom.messages.innerHTML = '';
         showWelcome();
@@ -4212,9 +4467,9 @@ async function deleteSessionFromTab(session) {
       state.activeSessionPath = null;
       // 必须同步清空 activeSessionId，否则事件路由保持严格模式，项目级事件被过滤
       state.activeSessionId = null;
-      const remaining = state.sessions.filter(s => state.activeSessionPaths.has(s.path));
+      const remaining = [...state.activeTabMeta.keys()];
       if (remaining.length > 0) {
-        switchToSession(remaining[remaining.length - 1].path);
+        switchToSession(remaining[remaining.length - 1]);
       } else {
         dom.messages.innerHTML = '';
         showWelcome();
@@ -4243,53 +4498,178 @@ async function renameSession(session) {
     session.title = trimmedTitle;
     session.firstMessage = trimmedTitle.substring(0, 30);
     renderSessionTabs();
-    renderHistoryPanel();
+    if (state.activeTabMeta.has(session.path)) state.activeTabMeta.get(session.path).title = trimmedTitle;
+    saveOpenTabs();
+    refreshTreeSelection();
+    state.autoNamedSessions.add(session.path);  // 手动命名过，不再自动覆盖
     return;
   }
   const result = await tiffaDesktop.renameSession(session.path, trimmedTitle);
   if (result.success) {
     session.title = trimmedTitle;
     renderSessionTabs();
-    renderHistoryPanel();
+    if (state.activeTabMeta.has(session.path)) state.activeTabMeta.get(session.path).title = trimmedTitle;
+    saveOpenTabs();
+    refreshTreeSelection();
+    state.autoNamedSessions.add(session.path);  // 手动命名过，不再自动覆盖
     addNotice('success', '对话已重命名');
   } else {
     addNotice('error', `重命名失败: ${result.error || '未知错误'}`);
   }
 }
 
-// AI 重命名：读取对话前几条消息，让模型生成标题，全程不渲染到聊天区
+// ── 标题生成（豆包轻量模型） ──
+
+// 文艺风格标题 prompt（首轮自动重命名用，上下文为首条消息）
+function buildTitlePrompt(context) {
+  return `[SYSTEM: title_generation_task] 立即执行，禁止思考、禁止分析、禁止解释。\n操作：为以下对话生成一个≤10字的中文标题。\n风格要求：文艺、凝练、有意境，像古诗标题或棋道术语（例如：“填坑即增强”“棋落无声”“墨晕初开”），禁止工程日志风格（禁止“修复XXX问题”“实现XXX功能”）。\n输入：${context}\n输出：`;
+}
+
+// 重命名 prompt（手动 AI 重命名用：最近 N 条消息 + 原标题，纠正主题漂移）
+function buildRenamePrompt(recentText, oldTitle) {
+  const titleLine = oldTitle ? `原标题「${oldTitle}」（若已不符合最近内容就重命名，符合则保持原样输出）：\n` : '';
+  return `[SYSTEM: title_generation_task] 立即执行，禁止思考、禁止分析、禁止解释。\n操作：根据对话最近的交流内容，为对话生成一个≤10字的中文标题。\n要求：对话主题可能已漂移，以最近的内容为准。\n${titleLine}风格要求：文艺、凝练、有意境，像古诗标题或棋道术语（例如：“填坑即增强”“棋落无声”“墨晕初开”），禁止工程日志风格（禁止“修复XXX问题”“实现XXX功能”）。\n最近对话：\n${recentText}\n输出：`;
+}
+
+// 从会话历史提取最近 N 条可读文本（用户/助手消息，跳过 thinking 与空内容）
+function extractRecentMessages(messages, n) {
+  if (!Array.isArray(messages)) return '';
+  const lines = [];
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    const text = (m.text || '').trim();
+    if (!text) continue;
+    const truncated = text.length > 200 ? text.substring(0, 200) + '…' : text;
+    lines.push(`${m.role === 'user' ? '用户' : '助手'}: ${truncated}`);
+  }
+  return lines.slice(-n).join('\n');
+}
+
+// 自动 AI 重命名：对话结束后用豆包生成文艺标题（静默，不打扰，防并发）
+// 豆包会根据"原标题是否贴切"决定保留或重命名——内核/工程标题会被替换，用户手动命名的会保留
+let _autoRenameInFlight = false;
+async function autoRenameWithLightModel(session) {
+  if (_autoRenameInFlight) return;
+  const sessPath = session && session.path;
+  if (!sessPath) return;
+  _autoRenameInFlight = true;
+  try {
+    // 上下文：优先最近 N 条消息（主题可能漂移），回退 firstMessage
+    let context = '';
+    try {
+      if (!sessPath.startsWith('__new__')) {
+        const hist = await tiffaDesktop.loadSessionHistory(sessPath);
+        if (hist && !hist.error && hist.messages) {
+          context = extractRecentMessages(hist.messages, 6);
+        }
+      }
+    } catch {}
+    if (!context.trim()) context = session.firstMessage || '';
+    if (!context.trim()) return;
+    const oldTitle = session.title && session.title !== '新对话' ? session.title : null;
+    const prompt = buildRenamePrompt(context, oldTitle);
+    const result = await tiffaDesktop.completeWithLightModel(prompt, 40, state.currentProvider, state.currentModel);
+    if (result && !result.error && result.text) {
+      const title = result.text.trim().replace(/^["'“”《]+|["'“”》]+$/g, '').substring(0, 30);
+      if (title && title !== session.title) {
+        session.title = title;
+        if (state.activeTabMeta.has(sessPath)) {
+          state.activeTabMeta.get(sessPath).title = title;
+        }
+        if (!sessPath.startsWith('__new__')) {
+          await tiffaDesktop.renameSession(sessPath, title).catch(() => {});
+        }
+        renderSessionTabs();
+        saveOpenTabs();
+        refreshTreeSelection();
+        if (state.activeProjectDirName) {
+          loadSessions(state.activeProjectDirName);
+        }
+      }
+      state.autoNamedSessions.add(sessPath);
+      addNotice('info', `已自动重命名：${title || '(标题未变)'}（${result.model || '当前模型'}）`);
+      console.log('[自动重命名] 完成:', title || '(标题未变)', '| 模型:', result.model, result.modelId);
+    } else {
+      console.warn('[自动重命名] 模型调用失败:', result && result.error);
+    }
+  } catch (err) {
+    console.warn('[自动重命名] 异常:', err.message);
+  } finally {
+    _autoRenameInFlight = false;
+  }
+}
+
+// AI 重命名：读取对话前几条消息，用轻量模型（豆包普通对话 API）生成标题，即时应用
 async function aiRenameSession(session) {
   if (!session || !session.path) return;
-  if (state.aiRenameMode) {
-    addNotice('warning', '正在重命名中，请稍候');
-    return;
-  }
   if (state.agentRunning) {
     addNotice('warning', 'AI 正在回复中，请等待完成后再重命名');
     return;
   }
 
-  // 1. 获取对话上下文（标题上下文来源：firstMessage，内存中直接取，零延迟）
-  let context = session.firstMessage || '';
-  if (!context) {
-    addNotice('warning', '对话没有内容，无法生成标题');
+  // 1. 取上下文：优先最近 N 条消息（对话主题可能漂移，以最近为准），回退 firstMessage
+  let context = '';
+  const oldTitle = session.title && session.title !== '新对话' ? session.title : null;
+  try {
+    if (!session.path.startsWith('__new__')) {
+      const hist = await tiffaDesktop.loadSessionHistory(session.path);
+      if (hist && !hist.error && hist.messages) {
+        context = extractRecentMessages(hist.messages, 6);
+      }
+    }
+  } catch {}
+  if (!context.trim()) {
+    context = session.firstMessage || '';
+  }
+  if (!context.trim()) {
+    addNotice('warning', session.path.startsWith('__new__')
+      ? '新建对话还在初始化，请稍候几秒再重命名'
+      : '对话没有内容，无法生成标题');
     return;
   }
 
-  // 2. 进入 AI 重命名模式（抑制渲染）
-  state.aiRenameMode = session;
-  state.aiRenameText = '';
   addNotice('info', '正在生成标题…');
 
-  // 3. 发送隐藏 prompt
-  const prompt = `[SYSTEM: title_generation_task] 立即执行，禁止思考、禁止分析、禁止解释。\n操作：为以下对话生成一个≤10字的中文标题。\n风格要求：文艺、凝练、有意境，像古诗标题或棋道术语（例如：“填坑即增强”“棋落无声”“墨晕初开”），禁止工程日志风格（禁止“修复XXX问题”“实现XXX功能”）。\n输入：${context}\n输出：`;
+  // 2. 走豆包轻量模型（普通对话，不经 agent 主模型），结合最近内容 + 原标题
+  const prompt = buildRenamePrompt(context, oldTitle);
+  let result;
   try {
-    await tiffaDesktop.send(prompt, [], state.activeSessionId);
+    result = await tiffaDesktop.completeWithLightModel(prompt, 80, state.currentProvider, state.currentModel);
   } catch (err) {
-    state.aiRenameMode = null;
     addNotice('error', `AI 重命名失败: ${err.message}`);
+    return;
   }
-  // agent_end 事件中会处理标题应用（见 handleEvent 中的 aiRenameMode 逻辑）
+  if (result && result.error) {
+    addNotice('error', `AI 重命名失败: ${result.error}`);
+    return;
+  }
+  let title = ((result && result.text) || '').trim().replace(/^["'“”《]+|["'“”》]+$/g, '').substring(0, 30);
+  if (!title) {
+    addNotice('warning', 'AI 未能生成标题');
+    return;
+  }
+
+  // 3. 即时应用标题（不再等 agent_end 异步流）
+  session.title = title;
+  if (state.activeTabMeta.has(session.path)) {
+    state.activeTabMeta.get(session.path).title = title;
+  }
+  if (!session.path.startsWith('__new__')) {
+    const r = await tiffaDesktop.renameSession(session.path, title);
+    if (r && r.error) {
+      addNotice('error', `保存标题失败: ${r.error}`);
+      return;
+    }
+  }
+  state.autoNamedSessions.add(session.path);  // 手动 AI 命名过，不再自动覆盖
+  renderSessionTabs();
+  saveOpenTabs();
+  refreshTreeSelection();
+  // 刷新项目会话缓存，树中标题同步
+  if (state.activeProjectDirName) {
+    loadSessions(state.activeProjectDirName);
+  }
+  addNotice('success', `已重命名：${title}（${result.model || '当前模型'}）`);
 }
 
 // ── 分支功能 ──

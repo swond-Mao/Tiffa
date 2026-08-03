@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   archiveSession: (sessionPath) => ipcRenderer.invoke('sessions:archiveSession', sessionPath),
   deleteSession: (sessionPath) => ipcRenderer.invoke('sessions:deleteSession', sessionPath),
   renameSession: (sessionPath, newTitle) => ipcRenderer.invoke('sessions:rename', sessionPath, newTitle),
+  // 轻量模型补全（AI 重命名等小任务；豆包优先，失败降级旁路主模型）
+  completeWithLightModel: (prompt, maxTokens, providerHint, modelHint) => ipcRenderer.invoke('ai:complete', { prompt, maxTokens, providerHint, modelHint }),
   listArchivedSessions: (projectDirName) => ipcRenderer.invoke('sessions:listArchivedSessions', projectDirName),
   restoreSession: (sessionPath) => ipcRenderer.invoke('sessions:restoreSession', sessionPath),
   getUserEntries: (sessionPath) => ipcRenderer.invoke('sessions:getUserEntries', sessionPath),
