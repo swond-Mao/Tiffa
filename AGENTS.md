@@ -1,6 +1,6 @@
-# AGENTS.md — Tiffa 项目规范（v7 · 2026-08-02）
+# AGENTS.md — Tiffa 项目规范（v7 · 2026-08-05）
 
-> 本文所有数字均在 2026-08-02 现场核实（对应 commit `163d3d3`）。
+> 本文所有数字均在 2026-08-05 现场核实。
 > 详细设计与踩坑记录见 `开发文档.md`；本文只保留每会话必须常驻的规范。
 
 ## 项目概述
@@ -94,7 +94,8 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 | L2 | 全局 bank | 跨项目使用历史 | 语义召回 |
 | L3 | `<项目>/PROJECT.md` | 项目纲领/铁律 | 每会话全文注入（hook 自动生成脚手架） |
 | L4 | 项目 bank | 项目近期进度 | 语义召回（优先） |
-| L5 | gap-fill | 本次对话瞬时上下文 | 压缩时即时注入，60 分钟后清理 |
+
+> **压缩时对话连续性**：不再依赖独立的 gap-fill 层（2026-08-05 已废弃，每会话独立 dump + 60 分钟清理维护成本过高且与 Mnemopi 重叠）。会话压缩由扩展 `session.compacting` hook 走 ③ 旁路结构化总结（详见下文），生成的 9 段摘要即对话连续性载体；工具调用/结果细节经 `messageToParts` 提取后进入摘要（语义级），无需每会话额外 dump。
 
 ### 写入路由
 
@@ -149,9 +150,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 
 ## Claude 化扩展 (v6.2)
 
-扩展文件：`plugins/claude-mode-extension.ts`（779 行），通过 `-e` 参数加载。
-
-> ⚠️ **文件头注释已过期**：注释声称 gap-fill「已删除，由 Mnemopi autoRecall 覆盖」，但代码中 gap-fill **完整存在**（22 处引用 + `session.compacting` hook 在册）。以代码为准。
+扩展文件：`plugins/claude-mode-extension.ts`（1063 行），通过 `-e` 参数加载。
 
 ### 6 个 Hooks
 
@@ -160,18 +159,21 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 | 0 | `session_start` | 移除 eval/hub 工具 |
 | 1 | `before_agent_start` | 注入 USER.md + PROJECT.md（含脚手架自动生成）+ 静默工具调用计数重置 |
 | 2 | `tool_call` | 危险拦截 + 熔断 + 技能强制 + 静默检测（见第 3 层约束） |
-| 3 | `session.compacting` | gap-fill 提取 + compact dump + 立即返回 context 注入 |
+| 3 | `session.compacting` | 压缩路由：① 本地视觉 snapcompact → ② 主模型视觉 snapcompact → ③ 旁路模型结构化总结（9 段）→ ④ 内核自压兜底（gap-fill 已废弃） |
 | 4 | `session_stop` | error 续行一次（最多一次，5 秒延迟），其他不干预 |
 | 5 | `tool_result` | 审计日志（JSONL） |
 
-### gap-fill 断片补救
+### 压缩摘要（替代 gap-fill · 2026-08-05 废弃 gap-fill）
 
-1. **触发**：`session.compacting` hook
-2. **compact dump**：`data/memory/inbox/compact-{sessionId}-{ts}.txt`（最近 50 条消息原文，单条截断 2000 字符）
-3. **提取**：改动文件、关键命令（排除 ls/cd/echo 等）、决策要点（正则去噪，上限 60 条）
-4. **落盘**：`data/memory/inbox/gap-fill-{sessionId}.md`
-5. **立即注入**：返回 `{context: [gapFill内容]}`，不等下轮
-6. **清理**：60 分钟后自动删除（跨 session）
+gap-fill 原设计为「每会话独立 dump 最近 50 条消息原文（`data/memory/inbox/compact-{sessionId}-{ts}.txt`）+ 落盘 `gap-fill-{sessionId}.md` + 60 分钟清理」，维护成本高且与 Mnemopi 语义召回重叠，已从扩展层彻底移除（grep 无残留）。
+
+现由 `session.compacting` hook 的 **③ 旁路结构化总结** 承担对话连续性：
+
+1. **触发**：内核 `session.compacting` 压缩事件
+2. **提取**：`messageToParts()` 统一提取 transcript 的 user/assistant 文本 + `tool_use`/`tool_result` 分片（兼容嵌套 `message` 字段与数组 content），转成 `[工具调用]`/`[工具结果]` 文本
+3. **总结**：旁路模型（env > `data/agent/bypass-model.json` > config default）生成 9 段结构化摘要（数据/指令隔离 prompt 防回显），落盘 `data/agent/last-compact-summary.md`
+4. **兜底**：旁路不可达/失败 → ④ 内核 LLM 自压（`return undefined`，扩展不注入 gap）
+5. **工具细节归属**：recall（Mnemopi）只存 user/assistant 文本、**不存工具**；工具调用/结果的连续性由 ③ 摘要的语义级保留覆盖，故无需复活 gap-fill
 
 ### 技能加载方式
 

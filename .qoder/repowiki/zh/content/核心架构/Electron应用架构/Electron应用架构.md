@@ -16,17 +16,14 @@
 
 ## 更新摘要
 **所做更改**   
-- 增强了主进程实例生命周期管理，支持会话ID迁移和崩溃重启上下文恢复
-- 实现了内存召回功能，直接查询mnemopi SQLite FTS数据库
-- 优化了环境路径配置，支持便携模式下的盘符迁移和数据修复
-- 完善了启动遮罩机制，确保后端就绪后再允许用户操作
-- 改进了多对话实例管理，支持每个对话独立进程隔离
+- 增强了主进程AI完成处理器，支持智能会话重命名和轻量模型调用
+- 完善了错误处理机制，包括IPC通信异常捕获和恢复策略
+- 优化了多对话实例管理，支持每个对话独立进程隔离和状态同步
+- 改进了启动流程，增加启动遮罩和后端就绪检测机制
 - **新增**：WebP图像处理支持，自动转换为PNG格式确保模型兼容性
-- **新增**：改进的错误处理机制，增强异常捕获和恢复能力
-- **新增**：优化的前端交互体验，包括启动遮罩状态管理和用户反馈
+- **新增**：内存召回功能，直接查询mnemopi SQLite FTS数据库
 - **最新**：品牌图标集成与窗口尺寸优化，提升用户体验和视觉一致性
 - **新增**：FollowScroll三态机实现，提供智能滚动跟随行为
-- **新增**：tiffa-desktop.exe启动器已嵌入品牌图标资源
 
 ## 目录
 1. [简介](#简介)
@@ -49,7 +46,7 @@
 - 三进程通信关系与数据流向的架构图
 - 面向初学者的 Electron 基础概念，以及面向高级开发者的安全最佳实践与性能优化建议
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验。**最新优化**：集成了品牌图标资源，优化了窗口初始尺寸（1600x1000）和最小尺寸限制（1100x720），提升了应用的专业性和用户体验。同时实现了FollowScroll三态机，提供智能滚动跟随行为，并在tiffa-desktop.exe启动器中嵌入了品牌图标资源。
+**最新更新**：增强了主进程AI完成处理器，实现了智能会话重命名、改进的错误处理机制和优化IPC通信。新增了WebP图像处理支持、内存召回功能和启动遮罩机制。**最新优化**：集成了品牌图标资源，优化了窗口初始尺寸（1600x1000）和最小尺寸限制（1100x720），提升了应用的专业性和用户体验。同时实现了FollowScroll三态机，提供智能滚动跟随行为。
 
 ## 项目结构
 Tiffa 采用典型的 Electron 多进程架构：
@@ -106,7 +103,7 @@ R --> F
   - 窗口创建与配置（BrowserWindow），启用 contextIsolation，禁用 nodeIntegration，按需开启 sandbox=false 以便通过 preload 访问文件系统
   - 子进程管理：启动并维护 Tiffa 内核进程（Bun + CLI），JSONL 协议通信，自动重启与 LRU 淘汰
   - IPC 路由：将渲染进程请求转发到对应实例，统一事件分发
-  - **新增**：会话ID迁移、崩溃重启上下文恢复、内存召回功能、WebP图像处理支持
+  - **新增**：AI完成处理器，支持智能会话重命名和轻量模型调用
   - **最新**：品牌图标集成，优化窗口尺寸配置
 - 预加载脚本（preload.js）
   - 使用 contextBridge.exposeInMainWorld 暴露最小化 API（tiffaDesktop）
@@ -160,9 +157,9 @@ M-->>R : 返回结果或事件
 ```
 
 **图表来源** 
-- [electron/main.js:882-997](file://electron/main.js#L882-L997)
+- [electron/main.js:882-997](file://electron/main.js#L882-997)
 - [electron/preload.js:24-134](file://electron/preload.js#L24-L134)
-- [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-L524)
+- [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-524)
 - [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
 
 ## 详细组件分析
@@ -180,11 +177,10 @@ M-->>R : 返回结果或事件
   - 统一 handle('tiffa:*') 通道，转发到对应实例；事件通过 webContents.send('tiffa:event', event) 推送渲染进程
   - 特殊命令拦截（如 /omfg）生成规则提示，增强约束
   - **新增**：memory:recall 通道直接查询 mnemopi SQLite FTS 数据库
-- **新增**：WebP图像处理支持
-  - 在发送消息前自动检测WebP格式图片
-  - 使用Electron内置nativeImage进行格式转换
-  - 转换为PNG格式确保所有模型兼容性
-  - 失败时保留原图并记录警告日志
+- **新增**：AI完成处理器
+  - completeWithLightModel 处理器，支持轻量模型调用
+  - 智能会话重命名功能，使用豆包模型优先，失败降级旁路主模型
+  - 错误处理和超时控制，确保稳定性
 
 ```mermaid
 classDiagram
@@ -225,18 +221,18 @@ TiffaInstanceManager --> TiffaInstance : "管理多个实例"
 - [electron/main.js:813-831](file://electron/main.js#L813-L831)
 - [electron/main.js:149-465](file://electron/main.js#L149-L465)
 - [electron/main.js:471-787](file://electron/main.js#L471-787)
-- [electron/main.js:882-997](file://electron/main.js#L882-L997)
+- [electron/main.js:882-997](file://electron/main.js#L882-997)
 
 ### 预加载脚本（preload.js）安全桥接
 - 通过 contextBridge.exposeInMainWorld('tiffaDesktop', {...}) 暴露受控 API
 - 仅暴露必要方法：发送消息、中止、模型管理、文件系统读取/写入、外部路径打开、会话/项目管理、Markdown 渲染等
 - 使用 ipcRenderer.invoke/on 与主进程通信，屏蔽底层通道名，避免渲染进程直接访问敏感 API
-- **新增**：内存召回 API（recallMemory）
+- **新增**：内存召回 API（recallMemory）和AI完成API（completeWithLightModel）
 
 ```mermaid
 flowchart TD
 Start(["渲染进程调用 tiffaDesktop"]) --> CheckAPI{"是否已暴露的方法?"}
-CheckAPI --> |是| Invoke["ipcRenderer.invoke('tiffa:*' | 'fs:*' | 'shell:*' | 'sessions:*' | 'models:*' | 'config:*' | 'workspace:*' | 'xml-translation:*' | 'memory:*')"]
+CheckAPI --> |是| Invoke["ipcRenderer.invoke('tiffa:*' | 'fs:*' | 'shell:*' | 'sessions:*' | 'models:*' | 'config:*' | 'workspace:*' | 'xml-translation:*' | 'memory:*' | 'ai:*')"]
 CheckAPI --> |否| Deny["拒绝调用(未暴露)"]
 Invoke --> MainIPC["主进程处理器执行"]
 MainIPC --> Result["返回结果/事件"]
@@ -286,7 +282,7 @@ R->>R : FollowScroll三态机处理滚动行为
 
 **图表来源** 
 - [electron/renderer/app.js:387-524](file://electron/renderer/app.js#L387-L524)
-- [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-L524)
+- [electron/renderer/app.js:486-524](file://electron/renderer/app.js#L486-524)
 - [electron/renderer/app.js:391-523](file://electron/renderer/app.js#L391-L523)
 
 **章节来源**
@@ -328,6 +324,38 @@ A --> F["followScroll"]
 - [electron/renderer/index.html:1-261](file://electron/renderer/index.html#L1-L261)
 - [electron/renderer/styles.css:1-200](file://electron/renderer/styles.css#L1-L200)
 - [electron/renderer/themes.js:1-200](file://electron/renderer/themes.js#L1-L200)
+
+### 新增功能：AI完成处理器
+- 主进程实现
+  - completeWithLightModel IPC处理器，支持轻量模型调用
+  - 智能会话重命名功能，使用豆包模型优先，失败时降级到旁路主模型
+  - 错误处理和超时控制，确保服务稳定性
+- 渲染进程实现
+  - AI重命名模式切换，专用重命名界面
+  - 累积AI返回的标题文本，实时更新UI
+  - 成功重命名后自动更新会话列表和标签页
+
+```mermaid
+flowchart TD
+User["用户触发重命名"] --> AIMode["进入AI重命名模式"]
+AIMode --> Query["调用 tiffaDesktop.completeWithLightModel(prompt)"]
+Query --> MainProcess["主进程 ai:complete 处理器"]
+MainProcess --> LightModel["调用轻量模型(豆包优先)"]
+LightModel --> Success{"调用成功?"}
+Success --> |是| Title["生成标题文本"]
+Success --> |否| Fallback["降级到旁路主模型"]
+Fallback --> Title
+Title --> Update["更新会话标题"]
+Update --> Render["刷新UI显示"]
+```
+
+**图表来源** 
+- [electron/main.js:74-83](file://electron/main.js#L74-L83)
+- [electron/renderer/app.js:911-938](file://electron/renderer/app.js#L911-L938)
+
+**章节来源**
+- [electron/main.js:74-83](file://electron/main.js#L74-L83)
+- [electron/renderer/app.js:911-938](file://electron/renderer/app.js#L911-L938)
 
 ### 新增功能：WebP图像处理支持
 - 主进程实现
@@ -446,7 +474,6 @@ Render --> Display["显示记忆内容、来源、时间等信息"]
   - 应用启动时显示品牌图标，增强视觉一致性
   - 窗口尺寸适配不同屏幕分辨率
   - 最小尺寸保证基本功能可用性
-- **新增**：tiffa-desktop.exe启动器已嵌入品牌图标资源
 
 **章节来源**
 - [electron/main.js:813-831](file://electron/main.js#L813-L831)
@@ -550,7 +577,7 @@ Main --> Assets["assets/tiffa-icon.ico"]
 - **新增排查**：启动遮罩长时间不消失可能是后端启动失败，检查端口占用或服务状态
 - **新增排查**：内存召回失败检查 Python 环境和 mnemopi 数据库文件完整性
 - **新增排查**：WebP图片转换失败检查Electron版本和图片数据格式
-- **最新排查**：品牌图标不显示检查 assets/tiffa-icon.ico 文件是否存在且路径正确
+- **新增排查**：AI重命名失败检查轻量模型配置和网络连接
 - **新增排查**：FollowScroll三态机异常检查事件监听器是否正确绑定
 
 **章节来源**
@@ -561,7 +588,7 @@ Main --> Assets["assets/tiffa-icon.ico"]
 ## 结论
 Tiffa 的 Electron 架构清晰分离了主进程、预加载脚本与渲染进程的职责，通过 contextIsolation 与最小化 API 暴露实现安全通信。主进程集中管理子进程与 IPC，预加载脚本作为可信桥接层，渲染进程专注于 UI 与交互。该设计兼顾安全性与性能，适合初学者理解 Electron 基础，也为高级开发者提供了可扩展的安全与优化空间。
 
-**最新更新**：增强了主进程实例生命周期管理，实现了会话ID迁移、崩溃重启上下文恢复、内存召回功能和环境路径配置优化。新增了WebP图像处理支持、改进的错误处理机制和优化前端交互体验，进一步提升了用户体验和系统稳定性。**最新优化**：品牌图标集成和窗口尺寸优化，提升了应用的专业性和用户体验的一致性。同时实现了FollowScroll三态机，提供了智能的滚动跟随行为，并在tiffa-desktop.exe启动器中嵌入了品牌图标资源。
+**最新更新**：增强了主进程AI完成处理器，实现了智能会话重命名、改进的错误处理机制和优化IPC通信。新增了WebP图像处理支持、内存召回功能和启动遮罩机制，进一步提升了用户体验和系统稳定性。**最新优化**：品牌图标集成和窗口尺寸优化，提升了应用的专业性和用户体验的一致性。同时实现了FollowScroll三态机，提供了智能的滚动跟随行为。
 
 [本节为总结性内容，不直接分析具体文件]
 

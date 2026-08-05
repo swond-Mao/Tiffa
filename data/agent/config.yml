@@ -30,3 +30,4 @@ snapcompact:
 
 tools:
   approvalMode: yolo
+  xdevInlineDevices: [ "recall", "retain", "reflect", "memory_edit" ]

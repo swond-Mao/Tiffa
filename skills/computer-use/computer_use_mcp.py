@@ -46,9 +46,10 @@ def _ensure_uia():
 # ══════════════════════════════════════════════════════════════
 # Grounding 子模型配置（可选，不配则完全走原有 UIA/OCR 路径）
 # ══════════════════════════════════════════════════════════════
-# 环境变量：
-#   GROUNDING_API_BASE  — OpenAI 兼容 API 地址（如 http://127.0.0.1:8080/v1 或 https://api.kimi.moonshot.cn/v1）
-#   GROUNDING_MODEL     — 模型名（默认 xiaomi/mimo-v2-flash，便宜快）
+# 环境变量（优先级最高，覆盖 grounding.json 与 role 联动）：
+#   GROUNDING_API_BASE  — OpenAI 兼容 API 地址（如 http://127.0.0.1:8080/v1 或 https://ark.cn-beijing.volces.com/api/v3）
+#   GROUNDING_MODEL     — 模型名。**必须是视觉模型（VLM）**，需支持多模态 image_url 输入；
+#                          默认优先级：grounding.json 的 model > role 联动解析 > 兜底 xiaomi/mimo-v2-flash
 #   GROUNDING_API_KEY   — API Key（本地 llama.cpp 可留空）
 #   GROUNDING_ENABLED   — "1" 启用 / "0" 禁用（默认：有 API_BASE 就启用）
 
