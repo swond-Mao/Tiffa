@@ -42,7 +42,7 @@ Tiffa 是基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 助手，做了
 
 ---
 
-## 核心架构：五重记忆
+## 核心架构：四重记忆（压缩摘要兜底连续性）
 
 AI 不该是金鱼。Tiffa 的记忆不是简单存储，是一套分层的生命体——从永久到瞬间，各管各的时间尺度：
 
@@ -59,13 +59,12 @@ AI 不该是金鱼。Tiffa 的记忆不是简单存储，是一套分层的生�
 ├─────────────────────────────────────────────┤
 │  L4  项目 bank     项目近期进度（甘特图）  → 语义召回，优先于全局 │
 │      "昨天修了 ComfyUI 管线，今天调侧边栏"                      │
-├─────────────────────────────────────────────┤
-│  L5  gap-fill      本次对话的瞬时上下文    → 压缩时即时注入，60分钟后消散 │
-│      "刚才讨论到一半的那个方案"                            │
 └─────────────────────────────────────────────┘
 ```
 
-L1 保证它知道“跟谁说话”，L2 保证它记得“一起干过什么”，L3 保证它不偏离方向，L4 保证它记得“昨天干了什么”，L5 保证长对话中间不断片。
+L1 保证它知道“跟谁说话”，L2 保证它记得“一起干过什么”，L3 保证它不偏离方向，L4 保证它记得“昨天干了什么”。
+
+> **长对话不断片**：原 L5「gap-fill」已于 2026-08-05 废弃（每会话独立 dump + 60 分钟清理维护成本过高，且与 Mnemopi 语义召回重叠）。会话压缩改由 Claude 化扩展的 `session.compacting` hook 走**旁路结构化总结**——旁路模型生成 9 段摘要（工具调用/结果经 `messageToParts` 语义级保留），落盘 `data/agent/last-compact-summary.md`，旁路不可达时回退内核 LLM 自压。这就是对话连续性的新载体。
 
 关了重开，它还认得你。换个项目，它知道上下文。隔了一周，翻日志还能接上。
 
@@ -76,7 +75,7 @@ L1 保证它知道“跟谁说话”，L2 保证它记得“一起干过什么�
 - **自动积累**：`autoRetain: true`，每 2 轮自动写入
 - **自动召回**：`autoRecall: true`，每次会话首条消息自动注入相关记忆
 - **防膨胀**：单次最多召回 10 条、注入上限 2000 token、旧记忆自动退化压缩——数据库可以无限长，上下文永远不爆
-- **断片补救**：上下文压缩时自动提取关键信息（改动文件、决策要点），即时注入
+- **断片补救**：上下文压缩时由 `session.compacting` hook 走旁路结构化总结（见上），生成 9 段摘要即时注入，工具细节语义级保留
 
 ---
 
@@ -88,10 +87,10 @@ L1 保证它知道“跟谁说话”，L2 保证它记得“一起干过什么�
 第一重：TTSR 流式规则（零 Context 成本）
   data/agent/rules/*.md
   → 模型输出时实时检测，违规立即拦截
-  → 10 条规则，不占一轮 token
+  → 13 条规则，不占一轮 token
 
 第二重：before_agent_start Hook（语义约束）
-  data/memory/constraints.md
+  data/memory/constraints-inject.md
   → 读文件规范、任务计划、3次失败换方法、skill铁律
   → 系统 Prompt 前缀注入，行为/语义类约束专属
 
@@ -117,7 +116,10 @@ data/agent/rules/
 ├── no-git-push-force.md       # 禁止 git push --force
 ├── cwd-file-placement.md       # 文件必须放在项目目录内
 ├── chinese-punctuation.md      # 中文标点
-└── tool-call-commentary.md    # 禁止工具调用废话
+├── tool-call-commentary.md    # 禁止工具调用废话
+├── intermediate-files-to-temp.md  # 中间文件落 temp，不污染项目
+├── no-direct-mnemopi-inspection.md # 禁止直接翻 mnemopi 数据库
+└── no-repeated-tool-calls.md  # 禁止相同参数重复调工具
 ```
 
 ### /omfg — 一句话创建规则
@@ -129,6 +131,17 @@ data/agent/rules/
 ```
 
 模型会分析问题，生成一条 TTSR 规则文件，即时生效。不用改代码，不用重启。
+
+---
+
+## Claude 化扩展
+
+Tiffa 的「记忆 / 约束 / 技能」不是硬写在代码里的，而是由 `plugins/claude-mode-extension.ts`（Claude 化扩展，1063 行）这个 Hook 引擎驱动——这也是它区别于裸跑内核的关键：
+
+- **6 个生命周期 Hook**：`session_start`（移除 eval/hub）→ `before_agent_start`（注入 USER/PROJECT.md + 脚手架）→ `tool_call`（危险拦截 + 熔断 + 技能强制）→ `session.compacting`（压缩路由 + 旁路总结）→ `session_stop`（error 续行）→ `tool_result`（审计）
+- **旁路结构化总结**：压缩时让便宜的旁路模型生成 9 段摘要，弱模型也能低成本续上下文
+- **熔断机制**：同一轮被 block 累计 3 次 → 强制终止并要求换方法，专治弱模型死循环
+- **/omfg 即时建规则**：一句话生成 TTSR 规则文件，零重启生效
 
 ---
 
@@ -159,7 +172,7 @@ data/agent/rules/
 | XML 工具调用拦截 | 从"完全无法调工具"到能调 |
 | 工具调用废话拦截 | 少说多做，省 token |
 | 取消 eval 注册 | 从"一条命令跑不了"到能完成简单任务 |
-| 断片补救 gap-fill | 崩溃续行有上下文 |
+| 压缩摘要（旁路总结） | 长对话不断片，弱模型也能续上下文 |
 | Loop Guard | 精确重复检测 + 自动重试 |
 | Tool Call Loop | 相同参数连续调工具拦截 |
 

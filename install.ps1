@@ -61,10 +61,17 @@ if (-not $NPM_CMD) {
 Invoke-Npm config set registry $CHINA_NPM --location project 2>$null | Out-Null
 Invoke-Npm config set registry $CHINA_NPM 2>$null | Out-Null
 $env:ELECTRON_MIRROR = $CHINA_ELECTRON
+# 同时写根 .npmrc（npm + bun 共用）：保证 fastembed-runtime 等原生依赖也从国内拉
+try {
+    "registry=$CHINA_NPM" | Out-File -FilePath (Join-Path $ROOT ".npmrc") -Encoding UTF8 -Force
+    OK ".npmrc 已写入国内源 (npm/bun 共用)"
+} catch {
+    INFO "写入 .npmrc 失败，可手动在 $ROOT\.npmrc 写入 registry=$CHINA_NPM"
+}
 OK "npm 镜像: $CHINA_NPM"
 OK "Electron 镜像: $CHINA_ELECTRON"
 
-# Step 2: 检查 Node.js（优先便携，次用系统）
+# Step 2: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
 Step 2 5 "检查 Node.js"
 $nodeExe = Join-Path $ROOT "node\node.exe"
 if (Test-Path $nodeExe) {
@@ -78,7 +85,29 @@ if (Test-Path $nodeExe) {
         OK "Node.js $v (系统)"
         $NODE = "node"
     } else {
-        FAIL "未找到 Node.js，请从 https://nodejs.org/ 下载安装"
+        INFO "未找到 Node.js，从国内镜像(npmmirror)下载 v22.17.1 ..."
+        $nodeVer = "v22.17.1"
+        $nodeZip = Join-Path $env:TEMP "tiffa-node-$nodeVer-win-x64.zip"
+        $nodeUrl = "https://registry.npmmirror.com/-/binary/node/$nodeVer/node-$nodeVer-win-x64.zip"
+        try {
+            Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
+            Expand-Archive -Path $nodeZip -DestinationPath $ROOT -Force
+            $extracted = Join-Path $ROOT "node-$nodeVer-win-x64"
+            $nodeDir   = Join-Path $ROOT "node"
+            if (Test-Path $extracted) {
+                if (Test-Path $nodeDir) { Remove-Item $nodeDir -Recurse -Force }
+                Move-Item $extracted $nodeDir
+            }
+            if (Test-Path $nodeExe) {
+                $v = & $nodeExe --version 2>$null
+                OK "Node.js $v 安装成功 (国内镜像)"
+                $NODE = $nodeExe
+            } else { throw "node.exe 未出现在 $nodeDir" }
+        } catch {
+            FAIL "Node.js 下载/解压失败：$_ ｜ 请手动下载 https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip 并解压到 $ROOT\node\"
+        } finally {
+            if (Test-Path $nodeZip) { Remove-Item $nodeZip -Force }
+        }
     }
 }
 
@@ -149,6 +178,69 @@ foreach ($d in $dirs) {
     if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
 }
 OK "目录结构已就绪"
+
+# ---- embedding 模型（必须随包，国内无法从 HuggingFace 下载）----
+$embSrc  = Join-Path $ROOT "embedding-assets\fast-bge-small-zh-v1.5"
+$embOnnx = Join-Path $embSrc "model_optimized.onnx"
+if ((Test-Path $embOnnx) -and ((Get-Item $embOnnx).Length -gt 1MB)) {
+    $embDst = Join-Path $ROOT "home\.omp\cache\fastembed\fast-bge-small-zh-v1.5"
+    if (-not (Test-Path $embDst)) {
+        New-Item -ItemType Directory -Path (Split-Path $embDst) -Force | Out-Null
+        Copy-Item -Path "$embSrc\*" -Destination $embDst -Recurse -Force
+    }
+    OK "embedding 模型已就位 (LFS 随包)"
+} else {
+    FAIL "embedding 模型未随包（git clone 需含 LFS 文件）。国内无法从 HuggingFace 下载 BAAI/bge-small-zh-v1.5，请先 `git lfs pull` 或手动拷贝 embedding-assets\fast-bge-small-zh-v1.5\ 到 home\.omp\cache\fastembed\。"
+}
+
+# ---- fastembed-runtime（onnxruntime 原生绑定，~870MB）----
+$rtDst = Join-Path $ROOT "home\.omp\cache\fastembed-runtime"
+if (-not (Test-Path $rtDst)) {
+    INFO "fastembed-runtime 缺失：首次启用记忆时会从国内 npm 镜像自动拉取 onnxruntime；若失败，请从源机器拷贝 home\.omp\cache\fastembed-runtime\ 目录。"
+}
+
+# ---- Python 运行时（base 国内拉 + pip 国内装，无需 LFS）----
+$pyExe = Join-Path $ROOT "python\python.exe"
+if (Test-Path $pyExe) {
+    OK "Python 运行时 (便携)"
+} else {
+    INFO "未找到 python\，从国内镜像(npmmirror)下载 Python 3.13.12 并 pip 安装依赖 ..."
+    $pyVer = "3.13.12"
+    $pyZip = Join-Path $env:TEMP "tiffa-python-$pyVer-embed-amd64.zip"
+    $pyUrl = "https://registry.npmmirror.com/-/binary/python/$pyVer/python-$pyVer-embed-amd64.zip"
+    try {
+        Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
+        Expand-Archive -Path $pyZip -DestinationPath $ROOT -Force
+        $extracted = Join-Path $ROOT "python-$pyVer-embed-amd64"
+        $pyDir     = Join-Path $ROOT "python"
+        if (Test-Path $extracted) {
+            if (Test-Path $pyDir) { Remove-Item $pyDir -Recurse -Force }
+            Move-Item $extracted $pyDir
+        }
+        # embeddable 需开启 import site 才能用 pip
+        $pth = Join-Path $pyDir "python313._pth"
+        if (Test-Path $pth) {
+            $c = Get-Content $pth -Raw
+            if ($c -notmatch "(?m)^import site") {
+                $c = $c -replace "(?m)^#\s*import site", "import site"
+                Set-Content $pth $c -Encoding UTF8
+            }
+        }
+        # ensurepip（embeddable 可能不含）→ 回退 get-pip.py（清华镜像）
+        & $pyExe -m ensurepip --upgrade 2>$null
+        if (-not (Test-Path (Join-Path $pyDir "Scripts\pip.exe"))) {
+            $gp = Join-Path $env:TEMP "tiffa-get-pip.py"
+            Invoke-WebRequest -Uri "https://mirrors.tuna.tsinghua.edu.cn/pypi/get-pip.py" -OutFile $gp -UseBasicParsing
+            & $pyExe $gp 2>$null
+        }
+        & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input 2>&1 | Out-Null
+        if (Test-Path $pyExe) { OK "Python $pyVer + 依赖安装成功 (国内镜像)" } else { throw "python.exe 未出现" }
+    } catch {
+        FAIL "Python 下载/安装失败：$_ ｜ 请手动拷贝 python\ 目录到 $ROOT\python\（或下载 Python $pyVer 后执行 pip install -r requirements-python.txt）"
+    } finally {
+        if (Test-Path $pyZip) { Remove-Item $pyZip -Force }
+    }
+}
 
 # models.yml 示例
 $modelsEx = Join-Path $ROOT "data\agent\models.yml.example"
