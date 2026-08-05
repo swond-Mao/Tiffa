@@ -11,10 +11,10 @@
 
 ## 更新摘要
 **变更内容**   
-- 新增自动零计算重命名模式（使用消息截断）
-- 增强手动AI重命名模式（文学四字风格提示）
-- 实现三层aiRenameMode状态检查防止竞态条件
-- 优化会话历史加载性能（使用gap-fill文件和firstMessage内存访问）
+- 实现基于轻量模型的AI智能重命名系统，支持多级回退链（当前模型旁路 → 豆包 → 其他提供商）
+- 新增上下文感知的标题生成，使用最近6条消息加原标题纠正主题漂移
+- 增强自动零计算重命名模式，优化会话历史加载性能
+- 完善三层状态检查机制防止竞态条件
 
 ## 目录
 1. [简介](#简介)
@@ -31,7 +31,7 @@
 ## 简介
 本文件聚焦 Tiffa 的"AI 智能重命名"能力，主要覆盖会话标题的智能生成与持久化、用户手动重命名的实现路径，以及渲染层对重命名状态的交互控制。该能力依托 Electron 主进程的文件操作、IPC 通道与渲染进程的状态管理，确保在弱模型环境下也能稳定产出简洁、可读的会话标题，并支持用户即时修正。
 
-**更新** 系统现已支持两种重命名模式：自动零计算模式（基于首条消息截断）和手动AI模式（文学四字风格），并通过三层状态检查机制确保并发安全。
+**更新** 系统现已实现 sophisticated AI-based session renaming system，采用轻量模型方法，具备多级回退链（当前模型旁路 → 豆包 → 其他提供商），支持上下文感知建议和自动主题漂移预防，使用最近6条消息加原标题纠正。
 
 ## 项目结构
 围绕"AI 智能重命名"，关键代码分布在以下位置：
@@ -48,6 +48,7 @@ Main --> FS["文件系统<br/>.jsonl 会话头更新"]
 UI --> State["本地状态 aiRenameMode / aiRenameText"]
 State --> AutoMode["自动零计算模式<br/>firstMessage截断"]
 State --> ManualMode["手动AI模式<br/>文学四字风格"]
+State --> LightModel["轻量模型AI重命名<br/>多级回退链"]
 ```
 
 图表来源
@@ -68,12 +69,13 @@ State --> ManualMode["手动AI模式<br/>文学四字风格"]
   - 支持自动零计算重命名和手动AI重命名两种模式。
 - IPC 桥接
   - 暴露 renameSession(sessionPath, newTitle) 给渲染进程调用。
+  - 暴露 completeWithLightModel(prompt, maxTokens, providerHint, modelHint) 用于轻量模型调用。
 - 主进程会话重命名
   - 校验 .jsonl 文件存在性
   - 读取首行 header JSON，更新 title 字段
   - 写回文件，返回成功或错误信息
 
-**更新** 新增三层状态检查机制，防止竞态条件导致的UI状态不一致。
+**更新** 新增三级AI重命名系统：自动零计算模式、手动AI模式和轻量模型AI模式，通过多层回退链确保高可用性。
 
 章节来源
 - [app.js:160-163](file://electron/renderer/app.js#L160-L163)
@@ -84,7 +86,7 @@ State --> ManualMode["手动AI模式<br/>文学四字风格"]
 - [main.js:2410-2437](file://electron/main.js#L2410-L2437)
 
 ## 架构总览
-下图展示了"AI 智能重命名"从用户触发到落盘的完整流程，包括渲染进程状态切换、IPC 调用、主进程文件解析与写入。
+下图展示了"AI 智能重命名"从用户触发到落盘的完整流程，包括渲染进程状态切换、IPC 调用、主进程文件解析与写入，以及轻量模型的多级回退机制。
 
 ```mermaid
 sequenceDiagram
@@ -92,18 +94,24 @@ participant U as "用户"
 participant R as "渲染进程(app.js)"
 participant P as "预加载(preload.js)"
 participant M as "主进程(main.js)"
+participant L as "轻量模型API"
 participant F as "文件系统"
 U->>R : 点击"AI 重命名"按钮
 R->>R : 设置 aiRenameMode=当前会话, 清空 aiRenameText
-R->>P : invoke('sessions : rename', sessionPath, newTitle)
-P->>M : IPC 'sessions : rename'
-M->>F : 校验 .jsonl 存在
-M->>F : 读取首行 header JSON
-M->>M : 更新 header.title = newTitle
-M->>F : 写回修改后的首行
-M-->>P : {success : true}
+R->>P : invoke('ai : complete', prompt, maxTokens, providerHint, modelHint)
+P->>M : IPC 'ai : complete'
+M->>M : 构建候选模型列表
+M->>L : 尝试当前模型旁路
+alt 当前模型失败
+M->>L : 尝试豆包模型
+alt 豆包失败
+M->>L : 尝试其他提供商
+end
+end
+L-->>M : {text : 生成的标题}
+M-->>P : 返回结果
 P-->>R : 返回结果
-R->>R : 清除 aiRenameMode, 刷新列表
+R->>R : 清理 aiRenameMode, 刷新列表
 Note over R,M : 自动重命名模式<br/>agent_end时自动应用firstMessage截断
 ```
 
@@ -111,7 +119,7 @@ Note over R,M : 自动重命名模式<br/>agent_end时自动应用firstMessage�
 - [app.js:160-163](file://electron/renderer/app.js#L160-L163)
 - [app.js:637-651](file://electron/renderer/app.js#L637-L651)
 - [preload.js:72](file://electron/preload.js#L72)
-- [main.js:2410-2437](file://electron/main.js#L2410-L2437)
+- [main.js:2713-2912](file://electron/main.js#L2713-L2912)
 
 ## 详细组件分析
 
@@ -138,14 +146,17 @@ Note over R,M : 自动重命名模式<br/>agent_end时自动应用firstMessage�
 - [app.js:2314-2316](file://electron/renderer/app.js#L2314-L2316)
 - [app.js:3277](file://electron/renderer/app.js#L3277)
 
-### IPC 桥接：renameSession
+### IPC 桥接：renameSession 与 completeWithLightModel
 - 暴露方法：renameSession(sessionPath, newTitle)
 - 作用：将渲染进程的请求转发至主进程 IPC 处理器，完成会话标题更新。
+- 新增方法：completeWithLightModel(prompt, maxTokens, providerHint, modelHint)
+- 作用：调用轻量模型进行AI重命名，支持多级回退链
 
 章节来源
 - [preload.js:72](file://electron/preload.js#L72)
+- [preload.js:75](file://electron/preload.js#L75)
 
-### 主进程：会话重命名逻辑
+### 主进程：会话重命名逻辑与轻量模型调用
 - 入口：ipcMain.handle('sessions:rename', ...)
 - 处理步骤
   - 校验 sessionPath 以 .jsonl 结尾且存在
@@ -156,8 +167,15 @@ Note over R,M : 自动重命名模式<br/>agent_end时自动应用firstMessage�
 - 并发安全
   - 仅修改首行 header，避免读取整个文件导致与内核并发 append 冲突丢数据。
 
+**更新** 新增轻量模型调用逻辑：
+- 多级回退链：当前模型旁路 → 豆包 → 其他提供商
+- 支持providerHint和modelHint参数优先使用指定模型
+- 自动从config.yml和models.yml读取配置
+- 20秒超时保护，防止长时间阻塞
+
 章节来源
-- [main.js:2410-2437](file://electron/main.js#L2410-L2437)
+- [main.js:2713-2739](file://electron/main.js#L2713-L2739)
+- [main.js:2813-2873](file://electron/main.js#L2813-L2873)
 
 ### 自动标题生成（补充）
 - 当会话无标题时，系统会基于首条用户消息截取前若干字符作为标题，并写入 header.title 与追加 title 事件，保证列表展示一致性。
@@ -188,6 +206,25 @@ Note over R,M : 自动重命名模式<br/>agent_end时自动应用firstMessage�
 章节来源
 - [app.js:4104-4143](file://electron/renderer/app.js#L4104-L4143)
 
+### 轻量模型AI重命名系统（新增）
+- **多级回退链设计**：
+  1. 当前模型旁路：优先使用前端当前配置的provider/model
+  2. 豆包模型：从computer-use/grounding.json读取配置
+  3. 其他提供商：从models.yml中查找有apiKey的provider
+- **上下文感知**：使用最近6条消息提取可读文本，结合原标题纠正主题漂移
+- **智能提示词**：根据是否已有标题动态构建prompt，支持主题漂移检测
+- **防并发机制**：_autoRenameInFlight标志防止重复调用
+
+**更新** 自动重命名流程：
+- agent_end事件触发后，检查会话是否已自动命名过
+- 对于__new__临时路径，轮询等待迁移完成（最多10秒）
+- 提取最近6条消息作为上下文，调用轻量模型生成标题
+- 成功后更新UI并持久化到文件系统
+
+章节来源
+- [app.js:4688-4737](file://electron/renderer/app.js#L4688-L4737)
+- [main.js:2813-2873](file://electron/main.js#L2813-L2873)
+
 ### 三层状态检查机制（新增）
 为防止竞态条件，系统在三个关键位置检查aiRenameMode状态：
 
@@ -214,6 +251,9 @@ PreloadJS --> MainJS["electron/main.js"]
 MainJS --> FS["fs.renameSync/readFileSync/writeFileSync"]
 AppJS --> GapFill["gap-fill文件<br/>高密度摘要"]
 AppJS --> FirstMsg["firstMessage<br/>内存缓存"]
+MainJS --> ConfigYML["config.yml<br/>默认模型配置"]
+MainJS --> ModelsYML["models.yml<br/>提供商配置"]
+MainJS --> GroundingJSON["grounding.json<br/>豆包配置"]
 ```
 
 图表来源
@@ -221,7 +261,7 @@ AppJS --> FirstMsg["firstMessage<br/>内存缓存"]
 - [app.js:4112](file://electron/renderer/app.js#L4112)
 - [app.js:4122](file://electron/renderer/app.js#L4122)
 - [preload.js:72](file://electron/preload.js#L72)
-- [main.js:2410-2437](file://electron/main.js#L2410-L2437)
+- [main.js:2713-2912](file://electron/main.js#L2713-L2912)
 
 章节来源
 - [AGENTS.md:158-208](file://AGENTS.md#L158-L208)
@@ -233,10 +273,13 @@ AppJS --> FirstMsg["firstMessage<br/>内存缓存"]
 - **新增** 自动零计算模式避免AI调用开销，提升响应速度。
 - **新增** gap-fill文件优先读取，减少大文件解析时间。
 - **新增** firstMessage内存缓存，避免重复文件读取。
+- **新增** 轻量模型调用20秒超时保护，防止长时间阻塞。
+- **新增** 多级回退链确保单个模型失败时快速切换到备用模型。
 
 **更新** 性能优化重点：
 - 自动重命名：零算力消耗，直接字符串处理
 - 手动重命名：优先使用内存数据和gap-fill文件
+- 轻量模型：多级回退链，20秒超时，防并发机制
 - 状态检查：O(1)复杂度，避免不必要的DOM操作
 
 [本节为通用指导，不直接分析具体文件]
@@ -256,9 +299,14 @@ AppJS --> FirstMsg["firstMessage<br/>内存缓存"]
 - **新增** 症状：AI重命名模式卡住
   - 检查三层状态检查是否正确重置aiRenameMode
   - 确认agent_end事件正常触发
+- **新增** 症状：轻量模型调用失败
+  - 检查config.yml中modelRoles配置
+  - 确认models.yml中有可用的provider配置
+  - 验证computer-use/grounding.json中豆包配置
+  - 查看网络连通性和API密钥有效性
 
 章节来源
-- [main.js:2410-2437](file://electron/main.js#L2410-L2437)
+- [main.js:2713-2912](file://electron/main.js#L2713-L2912)
 - [app.js:637-651](file://electron/renderer/app.js#L637-L651)
 - [app.js:2279-2280](file://electron/renderer/app.js#L2279-L2280)
 - [app.js:4139](file://electron/renderer/app.js#L4139)
@@ -269,10 +317,12 @@ Tiffa 的"AI 智能重命名"通过渲染进程状态管理、IPC 桥接与主�
 **更新** 新版本的增强特性：
 - 自动零计算模式提供即时响应，无需AI调用
 - 手动AI模式支持文学四字风格，提升标题质量
+- 轻量模型AI系统实现多级回退链，确保高可用性
+- 上下文感知建议使用最近6条消息加原标题纠正主题漂移
 - 三层状态检查确保并发安全性
 - gap-fill文件和firstMessage优化提升性能
 
-未来可在上层策略中接入 LLM 生成标题，结合规则与记忆系统进一步提升标题质量与一致性。
+未来可在上层策略中接入更复杂的LLM生成标题，结合规则与记忆系统进一步提升标题质量与一致性。
 
 [本节为总结性内容，不直接分析具体文件]
 
@@ -283,7 +333,9 @@ Tiffa 的"AI 智能重命名"通过渲染进程状态管理、IPC 桥接与主�
 **更新** 新增功能参考：
 - 自动重命名逻辑位于 `app.js:637-651`
 - 手动AI重命名逻辑位于 `app.js:4104-4143`
+- 轻量模型AI重命名逻辑位于 `app.js:4688-4737`
 - 三层状态检查位于 `app.js:2279-2280`, `app.js:2314-2316`, `app.js:3277`
+- 主进程轻量模型调用位于 `main.js:2813-2873`
 
 章节来源
 - [README.md:1-236](file://README.md#L1-L236)

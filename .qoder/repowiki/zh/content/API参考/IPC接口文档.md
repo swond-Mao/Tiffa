@@ -9,11 +9,11 @@
 
 ## 更新摘要
 **变更内容**   
-- IPC处理器数量从37个增加到54个，新增大量会话管理、文件系统操作和配置管理功能
-- 新增了完整的会话生命周期管理接口（归档、恢复、删除等）
-- 增强了多实例管理和项目管理工作区功能
-- 添加了XML翻译开关、记忆召回等高级功能
-- 完善了错误处理和资源管理机制
+- 新增AI完成处理器 `ai:complete`，提供轻量级AI补全功能（如会话重命名等小任务）
+- 实现20秒超时保护机制，防止AI调用长时间阻塞
+- 支持多provider配置降级链：主模型旁路 → 豆包 → models.yml其他provider
+- 增强preload脚本，暴露`completeWithLightModel` API供渲染进程使用
+- 完善的错误处理和异常恢复机制
 
 ## 目录
 1. [简介](#简介)
@@ -28,7 +28,7 @@
 10. [附录](#附录)
 
 ## 简介
-本文件为 Tiffa 的 IPC 接口完整文档，覆盖 Electron 主进程与渲染进程之间的 **54个 IPC 处理器方法**，以及 JSONL over stdin/stdout 通信协议、事件类型定义、消息传递机制与异步处理模式。文档面向不同技术背景的读者，提供从高层架构到代码级细节的系统化说明，并附带调用示例与最佳实践。
+本文件为 Tiffa 的 IPC 接口完整文档，覆盖 Electron 主进程与渲染进程之间的 **55个 IPC 处理器方法**，以及 JSONL over stdin/stdout 通信协议、事件类型定义、消息传递机制与异步处理模式。文档面向不同技术背景的读者，提供从高层架构到代码级细节的系统化说明，并附带调用示例与最佳实践。
 
 ## 项目结构
 Tiffa Desktop 采用 Electron 架构：
@@ -39,9 +39,10 @@ Tiffa Desktop 采用 Electron 架构：
 ```mermaid
 graph TB
 subgraph "Electron 主进程"
-MAIN["main.js<br/>54个IPC处理器/实例管理"]
+MAIN["main.js<br/>55个IPC处理器/实例管理"]
 MANAGER["TiffaInstanceManager<br/>多实例/LRU/激活"]
 INSTANCE["TiffaInstance<br/>子进程/事件/命令"]
+AI_HANDLER["AI Completion Handler<br/>20秒超时/多provider"]
 end
 subgraph "Electron 渲染进程"
 RENDERER["renderer/app.js<br/>UI/事件处理"]
@@ -53,6 +54,7 @@ end
 RENDERER --> PRELOAD
 PRELOAD --> MAIN
 MAIN --> MANAGER
+MAIN --> AI_HANDLER
 MANAGER --> INSTANCE
 INSTANCE --> TIFFA_CLI
 TIFFA_CLI --"JSONL(stdin/stdout)" --> INSTANCE
@@ -62,6 +64,7 @@ INSTANCE --"tiffa:event" --> RENDERER
 **图示来源** 
 - [electron/main.js:76-319](file://electron/main.js#L76-L319)
 - [electron/main.js:325-570](file://electron/main.js#L325-L570)
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)
 - [electron/preload.js:25-35](file://electron/preload.js#L25-L35)
 - [electron/renderer/app.js:420-449](file://electron/renderer/app.js#L420-L449)
 
@@ -73,12 +76,14 @@ INSTANCE --"tiffa:event" --> RENDERER
 ## 核心组件
 - TiffaInstance：封装单个 Tiffa 子进程的启动、事件解析、命令发送与响应匹配、崩溃自动重启等。
 - TiffaInstanceManager：维护多个 Tiffa 实例（项目级/对话级），实现懒启动、LRU 淘汰、活跃实例切换。
+- AI Completion Handler：处理轻量级AI补全请求，支持多provider降级和超时保护。
 - IPC 处理器：将渲染进程的调用映射到具体实例操作，统一错误返回格式。
 - 预加载桥接：向渲染进程暴露简洁 API，屏蔽底层 ipcRenderer.invoke 细节。
 
 **章节来源**
 - [electron/main.js:76-319](file://electron/main.js#L76-L319)
 - [electron/main.js:325-570](file://electron/main.js#L325-L570)
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)
 - [electron/preload.js:25-35](file://electron/preload.js#L25-L35)
 
 ## 架构总览
@@ -98,12 +103,18 @@ I->>S : write(JSONL : {type : 'prompt', ...})
 S-->>I : stdout(JSONL : {type : 'ready'|'message_start'|...})
 I-->>M : _handleEvent(event)
 M-->>R : webContents.send('tiffa : event', event)
+Note over M : AI补全请求走独立处理器
+R->>P : completeWithLightModel(prompt, maxTokens)
+P->>M : invoke('ai : complete', {...})
+M->>M : callCompletion(20s超时保护)
+M-->>R : {text, model, error?}
 ```
 
 **图示来源** 
 - [electron/main.js:626-724](file://electron/main.js#L626-L724)
 - [electron/main.js:207-248](file://electron/main.js#L207-L248)
 - [electron/main.js:250-303](file://electron/main.js#L250-L303)
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)
 - [electron/preload.js:25-35](file://electron/preload.js#L25-L35)
 - [electron/renderer/app.js:420-449](file://electron/renderer/app.js#L420-L449)
 
@@ -151,7 +162,20 @@ M-->>R : webContents.send('tiffa : event', event)
 - [electron/main.js:250-303](file://electron/main.js#L250-L303)
 - [electron/main.js:325-570](file://electron/main.js#L325-L570)
 
-### IPC 处理器方法清单（54个）
+### AI完成处理器（新增）
+- **ai:complete**：轻量级AI补全处理器，用于会话重命名等小任务
+- **降级链策略**：
+  1. 主模型旁路：优先使用当前活跃模型的provider配置
+  2. 豆包模型：从computer-use grounding.json读取配置
+  3. models.yml兜底：遍历其他有apiKey的provider
+- **超时保护**：20秒超时防止长时间阻塞
+- **错误处理**：逐级尝试，记录最后错误信息
+
+**章节来源**
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)
+- [electron/preload.js:75](file://electron/preload.js#L75)
+
+### IPC 处理器方法清单（55个）
 
 #### Tiffa 代理命令（12个）
 - tiffa:send(message, images, sessionId)
@@ -206,6 +230,17 @@ M-->>R : webContents.send('tiffa : event', event)
 **章节来源**
 - [electron/main.js:882-1110](file://electron/main.js#L882-L1110)
 - [electron/preload.js:26-37](file://electron/preload.js#L26-L37)
+
+#### AI补全功能（新增）
+- ai:complete(prompt, maxTokens, providerHint, modelHint)
+  - 参数：prompt(字符串), maxTokens(数字|空), providerHint(字符串|空), modelHint(字符串|空)
+  - 返回：{text, model, modelId} 或 {error}
+  - 行为：轻量级AI补全，支持多provider降级链和20秒超时保护
+  - 降级顺序：主模型旁路 → 豆包 → models.yml其他provider
+
+**章节来源**
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)
+- [electron/preload.js:75](file://electron/preload.js#L75)
 
 #### 文件系统操作（4个）
 - fs:listDir(dirPath)
@@ -452,6 +487,9 @@ M-->>R : webContents.send('tiffa : event', event)
   - 切换前确保实例就绪，失败时重试或降级。
 - 扩展交互：
   - 收到 extension_ui_request 后，通过 extensionResponse() 回调。
+- 轻量AI补全：
+  - 使用 completeWithLightModel() 进行会话重命名等小任务。
+  - 支持多级降级，自动选择最优provider。
 - 性能优化：
   - 批量操作合并请求，减少 IPC 开销。
   - 监听 agent_start/agent_end 控制 UI 状态，避免重复渲染。
@@ -465,6 +503,7 @@ M-->>R : webContents.send('tiffa : event', event)
   - child_process.spawn 启动子进程。
   - readline 解析 stdout 逐行 JSON。
   - fs/path 处理路径与文件。
+  - AbortController 实现超时控制。
 - 渲染进程依赖：
   - ipcRenderer.invoke 调用主进程方法。
   - webContents.on 监听事件。
@@ -495,6 +534,11 @@ class TiffaInstanceManager {
 +closeByKey(key) void
 +getStatus() Array
 }
+class AICompletionHandler {
++callCompletion(baseUrl, model, apiKey, prompt, maxTokens) Promise
++resolveDefaultModelFromConfig() Object
++findProviderConfig(providerId) Object
+}
 class MainProcess {
 +setupIpc() void
 +createWindow() void
@@ -505,12 +549,14 @@ class RendererProcess {
 }
 TiffaInstanceManager --> TiffaInstance : "管理"
 MainProcess --> TiffaInstanceManager : "使用"
+MainProcess --> AICompletionHandler : "调用"
 RendererProcess --> MainProcess : "IPC调用"
 ```
 
 **图示来源** 
 - [electron/main.js:76-319](file://electron/main.js#L76-L319)
 - [electron/main.js:325-570](file://electron/main.js#L325-L570)
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)
 
 **章节来源**
 - [electron/main.js:1-120](file://electron/main.js#L1-L120)
@@ -519,11 +565,13 @@ RendererProcess --> MainProcess : "IPC调用"
 ## 性能考量
 - 子进程池：最多 8 个实例，LRU 淘汰最久未用实例。
 - 命令超时：5 分钟超时防止 Promise 挂起。
+- AI补全超时：20秒超时防止长时间阻塞。
 - 事件过滤：embedding 预热期间过滤噪音事件，减少 UI 压力。
 - 内存管理：会话结束时清理 pendingCommands 与资源。
 - 网络优化：批量发送消息，减少 IPC 往返。
 - 文件操作：大文件读取限制（5MB文件，20MB会话文件优化）。
 - 数据库查询：记忆召回使用SQLite FTS索引，提升搜索性能。
+- Provider降级：AI补全支持多级降级，提高成功率。
 
 [本节为通用指导，无需特定文件引用]
 
@@ -534,6 +582,10 @@ RendererProcess --> MainProcess : "IPC调用"
 - 命令超时：
   - 增加超时时间或检查子进程负载。
   - 查看 pendingCommands 数量，排查阻塞点。
+- AI补全失败：
+  - 检查各provider配置是否正确。
+  - 验证网络连接和API密钥有效性。
+  - 查看降级链日志，确定失败环节。
 - 事件丢失：
   - 确认 JSONL 格式正确，无非法字符。
   - 检查渲染进程事件过滤器（如 sessionId 路由）。
@@ -553,7 +605,7 @@ RendererProcess --> MainProcess : "IPC调用"
 - [electron/main.js:250-303](file://electron/main.js#L250-L303)
 
 ## 结论
-Tiffa 的 IPC 接口设计清晰、健壮，通过 JSONL 协议实现高效跨进程通信。主进程的多实例管理与事件路由确保了系统的可扩展性与稳定性。**新增的54个IPC处理器方法**提供了完整的会话生命周期管理、文件系统操作、配置管理和高级功能，使Tiffa成为一个功能完备的AI助手桌面应用。遵循本文档的规范与最佳实践，开发者可轻松集成与扩展 Tiffa 功能。
+Tiffa 的 IPC 接口设计清晰、健壮，通过 JSONL 协议实现高效跨进程通信。主进程的多实例管理与事件路由确保了系统的可扩展性与稳定性。**新增的55个IPC处理器方法**提供了完整的会话生命周期管理、文件系统操作、配置管理和高级功能，使Tiffa成为一个功能完备的AI助手桌面应用。**新增的AI补全处理器**进一步增强了系统的智能化能力，支持轻量级AI任务和智能降级策略。遵循本文档的规范与最佳实践，开发者可轻松集成与扩展 Tiffa 功能。
 
 [本节为总结性内容，无需特定文件引用]
 
@@ -573,10 +625,16 @@ Tiffa 的 IPC 接口设计清晰、健壮，通过 JSONL 协议实现高效跨�
 - 性能指标：
   - 最大实例数：8个
   - 命令超时：5分钟
+  - AI补全超时：20秒
   - 文件大小限制：5MB（普通文件），20MB（会话文件）
   - 内存回收：LRU策略，基于lastActiveTime
+- AI补全降级链：
+  1. 主模型旁路（当前活跃模型）
+  2. 豆包模型（grounding.json配置）
+  3. models.yml其他provider（兜底）
 
 **章节来源**
 - [electron/main.js:16-31](file://electron/main.js#L16-L31)
 - [electron/main.js:577-612](file://electron/main.js#L577-L612)
 - [electron/main.js:756-768](file://electron/main.js#L756-L768)
+- [electron/main.js:2813-2873](file://electron/main.js#L2813-L2873)

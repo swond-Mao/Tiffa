@@ -71,7 +71,7 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   archiveSession: (sessionPath) => ipcRenderer.invoke('sessions:archiveSession', sessionPath),
   deleteSession: (sessionPath) => ipcRenderer.invoke('sessions:deleteSession', sessionPath),
   renameSession: (sessionPath, newTitle) => ipcRenderer.invoke('sessions:rename', sessionPath, newTitle),
-  // 轻量模型补全（AI 重命名等小任务；豆包优先，失败降级旁路主模型）
+  // 轻量模型补全（AI 重命名等小任务；旁路模型优先，失败降级主模型 → 豆包）
   completeWithLightModel: (prompt, maxTokens, providerHint, modelHint) => ipcRenderer.invoke('ai:complete', { prompt, maxTokens, providerHint, modelHint }),
   listArchivedSessions: (projectDirName) => ipcRenderer.invoke('sessions:listArchivedSessions', projectDirName),
   restoreSession: (sessionPath) => ipcRenderer.invoke('sessions:restoreSession', sessionPath),
@@ -109,6 +109,13 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   // ── Computer Use（电脑控制）开关 ──
   getComputerUseStatus: () => ipcRenderer.invoke('computer-use:status'),
   toggleComputerUse: (enabled) => ipcRenderer.invoke('computer-use:toggle', enabled),
+
+  // ── 旁路模型 / MCP 模型配置 ──
+  getBypassModel: () => ipcRenderer.invoke('settings:getBypassModel'),
+  saveBypassModel: (cfg) => ipcRenderer.invoke('settings:saveBypassModel', cfg),
+  getGroundingModel: () => ipcRenderer.invoke('settings:getGroundingModel'),
+  saveGroundingModel: (cfg) => ipcRenderer.invoke('settings:saveGroundingModel', cfg),
+  checkModelHealth: (arg) => ipcRenderer.invoke('settings:checkModelHealth', arg),
 
   // ── 渲染库 ──
   marked: (src) => marked.parse(src),

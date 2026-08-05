@@ -364,8 +364,6 @@ body {
   margin: 0 6px 4px;
   padding: 2px 0 4px 14px;
   border-left: 1px solid hsl(var(--border-200));
-  max-height: 260px;
-  overflow-y: auto;
 }
 
 .session-tree-loading,
@@ -375,6 +373,22 @@ body {
   text-align: center;
   padding: 6px 2px;
   font-style: italic;
+}
+
+/* 会话树超出限额时的展开/收起入口 */
+.session-tree-more {
+  padding: 5px 8px 6px 22px;
+  font-size: 12px;
+  color: hsl(var(--text-300));
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.85;
+  border-radius: 5px;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+.session-tree-more:hover {
+  color: hsl(var(--accent-main-000));
+  opacity: 1;
 }
 
 .session-item {
@@ -1829,6 +1843,73 @@ body {
   background: hsl(var(--bg-300));
 }
 
+/* 手动压缩按钮 */
+.input-btn.compact {
+  background: transparent;
+  color: hsl(var(--text-300));
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.input-btn.compact:hover {
+  color: hsl(var(--text-100));
+  background: hsl(var(--bg-300));
+}
+.input-btn.compact:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.input-btn.compact.active {
+  color: hsl(var(--accent-main-000));
+}
+
+/* 压缩用量提示浮层 */
+.compact-tooltip {
+  position: fixed;
+  z-index: 9999;
+  min-width: 230px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: hsl(var(--bg-400));
+  color: hsl(var(--text-100));
+  border: 1px solid hsl(var(--border-200));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+.compact-tooltip .ct-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: hsl(var(--text-200));
+}
+.compact-tooltip .ct-usage {
+  font-variant-numeric: tabular-nums;
+}
+.compact-tooltip .ct-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: hsl(var(--bg-200));
+  margin: 7px 0 6px;
+  overflow: hidden;
+}
+.compact-tooltip .ct-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.2s;
+}
+.compact-tooltip .ct-hint {
+  color: hsl(var(--text-400));
+  margin-top: 2px;
+}
+
 /* 拖放高亮 */
 #inputArea.drag-over {
   background: hsl(var(--accent-main-000) / 0.12);
@@ -2284,6 +2365,7 @@ html[data-mode="light"] .muse-tint {
   color: hsl(var(--text-200));
   letter-spacing: 1px;
   animation: statusPulse 3s ease-in-out infinite;
+  transition: opacity 0.8s ease;
 }
 
 @keyframes statusPulse {
@@ -2454,6 +2536,49 @@ html[data-mode="light"] .muse-tint {
   white-space: nowrap;
   font-size: 13px;
   color: hsl(var(--text-200));
+}
+
+/* ── 旁路模型 / MCP 模型配置表单 ── */
+.bypass-model-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.bypass-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bypass-field label {
+  font-size: 12px;
+  color: hsl(var(--text-200));
+}
+.bypass-field input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid hsl(var(--border-200));
+  border-radius: var(--radius-md);
+  background: hsl(var(--bg-200));
+  color: hsl(var(--text-100));
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.bypass-field input:focus {
+  outline: none;
+  border-color: hsl(var(--accent-main-000));
+}
+.bypass-toggle-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.bypass-toggle-row .model-toggle {
+  width: 28px;
+}
+.bypass-toggle-row .settings-btn {
+  margin-left: auto;
 }
 
 /* ── 模型列表 ── */
@@ -2791,6 +2916,50 @@ html[data-mode="light"] .muse-tint {
 .config-status.loading { color: hsl(var(--warning-100)); }
 
 /* ── Welcome Screen ── */
+/* ── 加载指示器（对话历史加载中） ── */
+.loading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 60px 20px;
+  color: hsl(var(--text-300));
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid hsl(var(--border-200));
+  border-top-color: hsl(var(--accent-main-000));
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── 大对话懒加载：顶部「加载更早消息」按钮 ── */
+.load-earlier-btn {
+  display: block;
+  margin: 8px auto 16px;
+  padding: 6px 18px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: hsl(var(--text-300));
+  background: hsl(var(--bg-300));
+  border: 1px solid hsl(var(--border-200));
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+.load-earlier-btn:hover {
+  color: hsl(var(--accent-main-000));
+  border-color: hsl(var(--accent-main-000));
+  background: hsl(var(--bg-200));
+}
+
 .welcome-screen {
   display: flex;
   flex-direction: column;

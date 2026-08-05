@@ -179,6 +179,8 @@ class TiffaInstance {
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
       BUN_INSTALL: PORTABLE_ROOT,
       // Mnemopi embedding：必须用中文模型，否则回退到默认英文模型
+      // 启用三级优雅降级压缩链：视觉模型走 snapcompact，非视觉走旁路 Claude 路线，失败回退内核 LLM + gap-fill
+      TIFFA_COMPACT: 'auto',
       MNEMOPI_EMBEDDING_MODEL: 'BAAI/bge-small-zh-v1.5',
       // 将便携 python/node 前置到 PATH，确保子进程能直接用 python/node 命令
       // 否则 Windows 系统 PATH 中的 Store 占位符 python.exe 会被命中（exit 49 弹窗）
@@ -379,7 +381,7 @@ class TiffaInstance {
           this.sendCommand({ type: 'switch_session', sessionPath: sf })
             .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文已恢复`); })
             .catch((e) => { console.warn(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文恢复失败: ${e.message}`); })
-            .finally(() => { this._restoringContext = false; });
+            .finally(() => { setTimeout(() => { this._restoringContext = false; }, 800); });
         }
       }
     }
@@ -389,16 +391,47 @@ class TiffaInstance {
     } else if (event.type === 'agent_start') {
       this.agentRunning = true;
     } else if (event.type === 'agent_end') {
-      const wasPrewarming = this.isPrewarming;
+      // 记录 prewarm 状态供过滤器使用：isPrewarming 不能在过滤器之前清除，
+      // 否则 prewarm 的 agent_end 会泄漏到前端，触发 loadSessions/autoRename 等副作用。
+      // 用 event 上的 _wasPrewarming 标记传递到下方过滤器，isPrewarming 延迟到过滤器之后清除。
+      event._wasPrewarming = this.isPrewarming;
       this.agentRunning = false;
-      // 预热 agent 结束 -> 立即解除事件过滤（不再等 30 秒兜底）
-      this.isPrewarming = false;
       // 非预热 agent_end 后，尝试生成会话标题
       // RPC-UI 模式下内核不自动调用 generateTitle，需 main.js 主动补标题
-      if (!wasPrewarming && !this._titleGenerated) {
+      // 延迟 6s：给前端旁路 AI 重命名让路（_tryGenerateSessionTitle 见标题已存在会跳过，
+      // 旁路失败时本兜底仍能保证树里有可读标题）
+      if (!event._wasPrewarming && !this._titleGenerated) {
         this._titleGenerated = true;
-        setTimeout(() => { if (TiffaInstance._titleGenerateCallback) TiffaInstance._titleGenerateCallback(this); }, 500);
+        setTimeout(() => { if (TiffaInstance._titleGenerateCallback) TiffaInstance._titleGenerateCallback(this); }, 6000);
       }
+    }
+
+    // Handle RPC chunked responses (large responses >256KB are split into rpc_chunk frames)
+    // 内核分块协议：{ type:'rpc_chunk', chunkId, index, count, byteLength, data(base64) }
+    // 收齐所有 chunk 后组装为完整 JSON，解析为 response 事件交给下方常规处理
+    if (event.type === 'rpc_chunk' && event.chunkId) {
+      if (!this._rpcChunkBuffer) this._rpcChunkBuffer = new Map();
+      const cid = event.chunkId;
+      if (!this._rpcChunkBuffer.has(cid)) {
+        this._rpcChunkBuffer.set(cid, { count: event.count, chunks: new Array(event.count), received: 0, byteLength: event.byteLength });
+      }
+      const buf = this._rpcChunkBuffer.get(cid);
+      if (buf.chunks[event.index]) return; // 重复 chunk，忽略
+      buf.chunks[event.index] = Buffer.from(event.data, 'base64');
+      buf.received++;
+      if (buf.received < buf.count) return; // 未收齐
+      // 所有 chunk 收齐，组装完整响应
+      const fullBuf = Buffer.concat(buf.chunks);
+      this._rpcChunkBuffer.delete(cid);
+      let parsed;
+      try {
+        parsed = JSON.parse(fullBuf.toString('utf8'));
+      } catch (e) {
+        console.warn(`[TiffaInstance:${this._shortCwd()}] rpc_chunk reassembly JSON parse failed: ${e.message}`);
+        return;
+      }
+      // 交给下方常规 response 处理（不再 forward rpc_chunk 到前端）
+      event = parsed;
     }
 
     // Handle command responses
@@ -420,20 +453,32 @@ class TiffaInstance {
     // 注意：预热期间的 session_switch 来自 /memory rebuild，不应迁移实例 key，
     // 否则后续用户消息的 session_switch 无法正确匹配。
     // 上下文恢复期间的 session_switch 是我们主动触发的，不需要迁移 key（key 已是正确的 realSessionId）。
-    if (event.type === 'session_switch' && event.sessionPath && !this.isPrewarming && !this._restoringContext) {
+    // 但 prewarm 期间用户也可能发消息触发新建对话的 session_switch，
+    // 所以只跳过 realSessionId === this.sessionId 的情况（/memory rebuild 的 session_switch
+    // sessionPath 就是当前会话自己的路径，realSessionId 相同），不同则正常迁移。
+    if (event.type === 'session_switch' && event.sessionPath && !this._restoringContext) {
       this.sessionFilePath = event.sessionPath; // 保存当前会话的 JSONL 文件路径
       const realSessionId = _extractSessionIdFromPath(event.sessionPath);
       if (realSessionId && realSessionId !== this.sessionId) {
-        tiffaManager.migrateSessionId(this.cwd, this.sessionId, realSessionId);
-        this.sessionId = realSessionId; // 更新实例自身 sessionId，后续事件标记用新值
+        // prewarm 期间不迁移：/memory rebuild 的 session_switch 不应改变实例 key。
+        // 只有非 prewarm 时才迁移（用户消息触发的新建对话 session_switch）。
+        if (!this.isPrewarming) {
+          tiffaManager.migrateSessionId(this.cwd, this.sessionId, realSessionId);
+          this.sessionId = realSessionId; // 更新实例自身 sessionId，后续事件标记用新值
+        }
       }
     }
     // Forward all events to renderer (带 cwd + sessionId 标记)
     event._cwd = this.cwd;
     event._sessionId = this.sessionId;
 
-    // embedding 预热期间过滤掉 /memory rebuild 产生的噪音事件
-    if (this.isPrewarming) {
+    // embedding 预热期间过滤掉 /memory rebuild 产生的噪音事件。
+    // agent_end 携带 _wasPrewarming 标记（在上方 agent_end 处理中设置），
+    // 用它判断而非 isPrewarming（此时还未清除），确保 prewarm 的 agent_end 也被过滤。
+    // 过滤完成后才清除 isPrewarming，避免提前清除导致后续事件泄漏。
+    const eventWasPrewarm = event._wasPrewarming || this.isPrewarming;
+    if (eventWasPrewarm) {
+      if (event.type === 'agent_end') this.isPrewarming = false;
       return;
     }
 
@@ -636,7 +681,10 @@ class TiffaInstanceManager {
           } catch (err) {
             console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复失败: ${err.message}`);
           } finally {
-            inst._restoringContext = false;
+            // 延迟清除：内核可能在 sendCommand response 之后仍有残留的重放事件在管道中。
+            // 立即清除会导致这些事件泄漏到前端，触发重复渲染。
+            // 800ms 足以覆盖事件管道的尾部延迟（内核 JSON 序列化 + stdout 缓冲 + readline 解析）。
+            setTimeout(() => { inst._restoringContext = false; }, 800);
           }
         }
       }
@@ -1050,6 +1098,10 @@ function setupIpc() {
       inst = tiffaManager.getActive();
     }
     if (!inst) throw new Error('No active Tiffa instance');
+    try {
+      const modelPath = path.join(PORTABLE_ROOT, 'data', 'agent', 'current-model.json');
+      fs.writeFileSync(modelPath, JSON.stringify({ provider, modelId, sessionId: sessionId || null, ts: Date.now() }, null, 2));
+    } catch {}
     return inst.sendCommand({ type: 'set_model', provider, modelId });
   });
 
@@ -1813,12 +1865,26 @@ function setupIpc() {
           cwd = decodeSessionDirName(dir.name);
         }
         
-        const normalized = path.resolve(cwd);
-        
+        let normalized = path.resolve(cwd);
+
+        // 旧盘符迁移：如果 cwd 不在当前 PORTABLE_ROOT 下但属于某个 workspace，
+        // 迁移到当前 PORTABLE_ROOT 的 workspace 下（换电脑/换盘符场景）
+        const wsSuffix = extractWorkspaceSuffix(normalized);
+        if (wsSuffix) {
+          const migrated = path.resolve(path.join(path.join(PORTABLE_ROOT, 'workspace'), wsSuffix));
+          if (migrated.toLowerCase() !== normalized.toLowerCase()) {
+            console.log(`[migrate] 盘符迁移: ${normalized} -> ${migrated}`);
+            normalized = migrated;
+          }
+        }
+
         // 验证 encode 反向匹配：确保 encode(normalized) 能映射回当前 dirName
-        // 这能排除 decode 错误的情况
+        // 注意：迁移后的 normalized 编码可能和 dirName 不同（旧盘符编码的目录），
+        // 此时跳过验证 -- 迁移逻辑已在 migrateSessionDirsForNewRoot 中处理目录重命名
         if (encodeSessionDirName(normalized) !== dir.name) {
-          console.log(`[migrate] 跳过不匹配的目录: ${dir.name} (decoded: ${normalized}, re-encoded: ${encodeSessionDirName(normalized)})`);
+          // 旧盘符编码的目录，migrateSessionDirsForNewRoot 应该已经处理过重命名/合并
+          // 如果目录还在，说明迁移失败（如文件冲突），跳过避免注册旧路径
+          console.log(`[migrate] 跳过旧盘符目录(应由路径迁移处理): ${dir.name} (cwd: ${normalized})`);
           continue;
         }
 
@@ -1828,10 +1894,9 @@ function setupIpc() {
           try { rimraf(dirPath); } catch {}
           continue;
         }
-        
+
         // 验证 cwd 路径存在于磁盘（排除歧义 decode 产生的幽灵路径）
         // 但对于 workspace 下的项目，即使路径不存在也保留（换电脑后子目录可能还没创建）
-        const wsSuffix = extractWorkspaceSuffix(normalized);
         if (!fs.existsSync(normalized)) {
           if (wsSuffix) {
             console.log(`[migrate] workspace 项目路径不存在但保留: ${dir.name} (cwd: ${normalized})`);
@@ -1954,18 +2019,24 @@ function setupIpc() {
       // 新目录已存在 → 合并（把旧目录的文件移过去）
       const newDirPath = path.join(SESSIONS_DIR, newDirName);
       if (fs.existsSync(newDirPath)) {
-        console.log(`[migrate-path] 合并: ${dir.name} → ${newDirName}`);
-        // 移动旧目录中的文件到新目录
+        console.log(`[migrate-path] 合并: ${dir.name} -> ${newDirName}`);
+        // 移动旧目录中的文件到新目录，文件名冲突时直接删除源文件（目标已存在且内容相同）
         const oldFiles = fs.readdirSync(dirPath);
         for (const f of oldFiles) {
           const src = path.join(dirPath, f);
           const dst = path.join(newDirPath, f);
           if (!fs.existsSync(dst)) {
             try { fs.renameSync(src, dst); } catch {}
+          } else {
+            // 目标已存在同名文件，删除源文件（会话文件内容相同，无需重复保留）
+            try { fs.unlinkSync(src); } catch {}
           }
         }
-        // 尝试删除旧目录（可能非空如果文件名冲突）
-        try { fs.rmdirSync(dirPath); } catch {}
+        // 删除旧目录（此时应为空）
+        try { fs.rmdirSync(dirPath); } catch (err) {
+          // rmdirSync 失败说明目录可能含子目录或文件删除失败，用 rimraf 兜底
+          try { rimraf(dirPath); } catch {}
+        }
       } else {
         // 直接重命名
         console.log(`[migrate-path] 重命名: ${dir.name} → ${newDirName}`);
@@ -2190,13 +2261,22 @@ function setupIpc() {
         const dirName = encodeSessionDirName(normalized);
         const projectPath = path.join(SESSIONS_DIR, dirName);
 
-        // 统计会话数
+        // 统计会话数（递归含分支子目录 *_<uuid>/，与 sessions:listSessions 口径一致）
         let sessionCount = 0;
-        try {
-          if (fs.existsSync(projectPath)) {
-            sessionCount = fs.readdirSync(projectPath).filter(f => f.endsWith('.jsonl')).length;
+        const countJsonl = (dir) => {
+          let entries;
+          try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+          } catch {
+            return;
           }
-        } catch {}
+          for (const entry of entries) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) countJsonl(full);
+            else if (entry.isFile() && entry.name.endsWith('.jsonl')) sessionCount++;
+          }
+        };
+        if (fs.existsSync(projectPath)) countJsonl(projectPath);
 
         result.push({
           dirName,
@@ -2214,20 +2294,33 @@ function setupIpc() {
         try {
           const projectPath = path.join(SESSIONS_DIR, proj.dirName);
           if (fs.existsSync(projectPath)) {
-            const files = fs.readdirSync(projectPath).filter(f => f.endsWith('.jsonl'));
+            // 递归扫描（含分支子目录），与 listSessions 口径一致
             let newestMtime = 0;
-            for (const f of files) {
-              const stat = fs.statSync(path.join(projectPath, f));
-              if (stat.mtimeMs > newestMtime) newestMtime = stat.mtimeMs;
-            }
+            const scanMtime = (dir) => {
+              let entries;
+              try {
+                entries = fs.readdirSync(dir, { withFileTypes: true });
+              } catch {
+                return;
+              }
+              for (const entry of entries) {
+                const full = path.join(dir, entry.name);
+                if (entry.isDirectory()) scanMtime(full);
+                else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+                  const stat = fs.statSync(full);
+                  if (stat.mtimeMs > newestMtime) newestMtime = stat.mtimeMs;
+                }
+              }
+            };
+            scanMtime(projectPath);
             proj.lastSessionMtime = newestMtime;
           } else { proj.lastSessionMtime = 0; }
         } catch { proj.lastSessionMtime = 0; }
       }
       result.sort((a, b) => {
-        const aTime = b.lastSessionMtime || new Date(b.lastOpenedAt || 0).getTime() || 0;
-        const bTime = a.lastSessionMtime || new Date(a.lastOpenedAt || 0).getTime() || 0;
-        return aTime - bTime;
+        const aTime = a.lastSessionMtime || new Date(a.lastOpenedAt || 0).getTime() || 0;
+        const bTime = b.lastSessionMtime || new Date(b.lastOpenedAt || 0).getTime() || 0;
+        return bTime - aTime;  // 最近活跃的排前
       });
 
       return result;
@@ -2820,6 +2913,16 @@ function setupIpc() {
         candidates.push(c);
       }
     };
+    // 0. 旁路模型（bypass-model.json，用户手配：AI 重命名/压缩总结/轻量补全三处共用，低成本优先）
+    try {
+      const bpPath = path.join(PORTABLE_ROOT, 'data', 'agent', 'bypass-model.json');
+      if (fs.existsSync(bpPath)) {
+        const bp = JSON.parse(fs.readFileSync(bpPath, 'utf8'));
+        if (bp && bp.enabled !== false && bp.baseUrl && bp.model) {
+          push({ name: 'bypass', baseUrl: bp.baseUrl, model: bp.model, apiKey: bp.apiKey || '' });
+        }
+      }
+    } catch {}
     // 1. 主模型旁路：前端当前模型优先（主力经常变，跟随当前；local 开着就用免费的本地，没开快速失败落下一级）
     let ref = null;
     if (providerHint && modelHint) {
@@ -2872,9 +2975,77 @@ function setupIpc() {
     return { error: `所有模型调用失败：${lastErr}` };
   });
 
-  // ── 列出归档的会话（单会话级别）
+  // ── 旁路模型配置（bypass-model.json：AI 重命名 / 压缩总结 / 轻量补全 三处共用） ──
+  ipcMain.handle('settings:getBypassModel', async () => {
+    try {
+      const p = path.join(PORTABLE_ROOT, 'data', 'agent', 'bypass-model.json');
+      if (!fs.existsSync(p)) return { enabled: false, baseUrl: '', apiKey: '', model: '', ts: 0 };
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch (err) { return { error: err.message }; }
+  });
+  ipcMain.handle('settings:saveBypassModel', async (event, cfg) => {
+    try {
+      const p = path.join(PORTABLE_ROOT, 'data', 'agent', 'bypass-model.json');
+      const clean = {
+        baseUrl: String((cfg && cfg.baseUrl) || '').trim(),
+        apiKey: String((cfg && cfg.apiKey) || '').trim(),
+        model: String((cfg && cfg.model) || '').trim(),
+        enabled: !!(cfg && cfg.enabled),
+        ts: Date.now(),
+      };
+      fs.writeFileSync(p, JSON.stringify(clean, null, 2), 'utf8');
+      return { success: true };
+    } catch (err) { return { success: false, error: err.message }; }
+  });
 
-  // ── 列出归档的会话（单会话级别） ──
+  // ── MCP 模型配置（computer-use grounding.json：ui_tars 视觉定位点击） ──
+  ipcMain.handle('settings:getGroundingModel', async () => {
+    try {
+      const p = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      if (!fs.existsSync(p)) return { enabled: false, api_base: '', api_key: '', model: '' };
+      return JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch (err) { return { error: err.message }; }
+  });
+  ipcMain.handle('settings:saveGroundingModel', async (event, cfg) => {
+    try {
+      const p = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      const clean = {
+        api_base: String((cfg && cfg.api_base) || '').trim(),
+        api_key: String((cfg && cfg.api_key) || '').trim(),
+        model: String((cfg && cfg.model) || '').trim(),
+        enabled: (cfg && cfg.enabled) ? '1' : '0',
+      };
+      fs.writeFileSync(p, JSON.stringify(clean, null, 2), 'utf8');
+      return { success: true };
+    } catch (err) { return { success: false, error: err.message }; }
+  });
+
+  // ── 模型健康检查（旁路 / MCP 共用）：验证 endpoint 可达 + model 可用 ──
+  ipcMain.handle('settings:checkModelHealth', async (event, arg) => {
+    const u = String((arg && arg.baseUrl) || '').trim().replace(/\/$/, '');
+    const k = String((arg && arg.apiKey) || '').trim() || 'EMPTY';
+    const model = String((arg && arg.model) || '').trim();
+    if (!u || !model) return { ok: false, status: 0, detail: 'Base URL 与 Model ID 必填' };
+    const auth = k !== 'EMPTY' ? { Authorization: `Bearer ${k}` } : {};
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15000);
+      const r = await fetch(`${u}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...auth },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      const text = await r.text().catch(() => '');
+      if (r.ok) return { ok: true, status: r.status, detail: '模型可达且响应正常' };
+      return { ok: false, status: r.status, detail: ((text || '').slice(0, 240)) || `HTTP ${r.status}` };
+    } catch (e) {
+      return { ok: false, status: 0, detail: '网络不可达或请求超时: ' + (e && e.message ? e.message : String(e)) };
+    }
+  });
+
+  // ── 列出归档的会话（单会话级别）
   ipcMain.handle('sessions:listArchivedSessions', async (event, projectDirName) => {
     try {
       const archiveProjectDir = path.join(ARCHIVE_DIR, projectDirName);

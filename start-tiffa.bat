@@ -17,6 +17,7 @@ set "PI_CODING_AGENT_DIR=%ROOT%\data\agent"
 set "HOME=%ROOT%\home"
 set "USERPROFILE=%ROOT%\home"
 set "MNEMOPI_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5"
+set "TIFFA_COMPACT=auto"
 
 REM ── Bun 运行时路径 ──
 set "BUN_EXE=%ROOT%\npm-global\node_modules\bun\bin\bun.exe"
