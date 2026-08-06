@@ -869,7 +869,7 @@ function createWindow() {
     title: 'Tiffa',
     icon: path.join(__dirname, 'assets', 'tiffa-icon.ico'),
     backgroundColor: '#1a1a2e',
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -877,16 +877,9 @@ function createWindow() {
       sandbox: false, // needed for fs access via preload
     },
   });
-
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-
   // 隐藏原生菜单栏
   mainWindow.setMenu(null);
-
-  // 等渲染进程准备好再显示窗口，避免黑屏闪烁
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
