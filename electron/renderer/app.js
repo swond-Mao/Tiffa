@@ -812,11 +812,52 @@ const followScroll = {
 
 // ── Initialize ──
 async function init() {
-  // 启动提示语由遮罩编排逻辑自适应驱动（见下方 overlay 段），
-  // 这里只记录启动时刻，用于计算各阶段的最短展示时间
+  // 启动时刻，用于计算各阶段时间
   const _startupT0 = Date.now();
-  state.workspacePath = await tiffaDesktop.getWorkspacePath();
 
+  // 进度条控制：setProgress(pct, label?) 同步更新进度条宽度和可选的状态文字
+  // 用 requestAnimationFrame 确保 UI 有机会重绘，避免主线程被 await 链阻塞时进度条不动
+  const _progressBar = document.getElementById('startupProgressBar');
+  const _statusEl = document.getElementById('startupStatus');
+  // 初始为不确定模式（shimmer 来回滑动），第一次 setProgress 后切到确定模式
+  if (_progressBar) _progressBar.classList.add('indeterminate');
+  let _progressStarted = false;
+  const setProgress = (pct, label) => {
+    const p = Math.min(100, Math.max(0, pct));
+    requestAnimationFrame(() => {
+      if (_progressBar) {
+        if (!_progressStarted) {
+          _progressBar.classList.remove('indeterminate');
+          _progressStarted = true;
+        }
+        _progressBar.style.width = `${p}%`;
+      }
+      if (label && _statusEl) _statusEl.textContent = label;
+    });
+  };
+  // 让出主线程一帧，确保进度条 DOM 更新被渲染。
+  // 注意：窗口是 show:false 创建、ready-to-show 后才显示；隐藏窗口下
+  // requestAnimationFrame 不触发（Chromium 暂停渲染帧），若 init() 抢先跑到这里
+  // 会永久挂起导致启动画面卡死。故用 setTimeout 兜底：rAF 优先，100ms 内不触发则放行。
+  const yieldFrame = () => new Promise(r => {
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; r(); } };
+    requestAnimationFrame(done);
+    setTimeout(done, 100);
+  });
+  // 提示语淡出->换字->淡入（transition 0.8s）
+  const fadeSwap = async (text) => {
+    if (!_statusEl) return;
+    _statusEl.style.animation = 'none';
+    _statusEl.style.opacity = '0';
+    await new Promise(r => setTimeout(r, 800));
+    _statusEl.textContent = text;
+    _statusEl.style.opacity = '1';
+  };
+
+  state.workspacePath = await tiffaDesktop.getWorkspacePath();
+  setProgress(5);
+  await yieldFrame();
 
   minimap.init();
   followScroll.init();
@@ -934,11 +975,19 @@ async function init() {
   setupXmlTranslation();
   setupComputerUse();
   setupApprovalMode();
+  setProgress(10);
+  await yieldFrame();
   // 先标记 welcomePhase=done，让 loadProjects 里的会话恢复不走 5.5s 延迟
   state.welcomePhase = 'done';
   await loadModelMap();
+  setProgress(15);
+  await yieldFrame();
   await loadEnabledModels();
+  setProgress(20);
+  await yieldFrame();
   await loadProjects();
+  setProgress(25);
+  await yieldFrame();
 
   const ready = await tiffaDesktop.isReady();
   if (ready) {
@@ -946,31 +995,24 @@ async function init() {
     updateStatus('就绪');
     fetchCurrentModel();
   }
+  setProgress(30);
 
-  // 等待后端就绪再淡出遮罩，避免用户在预热期间提前发送消息
-  // 自适应编排：每阶段「最少展示时间」与「实际等待」取大，后端快就快进，慢就等
+  // ── 启动遮罩编排：三阶段序贯，进度条贯穿全程 ──
   const overlay = document.getElementById('startupOverlay');
-  const statusEl = document.getElementById('startupStatus');
   if (overlay) {
-    // 提示语淡出→换字→淡入（transition 0.8s；先彻底移除脉冲动画，否则 animation 占用 opacity）
-    const fadeSwap = async (text) => {
-      if (!statusEl) return;
-      statusEl.style.animation = 'none';
-      statusEl.style.opacity = '0';
-      await new Promise(r => setTimeout(r, 800));
-      statusEl.textContent = text;
-      statusEl.style.opacity = '1';
-    };
-    // 「静候枰开…」至少展示 2 秒，避免一闪而过
-    const minPhase1 = 2000 - (Date.now() - _startupT0);
+    // 「静候枰开…」至少展示 1.5 秒（初始化步骤已映射到 0-30%）
+    const minPhase1 = 1500 - (Date.now() - _startupT0);
     if (minPhase1 > 0) await new Promise(r => setTimeout(r, minPhase1));
-    // 「凝心定神…」：三段序贯的必经阶段，无论后端快慢都展示；
-    // 后端未就绪时原地等待，已就绪时只停留最短时间，不拖慢启动
-    const csT0 = Date.now();
+    setProgress(35);
+
+    // 「凝心定神…」：唤醒引擎。无论后端快慢都展示此阶段。
+    // 后端未就绪时原地等待（进度条在 35-65% 间缓慢推进），已就绪时快速通过。
     await fadeSwap('凝心定神…');
+    setProgress(40);
     if (!state.tiffaReady) {
-      const maxWait = 20000; // 最多等 20 秒
+      const maxWait = 20000;
       const start = Date.now();
+      let _prog = 40;
       while (!state.tiffaReady && Date.now() - start < maxWait) {
         await new Promise(r => setTimeout(r, 300));
         const r = await tiffaDesktop.isReady();
@@ -979,20 +1021,26 @@ async function init() {
           updateStatus('就绪');
           fetchCurrentModel();
         }
+        // 进度条缓慢推进：20 秒内从 40% 推到 60%，让用户感知在等待
+        const elapsed = Date.now() - start;
+        _prog = 40 + Math.min(20, elapsed / 1000) * 1.0; // 每秒 +1%，上限 60%
+        setProgress(_prog);
       }
     }
-    // 该阶段至少展示 1.5 秒（含 0.8 秒淡出过渡），避免快就绪时一闪而过
-    const csShown = Date.now() - csT0;
-    if (csShown < 1500) await new Promise(r => setTimeout(r, 1500 - csShown));
+    setProgress(65);
+    // 凝心定神至少展示 1.2 秒（含 0.8 秒淡出），避免已就绪时一闪而过
+    const csElapsed = Date.now() - _startupT0;
+    if (csElapsed < 2700) await new Promise(r => setTimeout(r, 2700 - csElapsed));
     if (!state.tiffaReady) {
       // 超时兜底：仍然允许进入，但提示未就绪
-      if (statusEl) statusEl.textContent = '棋局未启，请稍候…';
+      if (_statusEl) _statusEl.textContent = '棋局未启，请稍候…';
       await new Promise(r => setTimeout(r, 1500));
     }
-    // 等待记忆系统预热完成（embedding 模型加载 + /memory rebuild）
+
+    // 「阅览旧谱…」：加载记忆与历史
     if (state.tiffaReady) {
-      const swapT0 = Date.now();
       await fadeSwap('阅览旧谱…');
+      setProgress(70);
       // 真正等待消息加载完成：轮询加载指示器，而不是固定时间猜测
       const warmupStart = Date.now();
       while (Date.now() - warmupStart < 30000) {  // 最多等 30 秒
@@ -1001,8 +1049,9 @@ async function init() {
         if (!stillLoading) break;
         await new Promise(r => setTimeout(r, 300));
       }
+      setProgress(80);
       // 预载其余已打开对话的历史（进入后切换 tab 秒开）：
-      // 全部加载完才放行，进度显示在提示语上
+      // 全部加载完才放行，进度显示在进度条上
       const preloadTargets = [...state.activeSessionPaths]
         .filter(p => p !== state.activeSessionPath && !p.startsWith('__new__'))
         .slice(0, 8);  // 上限与最大实例数对齐
@@ -1016,13 +1065,15 @@ async function init() {
             } catch (e) { console.warn('[init] 预载对话失败:', p, e.message); }
           }
           done++;
-          if (statusEl) statusEl.textContent = `阅览旧谱…（已读 ${done}/${preloadTargets.length}）`;
+          // 预载进度映射到 80-95%
+          setProgress(80 + Math.round((done / preloadTargets.length) * 15));
         }
       }
-      // 「阅览旧谱…」至少展示 1 秒，给记忆预热和渲染收尾留余量
-      const shown = Date.now() - swapT0;
-      if (shown < 1000) await new Promise(r => setTimeout(r, 1000 - shown));
+      // 「阅览旧谱…」至少展示 1 秒
+      const swapElapsed = Date.now() - warmupStart;
+      if (swapElapsed < 1000) await new Promise(r => setTimeout(r, 1000 - swapElapsed));
     }
+    setProgress(100);
     overlay.classList.add('fade-out');
     // 等遮罩过渡(1s)与星光溶出(1.2s)都走完再移除，避免未完全隐去就被硬拽掉
     await new Promise(r => setTimeout(r, 1400));

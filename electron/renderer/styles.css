@@ -2373,6 +2373,46 @@ html[data-mode="light"] .muse-tint {
   50% { opacity: 1; }
 }
 
+/* 启动进度条：细线 + 平滑过渡，让用户感知加载在推进 */
+.startup-progress {
+  width: 200px;
+  height: 2px;
+  background: hsl(var(--text-400) / 0.15);
+  border-radius: 1px;
+  overflow: hidden;
+  opacity: 0;
+  animation: progressFadeIn 0.6s ease 0.8s both;
+}
+
+@keyframes progressFadeIn {
+  to { opacity: 1; }
+}
+
+.startup-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: hsl(var(--accent) / 0.8);
+  border-radius: 1px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 不确定进度模式：进度条来回滑动，在等待 IPC 响应等场景给用户视觉反馈 */
+.startup-progress-bar.indeterminate {
+  width: 30% !important;
+  animation: indeterminateSlide 1.8s ease-in-out infinite;
+}
+
+@keyframes indeterminateSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(333%); }
+}
+
+/* 进度条随遮罩一起淡出 */
+.startup-overlay.fade-out .startup-progress {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
 /* 新建对话过渡遮罩 */
 .new-session-overlay {
   position: fixed;
