@@ -2380,31 +2380,17 @@ html[data-mode="light"] .muse-tint {
   background: hsl(var(--text-400) / 0.15);
   border-radius: 1px;
   overflow: hidden;
-  opacity: 0;
-  animation: progressFadeIn 0.6s ease 0.8s both;
 }
 
-@keyframes progressFadeIn {
-  to { opacity: 1; }
-}
 
 .startup-progress-bar {
   height: 100%;
   width: 0%;
   background: hsl(var(--accent) / 0.8);
   border-radius: 1px;
+  /* 0.6s 平滑过渡：伪进度每 250ms 推一次，进度条一直处于"追赶"中，
+     视觉上就是持续平滑移动，杜绝"卡住不动"的观感 */
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* 不确定进度模式：进度条来回滑动，在等待 IPC 响应等场景给用户视觉反馈 */
-.startup-progress-bar.indeterminate {
-  width: 30% !important;
-  animation: indeterminateSlide 1.8s ease-in-out infinite;
-}
-
-@keyframes indeterminateSlide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(333%); }
 }
 
 /* 进度条随遮罩一起淡出 */

@@ -815,26 +815,29 @@ async function init() {
   // 启动时刻，用于计算各阶段时间
   const _startupT0 = Date.now();
 
-  // 进度条控制：setProgress(pct, label?) 同步更新进度条宽度和可选的状态文字
-  // 用 requestAnimationFrame 确保 UI 有机会重绘，避免主线程被 await 链阻塞时进度条不动
+  // ── 启动进度：检查点 + 伪进度双驱动 ──
+  // 检查点：真实步骤完成时 setProgress 拉高目标（只增不减，绝不倒退）
+  // 伪进度：等待期间进度条缓慢爬升（每 250ms +0.5%，封顶 95%），
+  //         保证任何等待都"看得见在动"，杜绝"进度条卡住"的观感。
+  // 提示语：setProgress(pct, label) 可同步换字（轻量直接替换），
+  //         大阶段切换用下方 fadeSwap（淡出->换字->淡入）。
   const _progressBar = document.getElementById('startupProgressBar');
   const _statusEl = document.getElementById('startupStatus');
-  // 初始为不确定模式（shimmer 来回滑动），第一次 setProgress 后切到确定模式
-  if (_progressBar) _progressBar.classList.add('indeterminate');
-  let _progressStarted = false;
+  let _progressTarget = 0;   // 真实检查点，只增不减
+  let _progressValue = 0;    // 当前显示值
   const setProgress = (pct, label) => {
-    const p = Math.min(100, Math.max(0, pct));
-    requestAnimationFrame(() => {
-      if (_progressBar) {
-        if (!_progressStarted) {
-          _progressBar.classList.remove('indeterminate');
-          _progressStarted = true;
-        }
-        _progressBar.style.width = `${p}%`;
-      }
-      if (label && _statusEl) _statusEl.textContent = label;
-    });
+    if (typeof pct === 'number') _progressTarget = Math.min(100, Math.max(0, pct));
+    if (label && _statusEl) _statusEl.textContent = label;
   };
+  const _progressTicker = setInterval(() => {
+    if (!_progressBar || !_progressBar.isConnected) { clearInterval(_progressTicker); return; }
+    if (_progressValue < _progressTarget) {
+      _progressValue = Math.min(_progressTarget, _progressValue + 5); // 快速追到检查点
+    } else if (_progressValue < 95) {
+      _progressValue = Math.min(95, _progressValue + 0.5);            // 伪进度：继续爬
+    }
+    _progressBar.style.width = `${_progressValue}%`;
+  }, 250);
   // 让出主线程一帧，确保进度条 DOM 更新被渲染。
   // 注意：窗口是 show:false 创建、ready-to-show 后才显示；隐藏窗口下
   // requestAnimationFrame 不触发（Chromium 暂停渲染帧），若 init() 抢先跑到这里
@@ -856,7 +859,7 @@ async function init() {
   };
 
   state.workspacePath = await tiffaDesktop.getWorkspacePath();
-  setProgress(5);
+  setProgress(5, '静候枰开…');
   await yieldFrame();
 
   minimap.init();
@@ -975,18 +978,18 @@ async function init() {
   setupXmlTranslation();
   setupComputerUse();
   setupApprovalMode();
-  setProgress(10);
+  setProgress(10, '摆盘落座…');
   await yieldFrame();
   // 先标记 welcomePhase=done，让 loadProjects 里的会话恢复不走 5.5s 延迟
   state.welcomePhase = 'done';
   await loadModelMap();
-  setProgress(15);
+  setProgress(15, '梳理棋谱…');
   await yieldFrame();
   await loadEnabledModels();
-  setProgress(20);
+  setProgress(20, '陈列棋子…');
   await yieldFrame();
   await loadProjects();
-  setProgress(25);
+  setProgress(25, '排兵布阵…');
   await yieldFrame();
 
   const ready = await tiffaDesktop.isReady();
@@ -995,20 +998,17 @@ async function init() {
     updateStatus('就绪');
     fetchCurrentModel();
   }
-  setProgress(30);
+  setProgress(30, '落子定音…');
 
-  // ── 启动遮罩编排：三阶段序贯，进度条贯穿全程 ──
+  // ── 启动遮罩编排：进度条贯穿全程，提示语随阶段切换 ──
   const overlay = document.getElementById('startupOverlay');
   if (overlay) {
-    // 「静候枰开…」至少展示 1.5 秒（初始化步骤已映射到 0-30%）
-    const minPhase1 = 1500 - (Date.now() - _startupT0);
-    if (minPhase1 > 0) await new Promise(r => setTimeout(r, minPhase1));
-    setProgress(35);
+    // init 步骤已映射到 0-30%（含提示语：静候枰开→摆盘落座→梳理棋谱→陈列棋子→排兵布阵→落子定音）
+    // 伪进度保证任何等待期间进度条持续推进，不会"卡住不动"
 
-    // 「凝心定神…」：唤醒引擎。无论后端快慢都展示此阶段。
-    // 后端未就绪时原地等待（进度条在 35-65% 间缓慢推进），已就绪时快速通过。
-    await fadeSwap('凝心定神…');
-    setProgress(40);
+    // 「凝心定神…」：唤醒引擎。后端未就绪时原地等待，已就绪时快速通过。
+    // 提示语在 init 已用过"摆盘落座"，此处仅在真正等待内核时才切换到"凝心定神"
+    setProgress(40, '凝心定神…');
     if (!state.tiffaReady) {
       const maxWait = 20000;
       const start = Date.now();
@@ -1021,14 +1021,14 @@ async function init() {
           updateStatus('就绪');
           fetchCurrentModel();
         }
-        // 进度条缓慢推进：20 秒内从 40% 推到 60%，让用户感知在等待
+        // 进度条缓慢推进：20 秒内从 40% 推到 60%（伪进度已兜底，这里是真实检查点）
         const elapsed = Date.now() - start;
         _prog = 40 + Math.min(20, elapsed / 1000) * 1.0; // 每秒 +1%，上限 60%
         setProgress(_prog);
       }
     }
     setProgress(65);
-    // 凝心定神至少展示 1.2 秒（含 0.8 秒淡出），避免已就绪时一闪而过
+    // 至少展示 1.2 秒（含 0.8 秒淡出），避免已就绪时一闪而过
     const csElapsed = Date.now() - _startupT0;
     if (csElapsed < 2700) await new Promise(r => setTimeout(r, 2700 - csElapsed));
     if (!state.tiffaReady) {
