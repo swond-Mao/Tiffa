@@ -817,16 +817,12 @@ async function init() {
 
   // ── 启动剧本：字幕 + 进度条按固定节奏播放，与真实加载完全解耦 ──
   // 无论后端快慢，观感永远是"字幕一句句过 + 进度条匀速走"。
-  // 剧本固定 12 秒播完：每句 1.5 秒，进度条 12 秒匀速到 100%。
+  // 剧本固定 12 秒播完：4 句字幕各 3 秒，进度条 12 秒匀速到 100%。
   const SCRIPT = [
-    { label: '静候枰开…', end: 1500 },
-    { label: '摆盘落座…', end: 3000 },
-    { label: '梳理棋谱…', end: 4500 },
-    { label: '陈列棋子…', end: 6000 },
-    { label: '排兵布阵…', end: 7500 },
-    { label: '落子定音…', end: 9000 },
-    { label: '凝心定神…', end: 10500 },
-    { label: '阅览旧谱…', end: 12000 },
+    { label: '夜色将尽，晨光初透', end: 3000 },
+    { label: '拾起散落的记忆',     end: 6000 },
+    { label: '行囊在肩，天地为卷', end: 9000 },
+    { label: '久等了，入席吧',     end: 12000 },
   ];
   const SCRIPT_DURATION = 12000;
   const _progressBar = document.getElementById('startupProgressBar');
