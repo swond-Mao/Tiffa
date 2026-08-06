@@ -817,7 +817,7 @@ async function init() {
 
   // ── 启动进度：检查点 + 伪进度双驱动 ──
   // 检查点：真实步骤完成时 setProgress 拉高目标（只增不减，绝不倒退）
-  // 伪进度：等待期间进度条缓慢爬升（每 250ms +0.5%，封顶 95%），
+  // 伪进度：等待期间进度条持续爬升（每 250ms +1.5% ≈ 6%/秒，封顶 95%），
   //         保证任何等待都"看得见在动"，杜绝"进度条卡住"的观感。
   // 提示语：setProgress(pct, label) 可同步换字（轻量直接替换），
   //         大阶段切换用下方 fadeSwap（淡出->换字->淡入）。
@@ -834,7 +834,7 @@ async function init() {
     if (_progressValue < _progressTarget) {
       _progressValue = Math.min(_progressTarget, _progressValue + 5); // 快速追到检查点
     } else if (_progressValue < 95) {
-      _progressValue = Math.min(95, _progressValue + 0.5);            // 伪进度：继续爬
+      _progressValue = Math.min(95, _progressValue + 1.5);            // 伪进度：持续爬升
     }
     _progressBar.style.width = `${_progressValue}%`;
   }, 250);
@@ -858,8 +858,8 @@ async function init() {
     _statusEl.style.opacity = '1';
   };
 
-  state.workspacePath = await tiffaDesktop.getWorkspacePath();
   setProgress(5, '静候枰开…');
+  state.workspacePath = await tiffaDesktop.getWorkspacePath();
   await yieldFrame();
 
   minimap.init();
@@ -982,23 +982,23 @@ async function init() {
   await yieldFrame();
   // 先标记 welcomePhase=done，让 loadProjects 里的会话恢复不走 5.5s 延迟
   state.welcomePhase = 'done';
-  await loadModelMap();
   setProgress(15, '梳理棋谱…');
+  await loadModelMap();
   await yieldFrame();
-  await loadEnabledModels();
   setProgress(20, '陈列棋子…');
+  await loadEnabledModels();
   await yieldFrame();
-  await loadProjects();
   setProgress(25, '排兵布阵…');
+  await loadProjects();
   await yieldFrame();
 
+  setProgress(30, '落子定音…');
   const ready = await tiffaDesktop.isReady();
   if (ready) {
     state.tiffaReady = true;
     updateStatus('就绪');
     fetchCurrentModel();
   }
-  setProgress(30, '落子定音…');
 
   // ── 启动遮罩编排：进度条贯穿全程，提示语随阶段切换 ──
   const overlay = document.getElementById('startupOverlay');
@@ -1006,10 +1006,10 @@ async function init() {
     // init 步骤已映射到 0-30%（含提示语：静候枰开→摆盘落座→梳理棋谱→陈列棋子→排兵布阵→落子定音）
     // 伪进度保证任何等待期间进度条持续推进，不会"卡住不动"
 
-    // 「凝心定神…」：唤醒引擎。后端未就绪时原地等待，已就绪时快速通过。
-    // 提示语在 init 已用过"摆盘落座"，此处仅在真正等待内核时才切换到"凝心定神"
-    setProgress(40, '凝心定神…');
+    // 「凝心定神…」：唤醒引擎。仅当后端未就绪时才显示此阶段并等待；
+    // 已就绪（init 里 isReady 成功）则直接跳过，避免提示语一闪而过
     if (!state.tiffaReady) {
+      setProgress(40, '凝心定神…');
       const maxWait = 20000;
       const start = Date.now();
       let _prog = 40;
@@ -1041,13 +1041,16 @@ async function init() {
     if (state.tiffaReady) {
       await fadeSwap('阅览旧谱…');
       setProgress(70);
-      // 真正等待消息加载完成：轮询加载指示器，而不是固定时间猜测
+      // 真正等待消息加载完成：轮询加载指示器，而不是固定时间猜测。
+      // 轮询期间按时间映射推进 70→80，避免进度条长时间停驻
       const warmupStart = Date.now();
       while (Date.now() - warmupStart < 30000) {  // 最多等 30 秒
         const stillLoading = dom.messages.querySelector('.loading-indicator')
           || dom.messages.children.length === 0;
         if (!stillLoading) break;
         await new Promise(r => setTimeout(r, 300));
+        const elapsed = Date.now() - warmupStart;
+        setProgress(70 + Math.min(10, (elapsed / 30000) * 10)); // 30 秒内 70→80
       }
       setProgress(80);
       // 预载其余已打开对话的历史（进入后切换 tab 秒开）：
