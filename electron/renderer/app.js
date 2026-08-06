@@ -815,50 +815,45 @@ async function init() {
   // 启动时刻，用于计算各阶段时间
   const _startupT0 = Date.now();
 
-  // ── 启动进度：检查点 + 伪进度双驱动 ──
-  // 检查点：真实步骤完成时 setProgress 拉高目标（只增不减，绝不倒退）
-  // 伪进度：等待期间进度条持续爬升（每 250ms +1.5% ≈ 6%/秒，封顶 95%），
-  //         保证任何等待都"看得见在动"，杜绝"进度条卡住"的观感。
-  // 提示语：setProgress(pct, label) 可同步换字（轻量直接替换），
-  //         大阶段切换用下方 fadeSwap（淡出->换字->淡入）。
+  // ── 启动剧本：字幕 + 进度条按固定节奏播放，与真实加载完全解耦 ──
+  // 无论后端快慢，观感永远是"字幕一句句过 + 进度条匀速走"。
+  // 剧本固定 12 秒播完：每句 1.5 秒，进度条 12 秒匀速到 100%。
+  const SCRIPT = [
+    { label: '静候枰开…', end: 1500 },
+    { label: '摆盘落座…', end: 3000 },
+    { label: '梳理棋谱…', end: 4500 },
+    { label: '陈列棋子…', end: 6000 },
+    { label: '排兵布阵…', end: 7500 },
+    { label: '落子定音…', end: 9000 },
+    { label: '凝心定神…', end: 10500 },
+    { label: '阅览旧谱…', end: 12000 },
+  ];
+  const SCRIPT_DURATION = 12000;
   const _progressBar = document.getElementById('startupProgressBar');
   const _statusEl = document.getElementById('startupStatus');
-  let _progressTarget = 0;   // 真实检查点，只增不减
-  let _progressValue = 0;    // 当前显示值
-  const setProgress = (pct, label) => {
-    if (typeof pct === 'number') _progressTarget = Math.min(100, Math.max(0, pct));
-    if (label && _statusEl) _statusEl.textContent = label;
-  };
-  const _progressTicker = setInterval(() => {
-    if (!_progressBar || !_progressBar.isConnected) { clearInterval(_progressTicker); return; }
-    if (_progressValue < _progressTarget) {
-      _progressValue = Math.min(_progressTarget, _progressValue + 5); // 快速追到检查点
-    } else if (_progressValue < 95) {
-      _progressValue = Math.min(95, _progressValue + 1.5);            // 伪进度：持续爬升
+  let _scriptIdx = 0;
+  // 剧本播放器：每 100ms 按固定时间轴推进字幕与进度条
+  const _scriptTicker = setInterval(() => {
+    if (!_progressBar || !_progressBar.isConnected) { clearInterval(_scriptTicker); return; }
+    const elapsed = Date.now() - _startupT0;
+    const pct = Math.min(100, (elapsed / SCRIPT_DURATION) * 100);
+    _progressBar.style.width = `${pct}%`;
+    while (_scriptIdx < SCRIPT.length && elapsed >= SCRIPT[_scriptIdx].end) {
+      if (_statusEl) _statusEl.textContent = SCRIPT[_scriptIdx].label;
+      _scriptIdx++;
     }
-    _progressBar.style.width = `${_progressValue}%`;
-  }, 250);
-  // 让出主线程一帧，确保进度条 DOM 更新被渲染。
-  // 注意：窗口是 show:false 创建、ready-to-show 后才显示；隐藏窗口下
-  // requestAnimationFrame 不触发（Chromium 暂停渲染帧），若 init() 抢先跑到这里
-  // 会永久挂起导致启动画面卡死。故用 setTimeout 兜底：rAF 优先，100ms 内不触发则放行。
+    if (elapsed >= SCRIPT_DURATION) clearInterval(_scriptTicker);
+  }, 100);
+  // 让出主线程一帧，确保启动画面 DOM 更新被渲染。
+  // 注意：窗口 show:false 时 rAF 不触发（Chromium 暂停渲染帧），
+  // 故 setTimeout 兜底：rAF 优先，100ms 内不触发则放行，绝不挂死。
   const yieldFrame = () => new Promise(r => {
     let settled = false;
     const done = () => { if (!settled) { settled = true; r(); } };
     requestAnimationFrame(done);
     setTimeout(done, 100);
   });
-  // 提示语淡出->换字->淡入（transition 0.8s）
-  const fadeSwap = async (text) => {
-    if (!_statusEl) return;
-    _statusEl.style.animation = 'none';
-    _statusEl.style.opacity = '0';
-    await new Promise(r => setTimeout(r, 800));
-    _statusEl.textContent = text;
-    _statusEl.style.opacity = '1';
-  };
 
-  setProgress(5, '静候枰开…');
   state.workspacePath = await tiffaDesktop.getWorkspacePath();
   await yieldFrame();
 
@@ -978,21 +973,16 @@ async function init() {
   setupXmlTranslation();
   setupComputerUse();
   setupApprovalMode();
-  setProgress(10, '摆盘落座…');
   await yieldFrame();
   // 先标记 welcomePhase=done，让 loadProjects 里的会话恢复不走 5.5s 延迟
   state.welcomePhase = 'done';
-  setProgress(15, '梳理棋谱…');
   await loadModelMap();
   await yieldFrame();
-  setProgress(20, '陈列棋子…');
   await loadEnabledModels();
   await yieldFrame();
-  setProgress(25, '排兵布阵…');
   await loadProjects();
   await yieldFrame();
 
-  setProgress(30, '落子定音…');
   const ready = await tiffaDesktop.isReady();
   if (ready) {
     state.tiffaReady = true;
@@ -1000,19 +990,19 @@ async function init() {
     fetchCurrentModel();
   }
 
-  // ── 启动遮罩编排：进度条贯穿全程，提示语随阶段切换 ──
+  // ── 启动遮罩收尾：剧本已由 _scriptTicker 自动播放（12s 匀速）──
+  // 这里只负责：等剧本播完 → 若内核未就绪则轮询等待 → 淡出移除。
   const overlay = document.getElementById('startupOverlay');
   if (overlay) {
-    // init 步骤已映射到 0-30%（含提示语：静候枰开→摆盘落座→梳理棋谱→陈列棋子→排兵布阵→落子定音）
-    // 伪进度保证任何等待期间进度条持续推进，不会"卡住不动"
+    // 等剧本播完（字幕与进度条已由 ticker 匀速推进，不绑定真实进度）
+    const remain = SCRIPT_DURATION - (Date.now() - _startupT0);
+    if (remain > 0) await new Promise(r => setTimeout(r, remain));
 
-    // 「凝心定神…」：唤醒引擎。仅当后端未就绪时才显示此阶段并等待；
-    // 已就绪（init 里 isReady 成功）则直接跳过，避免提示语一闪而过
+    // 内核仍未就绪：轮询等待（最多 20 秒），字幕提示，不无限卡死
     if (!state.tiffaReady) {
-      setProgress(40, '凝心定神…');
+      if (_statusEl) _statusEl.textContent = '棋局未启，请稍候…';
       const maxWait = 20000;
       const start = Date.now();
-      let _prog = 40;
       while (!state.tiffaReady && Date.now() - start < maxWait) {
         await new Promise(r => setTimeout(r, 300));
         const r = await tiffaDesktop.isReady();
@@ -1021,66 +1011,40 @@ async function init() {
           updateStatus('就绪');
           fetchCurrentModel();
         }
-        // 进度条缓慢推进：20 秒内从 40% 推到 60%（伪进度已兜底，这里是真实检查点）
-        const elapsed = Date.now() - start;
-        _prog = 40 + Math.min(20, elapsed / 1000) * 1.0; // 每秒 +1%，上限 60%
-        setProgress(_prog);
       }
     }
-    setProgress(65);
-    // 至少展示 1.2 秒（含 0.8 秒淡出），避免已就绪时一闪而过
-    const csElapsed = Date.now() - _startupT0;
-    if (csElapsed < 2700) await new Promise(r => setTimeout(r, 2700 - csElapsed));
-    if (!state.tiffaReady) {
-      // 超时兜底：仍然允许进入，但提示未就绪
-      if (_statusEl) _statusEl.textContent = '棋局未启，请稍候…';
-      await new Promise(r => setTimeout(r, 1500));
-    }
 
-    // 「阅览旧谱…」：加载记忆与历史
+    // 已就绪时等待消息加载完成（轮询加载指示器），避免进入后看到空聊天区
     if (state.tiffaReady) {
-      await fadeSwap('阅览旧谱…');
-      setProgress(70);
-      // 真正等待消息加载完成：轮询加载指示器，而不是固定时间猜测。
-      // 轮询期间按时间映射推进 70→80，避免进度条长时间停驻
       const warmupStart = Date.now();
       while (Date.now() - warmupStart < 30000) {  // 最多等 30 秒
         const stillLoading = dom.messages.querySelector('.loading-indicator')
           || dom.messages.children.length === 0;
         if (!stillLoading) break;
         await new Promise(r => setTimeout(r, 300));
-        const elapsed = Date.now() - warmupStart;
-        setProgress(70 + Math.min(10, (elapsed / 30000) * 10)); // 30 秒内 70→80
       }
-      setProgress(80);
-      // 预载其余已打开对话的历史（进入后切换 tab 秒开）：
-      // 全部加载完才放行，进度显示在进度条上
-      const preloadTargets = [...state.activeSessionPaths]
-        .filter(p => p !== state.activeSessionPath && !p.startsWith('__new__'))
-        .slice(0, 8);  // 上限与最大实例数对齐
-      if (preloadTargets.length > 0) {
-        let done = 0;
-        for (const p of preloadTargets) {
-          if (!state.historyCache.has(p)) {
-            try {
-              const res = await tiffaDesktop.loadSessionHistory(p);
-              if (res && !res.error && res.messages) state.historyCache.set(p, res.messages);
-            } catch (e) { console.warn('[init] 预载对话失败:', p, e.message); }
-          }
-          done++;
-          // 预载进度映射到 80-95%
-          setProgress(80 + Math.round((done / preloadTargets.length) * 15));
-        }
-      }
-      // 「阅览旧谱…」至少展示 1 秒
-      const swapElapsed = Date.now() - warmupStart;
-      if (swapElapsed < 1000) await new Promise(r => setTimeout(r, 1000 - swapElapsed));
     }
-    setProgress(100);
+
+    // 剧本进度条最后拉到 100%，淡出移除
+    if (_progressBar) _progressBar.style.width = '100%';
     overlay.classList.add('fade-out');
     // 等遮罩过渡(1s)与星光溶出(1.2s)都走完再移除，避免未完全隐去就被硬拽掉
     await new Promise(r => setTimeout(r, 1400));
     overlay.remove();
+
+    // 预载其余已打开对话的历史（进入后切换 tab 秒开）：
+    // 不阻塞进入，异步后台预载
+    if (state.tiffaReady) {
+      const preloadTargets = [...state.activeSessionPaths]
+        .filter(p => p !== state.activeSessionPath && !p.startsWith('__new__'))
+        .slice(0, 8);  // 上限与最大实例数对齐
+      preloadTargets.forEach(p => {
+        if (state.historyCache.has(p)) return;
+        tiffaDesktop.loadSessionHistory(p).then(res => {
+          if (res && !res.error && res.messages) state.historyCache.set(p, res.messages);
+        }).catch(e => console.warn('[init] 预载对话失败:', p, e.message));
+      });
+    }
   }
   // 遮罩已在上方等待消息加载完成，无需重渲染；仅当消息区确实为空时显示欢迎页
   if (dom.messages.children.length === 0) showWelcome();

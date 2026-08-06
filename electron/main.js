@@ -869,7 +869,7 @@ function createWindow() {
     title: 'Tiffa',
     icon: path.join(__dirname, 'assets', 'tiffa-icon.ico'),
     backgroundColor: '#1a1a2e',
-    show: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -880,6 +880,12 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   // 隐藏原生菜单栏
   mainWindow.setMenu(null);
+  // 等渲染进程首帧就绪再显示，避免黑屏/白屏闪烁。
+  // 注：renderer 的 yieldFrame 已有 setTimeout 兜底，窗口未显示期间 rAF 被暂停
+  // 也不会导致 init() 挂死（2026-08-06 已修复），故可安全延迟显示。
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
