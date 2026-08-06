@@ -435,6 +435,16 @@ body {
   box-shadow: 0 0 0 2px hsl(var(--accent-main-200) / 0.25);
 }
 
+/* 正在等待用户回复（ask 抽屉待弹）的会话：圆点高亮脉动提示 */
+.session-item.pending-ask .session-item-dot {
+  background: var(--accent);
+  animation: pendingAskPulse 1.4s ease-in-out infinite;
+}
+@keyframes pendingAskPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .session-item-title {
   flex: 1;
   min-width: 0;
@@ -684,6 +694,29 @@ body {
 
 .session-tab-msgcount {
   display: none;  /* 对话条数太占空间，隐藏 */
+}
+
+/* 正在等待用户回复（ask 抽屉待弹）的 tab：底部高亮 + 待回复徽标 */
+.session-tab.pending-ask {
+  border-bottom: 2px solid var(--accent);
+}
+.session-tab-ask {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--accent);
+}
+.session-tab.preparing {
+  border-bottom: 2px solid #d99a2b;
+}
+.session-tab.preparing .session-tab-name {
+  opacity: 0.7;
+}
+.session-tab-ask.preparing-badge {
+  background: #d99a2b;
 }
 
 .btn-new-session {
