@@ -817,14 +817,17 @@ async function init() {
 
   // ── 启动剧本：字幕 + 进度条按固定节奏播放，与真实加载完全解耦 ──
   // 无论后端快慢，观感永远是"字幕一句句过 + 进度条匀速走"。
-  // 剧本固定 12 秒播完：4 句字幕各 3 秒，进度条 12 秒匀速到 100%。
+  // 剧本固定 15 秒播完：6 句字幕各 2.5 秒，进度条 15 秒匀速到 100%。
+  // 风格与欢迎页 mottos 对齐（文艺向），按"唤醒→记忆→准备→运转→就绪→进入"递进。
   const SCRIPT = [
-    { label: '夜色将尽，晨光初透', end: 3000 },
-    { label: '拾起散落的记忆',     end: 6000 },
-    { label: '行囊在肩，天地为卷', end: 9000 },
-    { label: '久等了，入席吧',     end: 12000 },
+    { label: '夜色将尽，晨光初透', end: 2500 },
+    { label: '拾起散落的记忆',     end: 5000 },
+    { label: '行囊在肩，天地为卷', end: 7500 },
+    { label: '静水深流，暗涌潜行', end: 10000 },
+    { label: '灯火已明，门扉待启', end: 12500 },
+    { label: '久等了，入席吧',     end: 15000 },
   ];
-  const SCRIPT_DURATION = 12000;
+  const SCRIPT_DURATION = 15000;
   const _progressBar = document.getElementById('startupProgressBar');
   const _statusEl = document.getElementById('startupStatus');
   let _scriptIdx = 0;
@@ -1466,6 +1469,16 @@ function showWelcome() {
     '若机器有梦，它会梦见什么',
     '在无尽参数的尽头，是否也有一片星空',
     '每一次推理，都是一场微小的宇宙诞生',
+    '把灯塔建在风暴里，把答案埋在路上',
+    '你站在桥上看风景，桥下的人在看你',
+    '世间所有的相遇，都是久别重逢',
+    '尘埃落定之前，一切皆有可能',
+    '我们都在阴沟里，但仍有人仰望星空',
+    '尚未落下的太阳，照不亮已成定局的昨天',
+    '语言是思想的牢笼，也是自由的翅膀',
+    '时间不说话，却回答了所有问题',
+    '每一次遗忘，都是一场温柔的清理',
+    '走到这里，世界才刚刚开始',
   ];
   const motto = mottos[Math.floor(Math.random() * mottos.length)];
   dom.messages.innerHTML = `
