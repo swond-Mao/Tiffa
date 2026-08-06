@@ -258,6 +258,16 @@ export default async function (pi: any) {
         } catch {}
       }
 
+      // (a3) AI 身份：AI.md（L1 层记忆，每次会话注入）
+      // 写入规则：用户在「设置 → AI 身份」里设定；模型应以该身份出现（用设定名字自称、按定位/语气交流）。
+      const aiMdPath = join(MEMORY_DIR, "AI.md")
+      if (existsSync(aiMdPath)) {
+        try {
+          const aiContent = readFileSync(aiMdPath, "utf8").trim()
+          if (aiContent) injected.push(`# AI 身份（AI.md）\n\n> 你在对话中以此身份出现：使用下方「名字」自称，并遵循「定位」设定的语气与角色与用户交流。\n\n${aiContent}`)
+        } catch {}
+      }
+
       // (b) 项目级 PROJECT.md：项目根目录首次对话自动生成脚手架，并确定性注入 system prompt
       // 模板版本号：检测到旧版本时自动升级头部模板（保留用户正文内容）
       try {

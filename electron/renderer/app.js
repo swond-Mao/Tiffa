@@ -172,6 +172,9 @@ const state = {
   // ── AI 重命名模式 ──
   aiRenameMode: null,            // 正在 AI 重命名的 session 对象（非 null 时抑制渲染）
   aiRenameText: '',              // 累积 AI 返回的标题文本
+  // ── AI 身份 / 用户称呼（记忆系统配置，fallback「助手」）──
+  aiName: '助手',                // 对话中 AI 的显示名（取代硬编码"助手"）
+  userName: '',                  // 对用户的称呼（来自 USER.md 称呼）
 };
 
 // 从 sessionPath 提取 sessionId（UUID）
@@ -810,6 +813,67 @@ const followScroll = {
   },
 };
 
+// ── AI 身份 / 用户称呼配置（记忆系统：AI.md + USER.md）──
+async function initIdentity() {
+  try {
+    const id = await tiffaDesktop.getIdentity();
+    if (id && id.aiName) state.aiName = id.aiName;
+    if (id && id.userName) state.userName = id.userName;
+    // 首次启动且未手动跳过 → 弹设置框
+    if (id && id.needsSetup && !localStorage.getItem('tiffaIdentitySkipped')) {
+      showIdentityModal(id.aiName || '', id.userName || '');
+    }
+  } catch (e) {
+    console.warn('[initIdentity] error:', e && e.message);
+  }
+}
+
+function showIdentityModal(prefillAi, prefillUser) {
+  const overlay = document.getElementById('identityOverlay');
+  if (!overlay) return;
+  const aiInput = document.getElementById('identityAiName');
+  const userInput = document.getElementById('identityUserName');
+  const errEl = document.getElementById('identityError');
+  if (aiInput) aiInput.value = prefillAi || '';
+  if (userInput) userInput.value = prefillUser || '';
+  if (errEl) errEl.textContent = '';
+  overlay.classList.remove('hidden');
+  if (aiInput) setTimeout(() => aiInput.focus(), 0);
+
+  const saveBtn = document.getElementById('identitySave');
+  const skipBtn = document.getElementById('identitySkip');
+  const close = () => {
+    overlay.classList.add('hidden');
+    if (saveBtn) saveBtn.replaceWith(saveBtn.cloneNode(true));
+    if (skipBtn) skipBtn.replaceWith(skipBtn.cloneNode(true));
+  };
+  setTimeout(() => {
+    const s = document.getElementById('identitySave');
+    const sk = document.getElementById('identitySkip');
+    if (s) s.addEventListener('click', async () => {
+      const name = (aiInput.value || '').trim();
+      const title = (userInput.value || '').trim();
+      if (!name && !title) {
+        if (errEl) errEl.textContent = '至少填写一项：AI 的名字或对你的称呼';
+        return;
+      }
+      const res = await tiffaDesktop.saveIdentity(name, title);
+      if (res && res.ok) {
+        if (name) state.aiName = name;
+        if (title) state.userName = title;
+        localStorage.removeItem('tiffaIdentitySkipped');
+        close();
+      } else if (errEl) {
+        errEl.textContent = (res && res.error) || '保存失败';
+      }
+    });
+    if (sk) sk.addEventListener('click', () => {
+      localStorage.setItem('tiffaIdentitySkipped', '1');
+      close();
+    });
+  }, 0);
+}
+
 // ── Initialize ──
 async function init() {
   // 启动时刻，用于计算各阶段时间
@@ -1051,6 +1115,9 @@ async function init() {
   // 启动时尝试恢复 lastModel（仅当有活跃对话且无 sessionModelMap 记录时）
   if (state.tiffaReady) restoreLastModelIfNeeded();
   dom.input.focus();
+
+  // 身份配置：AI 名字 / 用户称呼为空时弹设置框（记忆系统配置）
+  initIdentity();
 }
 
 // ── Event Handler ──
@@ -3067,7 +3134,7 @@ function createHistoryAssistantMessage(text, thinking, toolCalls, timestamp, mod
   header.className = 'message-header';
   const time = timestamp ? new Date(timestamp).toLocaleTimeString() : '';
   const modelTag = model ? `<span class="message-model">${escapeHtml(model.split('/').pop() || model)}</span>` : '';
-  header.innerHTML = `<span class="message-role assistant">助手</span>${modelTag}<span class="message-time">${escapeHtml(time)}</span>`;
+  header.innerHTML = `<span class="message-role assistant">${escapeHtml(state.aiName)}</span>${modelTag}<span class="message-time">${escapeHtml(time)}</span>`;
   const body = document.createElement('div');
   body.className = 'message-body markdown-body';
 
@@ -3295,7 +3362,7 @@ function createMessageElement(role, content, opts = {}) {
   if (role === 'user') applyUserMessageClasses(div, opts);
   const header = document.createElement('div');
   header.className = 'message-header';
-  const roleLabel = role === 'user' ? getUserRoleLabel(opts) : '助手';
+  const roleLabel = role === 'user' ? getUserRoleLabel(opts) : state.aiName;
   header.innerHTML = `<span class="message-role ${role}">${roleLabel}</span>
     <span class="message-time">${new Date().toLocaleTimeString()}</span>`;
   const body = document.createElement('div');
@@ -3318,7 +3385,7 @@ function createAssistantMessageElement() {
   div.className = 'message assistant';
   const header = document.createElement('div');
   header.className = 'message-header';
-  header.innerHTML = `<span class="message-role assistant">助手</span>
+  header.innerHTML = `<span class="message-role assistant">${escapeHtml(state.aiName)}</span>
     <span class="message-time">${new Date().toLocaleTimeString()}</span>`;
   const body = document.createElement('div');
   body.className = 'message-body markdown-body';
@@ -5166,7 +5233,7 @@ function extractRecentMessages(messages, n) {
     const text = (m.text || '').trim();
     if (!text) continue;
     const truncated = text.length > 200 ? text.substring(0, 200) + '…' : text;
-    lines.push(`${m.role === 'user' ? '用户' : '助手'}: ${truncated}`);
+    lines.push(`${m.role === 'user' ? '用户' : state.aiName}: ${truncated}`);
   }
   return lines.slice(-n).join('\n');
 }
@@ -5761,6 +5828,12 @@ function setupSettings() {
   dom.btnCloseSettings.addEventListener('click', () => dom.settingsOverlay.classList.add('hidden'));
   dom.settingsOverlay.addEventListener('click', (e) => { if (e.target === dom.settingsOverlay) dom.settingsOverlay.classList.add('hidden'); });
   dom.btnOpenConstraints.addEventListener('click', async () => { tiffaDesktop.openPath((await tiffaDesktop.getRootPath()) + '\\data\\memory\\constraints-inject.md'); });
+  const btnOpenIdentity = document.getElementById('btnOpenIdentity');
+  if (btnOpenIdentity) btnOpenIdentity.addEventListener('click', () => {
+    const preview = document.getElementById('identityPreview');
+    if (preview) preview.textContent = `AI 名字：${state.aiName || '助手'}${state.userName ? '　·　对你的称呼：' + state.userName : ''}`;
+    showIdentityModal(state.aiName === '助手' ? '' : state.aiName, state.userName);
+  });
   setupBypassModelSaving();
   setupGroundingModelSaving();
 }

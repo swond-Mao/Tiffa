@@ -3257,6 +3257,77 @@ print(json.dumps({'results': results[:30]}, ensure_ascii=False))
       return { results: [], error: err.message };
     }
   });
+
+  // ── AI 身份 / 用户称呼：记忆系统配置 ──
+  // AI.md 存 AI 名字（扩展 before_agent_start 注入 system prompt）；
+  // USER.md 的「称呼」存对用户的称呼。两者任一为空 → 前端首次启动弹设置框。
+  const MEMORY_DIR = path.join(PORTABLE_ROOT, 'data', 'memory');
+  const AI_MD = path.join(MEMORY_DIR, 'AI.md');
+  const USER_MD = path.join(MEMORY_DIR, 'USER.md');
+
+  // 从 markdown 字段行 `- 字段名：值` / `- 字段名: 值` 提取 value
+  function parseMdField(content, field) {
+    if (!content) return '';
+    const re = new RegExp('^\\s*-\\s*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[:：]\\s*(.+?)\\s*$', 'm');
+    const m = content.match(re);
+    return m ? m[1].trim() : '';
+  }
+
+  ipcMain.handle('memory:getIdentity', async () => {
+    try {
+      const aiContent = fs.existsSync(AI_MD) ? fs.readFileSync(AI_MD, 'utf8') : '';
+      const userContent = fs.existsSync(USER_MD) ? fs.readFileSync(USER_MD, 'utf8') : '';
+      const aiName = parseMdField(aiContent, '名字');
+      const userName = parseMdField(userContent, '称呼');
+      return {
+        aiName,
+        userName,
+        needsSetup: (!aiName || !userName),
+      };
+    } catch (err) {
+      return { aiName: '', userName: '', needsSetup: true, error: err.message };
+    }
+  });
+
+  ipcMain.handle('memory:saveIdentity', async (event, aiName, userName) => {
+    try {
+      const name = (aiName || '').trim();
+      const title = (userName || '').trim();
+      if (!name && !title) return { ok: false, error: '名字与称呼不能都为空' };
+
+      // 写 AI.md（整体覆盖，结构固定）
+      if (name) {
+        const aiMd = [
+          '# AI 身份',
+          '',
+          `- 名字：${name}`,
+          '- 定位：你的桌面 AI 助手，陪你写代码、想方案、管记忆。',
+          '',
+        ].join('\n');
+        fs.writeFileSync(AI_MD, aiMd, 'utf8');
+      }
+
+      // 更新 USER.md 的「称呼」字段（保留其余内容）
+      if (title) {
+        let userContent = fs.existsSync(USER_MD) ? fs.readFileSync(USER_MD, 'utf8') : '# 用户档案\n\n- 称呼：\n';
+        if (/^\s*-\s*称呼\s*[:：]/.test(userContent)) {
+          userContent = userContent.replace(/^(\s*-\s*称呼\s*[:：]\s*).*$/m, `$1${title}`);
+        } else {
+          // 在「# 用户档案」标题后插入，否则追加到末尾
+          if (/^#\s*用户档案\s*$/m.test(userContent)) {
+            userContent = userContent.replace(/^(#\s*用户档案\s*$)/m, `$1\n\n- 称呼：${title}`);
+          } else {
+            userContent = userContent.trimEnd() + `\n\n- 称呼：${title}\n`;
+          }
+        }
+        fs.writeFileSync(USER_MD, userContent, 'utf8');
+      }
+
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 }
 
 // ── App Lifecycle ──
