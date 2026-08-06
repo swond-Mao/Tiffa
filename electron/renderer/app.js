@@ -831,11 +831,13 @@ async function init() {
   const _progressBar = document.getElementById('startupProgressBar');
   const _statusEl = document.getElementById('startupStatus');
   let _scriptIdx = 0;
-  // 剧本播放器：每 100ms 按固定时间轴推进字幕与进度条
+  // 剧本播放器：每 100ms 按固定时间轴推进字幕与进度条。
+  // 进度条封顶 95%——真实加载完成前绝不填满（填满=完成信号），
+  // 由遮罩收尾在加载完成后统一拉到 100%。
   const _scriptTicker = setInterval(() => {
     if (!_progressBar || !_progressBar.isConnected) { clearInterval(_scriptTicker); return; }
     const elapsed = Date.now() - _startupT0;
-    const pct = Math.min(100, (elapsed / SCRIPT_DURATION) * 100);
+    const pct = Math.min(95, (elapsed / SCRIPT_DURATION) * 100);
     _progressBar.style.width = `${pct}%`;
     while (_scriptIdx < SCRIPT.length && elapsed >= SCRIPT[_scriptIdx].end) {
       if (_statusEl) _statusEl.textContent = SCRIPT[_scriptIdx].label;
@@ -989,15 +991,13 @@ async function init() {
     fetchCurrentModel();
   }
 
-  // ── 启动遮罩收尾：剧本已由 _scriptTicker 自动播放（12s 匀速）──
-  // 这里只负责：等剧本播完 → 若内核未就绪则轮询等待 → 淡出移除。
+  // ── 启动遮罩收尾：淡出时机 = 真实加载完成，剧本只是背景演出 ──
+  // 进度条规则：剧本播放器封顶 95%（加载完成前绝不填满）；
+  // 加载完成 → 立即拉到 100% 并淡出（即使剧本还没播完）。
   const overlay = document.getElementById('startupOverlay');
   if (overlay) {
-    // 等剧本播完（字幕与进度条已由 ticker 匀速推进，不绑定真实进度）
-    const remain = SCRIPT_DURATION - (Date.now() - _startupT0);
-    if (remain > 0) await new Promise(r => setTimeout(r, remain));
-
-    // 内核仍未就绪：轮询等待（最多 20 秒），字幕提示，不无限卡死
+    // 内核未就绪：轮询等待（最多 20 秒），字幕提示，不无限卡死。
+    // 等待期间剧本/进度条照常推进（封顶 95%）
     if (!state.tiffaReady) {
       if (_statusEl) _statusEl.textContent = '棋局未启，请稍候…';
       const maxWait = 20000;
@@ -1024,7 +1024,8 @@ async function init() {
       }
     }
 
-    // 剧本进度条最后拉到 100%，淡出移除
+    // 加载完成（或超时兜底）→ 进度条瞬间填满 100% → 淡出移除。
+    // 注意：即使剧本还没播完也直接淡出；若剧本已播完则停在 95% 等加载，此刻补满
     if (_progressBar) _progressBar.style.width = '100%';
     overlay.classList.add('fade-out');
     // 等遮罩过渡(1s)与星光溶出(1.2s)都走完再移除，避免未完全隐去就被硬拽掉
