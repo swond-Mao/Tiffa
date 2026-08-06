@@ -308,6 +308,15 @@ class TiffaInstance {
         this.isPrewarming = false;
         console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消预热过滤`);
       }
+      // 用户交互立即取消上下文恢复过滤：switch_session 恢复历史上下文可能因
+      // 大 JSONL 加载/embedding 计算而卡住（sendCommand 超时长达 5 分钟），
+      // 期间 _restoringContext 保持 true 会吞掉用户消息的 thinking/text 事件，
+      // 表现为"模型在推理但 UI 无任何输出，以为卡死而中断"。
+      // 用户发消息说明已经要交互了，恢复可以放弃，立即放行响应事件。
+      if (this._restoringContext && (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up')) {
+        this._restoringContext = false;
+        console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消上下文恢复过滤`);
+      }
 
       const id = `cmd_${++this.commandId}`;
       frame.id = id;
@@ -378,10 +387,17 @@ class TiffaInstance {
         const sf = this.sessionFilePath;
         if (fs.existsSync(sf)) {
           this._restoringContext = true;
+          // 绝对兜底：switch_session 长时间不返回时 15 秒后强制解除过滤（见 activateSession 注释）
+          const restoreDeadline = setTimeout(() => {
+            if (this._restoringContext) {
+              this._restoringContext = false;
+              console.warn(`[TiffaInstance:${this._shortCwd()}] 崩溃重启上下文恢复超时，强制解除过滤`);
+            }
+          }, 15000);
           this.sendCommand({ type: 'switch_session', sessionPath: sf })
             .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文已恢复`); })
             .catch((e) => { console.warn(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文恢复失败: ${e.message}`); })
-            .finally(() => { setTimeout(() => { this._restoringContext = false; }, 800); });
+            .finally(() => { clearTimeout(restoreDeadline); setTimeout(() => { this._restoringContext = false; }, 800); });
         }
       }
     }
@@ -674,6 +690,16 @@ class TiffaInstanceManager {
         const sessionFile = _findSessionFile(normalized, inst.sessionId);
         if (sessionFile) {
           inst._restoringContext = true;
+          // 绝对兜底：switch_session 可能因大 JSONL 加载/embedding 计算长时间不返回
+          // （sendCommand 超时长达 5 分钟），期间 _restoringContext=true 会吞掉用户
+          // 消息的 thinking/text 事件，表现为"发消息无输出，以为卡死"。
+          // 15 秒后强制解除，事件恢复流动（重放事件泄漏的代价远小于用户以为卡死）。
+          const restoreDeadline = setTimeout(() => {
+            if (inst._restoringContext) {
+              inst._restoringContext = false;
+              console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复超时，强制解除过滤`);
+            }
+          }, 15000);
           try {
             await inst.sendCommand({ type: 'switch_session', sessionPath: sessionFile });
             inst.sessionFilePath = sessionFile;
@@ -681,6 +707,7 @@ class TiffaInstanceManager {
           } catch (err) {
             console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复失败: ${err.message}`);
           } finally {
+            clearTimeout(restoreDeadline);
             // 延迟清除：内核可能在 sendCommand response 之后仍有残留的重放事件在管道中。
             // 立即清除会导致这些事件泄漏到前端，触发重复渲染。
             // 800ms 足以覆盖事件管道的尾部延迟（内核 JSON 序列化 + stdout 缓冲 + readline 解析）。
@@ -3346,23 +3373,47 @@ app.whenReady().then(() => {
   });
 });
 
+// 优雅关机标记：before-quit 会被 app.quit() 重复触发，靠它避免重入与二次强杀
+let gracefulShutdownStarted = false;
+
 app.on('window-all-closed', () => {
-  tiffaManager.killAll();
+  // 不再直接强杀——交给 before-quit 统一走内核 EOF 优雅 drain + dispose
   app.quit();
 });
 
-app.on('before-quit', () => {
-  // 同步杀所有进程（app 退出路径必须同步等进程死透）
-  for (const inst of tiffaManager.instances.values()) {
-    if (inst.process) {
-      try {
-        inst.process.stdin.write(JSON.stringify({ type: 'abort' }) + '\n');
-      } catch (e) { /* ignore */ }
-      _killTree(inst.process.pid, true);
-    }
-  }
-  // 给 2 秒时间优雅退出
-  setTimeout(() => {
+app.on('before-quit', (e) => {
+  if (gracefulShutdownStarted) return;        // 第二次（app.quit 再次触发）直接放行退出
+  gracefulShutdownStarted = true;
+  e.preventDefault();                          // 先拦住，等内核 drain+dispose 自退后再 quit
+
+  const instances = [...tiffaManager.instances.values()].filter(i => i.process && i.process.pid);
+  let pending = instances.length;
+
+  const finish = () => {
+    if (pending > 0) return;
+    clearTimeout(forceKillTimer);
+    app.quit();
+  };
+
+  // 兜底：3 秒内没退干净就强制 kill，避免关机卡死
+  const forceKillTimer = setTimeout(() => {
     tiffaManager.killAll();
-  }, 2000);
+    app.quit();
+  }, 3000);
+
+  if (pending === 0) { clearTimeout(forceKillTimer); app.quit(); return; }
+
+  for (const inst of instances) {
+    const p = inst.process;
+    // 已经退出的实例不计入等待
+    if (p.exitCode !== null || p.signalCode !== null) { pending--; continue; }
+    try {
+      p.stdin.write(JSON.stringify({ type: 'abort' }) + '\n');   // 取消在途生成
+    } catch { /* ignore */ }
+    try {
+      p.stdin.end();                                            // 关键：EOF → 内核走 drain+session.dispose 自退
+    } catch { /* ignore */ }
+    p.on('exit', () => { pending--; finish(); });
+  }
+  finish();
 });
