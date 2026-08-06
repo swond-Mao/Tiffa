@@ -121,6 +121,8 @@ export default async function (pi: any) {
   let skillLoadedMap = new Map<string, number>() // skill名 -> 加载时间戳
   let askTimestamp = 0                          // 最近一次 ask 的时间戳
   let lastSkillRead = ""                        // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
+  let styleAskedAt = 0                          // 最近一次 ask 且包含"风格/模板"问题的时间戳
+  const STYLE_ASK_KEYWORDS = /风格|模板|style|样式/i
 
   // ── WebP 处理：已下放给内核 ──
   // 本地推理引擎（llama.cpp / local-server 等）在 models.yml 用内核原生 provider 命名，
@@ -138,9 +140,15 @@ export default async function (pi: any) {
     return Date.now() - askTimestamp < SKILL_STATE_TTL_MS
   }
 
+  function isStyleAskFresh(): boolean {
+    if (!styleAskedAt) return false
+    return Date.now() - styleAskedAt < SKILL_STATE_TTL_MS
+  }
+
   function resetSkillState() {
     skillLoadedMap = new Map()
     askTimestamp = 0
+    styleAskedAt = 0
     lastSkillRead = ""
   }
 
@@ -162,12 +170,19 @@ export default async function (pi: any) {
       `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
       `computer_use.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "computer-use", "computer_use.py")}`,
     ].join("\n"),
+    "shared-visual-components": [
+      "\n\n---\n[系统注入 · 组件库绝对路径，禁止自行拼接]",
+      `组件库根目录: ${join(PORTABLE_ROOT, "skills", "shared-visual-components")}`,
+      `registry.json: ${join(PORTABLE_ROOT, "skills", "shared-visual-components", "registry.json")}`,
+      "使用方式：读 registry.json 选布局/主题/组件 → 复制组件到你的 HTML → 替换占位符 → 引入 core/reset.css + core/variables.css + core/utils.css + themes/<主题>.css，<body data-theme=\"<主题id>\"> 换肤",
+    ].join("\n"),
   }
 
   // 技能脚本 -> 对应 skill 名 + 是否必须先问用户
-  const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean }> = [
+  const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean; requireStyleAsk?: boolean }> = [
     { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?comfy\.py/i, skill: "comfyui-image-gen", requireAsk: true },
-    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?craftman\.py/i, skill: "craftman", requireAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?craftman\.py/i, skill: "craftman", requireAsk: true, requireStyleAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?pptgen\.py/i, skill: "pptgen", requireAsk: true, requireStyleAsk: true },
     { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?computer_use\.py/i, skill: "computer-use", requireAsk: true },
   ]
 
@@ -233,6 +248,7 @@ export default async function (pi: any) {
         if (now - ts >= SKILL_STATE_TTL_MS) skillLoadedMap.delete(skill)
       }
       if (askTimestamp && now - askTimestamp >= SKILL_STATE_TTL_MS) askTimestamp = 0
+      if (styleAskedAt && now - styleAskedAt >= SKILL_STATE_TTL_MS) styleAskedAt = 0
       await sanitizeTools("before_agent_start")
 
       const injected: string[] = []
@@ -516,7 +532,13 @@ export default async function (pi: any) {
       // ── 技能强制：跟踪 ask 工具调用（模型问了用户）──
       if (tool === "ask") {
         askTimestamp = Date.now()
-        log("tool_call.ask", `ask recorded at ${askTimestamp}`)
+        const qsText = JSON.stringify(input.questions || [])
+        if (STYLE_ASK_KEYWORDS.test(qsText)) {
+          styleAskedAt = Date.now()
+          log("tool_call.ask", `style ask recorded at ${styleAskedAt}`)
+        } else {
+          log("tool_call.ask", `ask recorded at ${askTimestamp}`)
+        }
       }
 
       // ── 技能强制：调技能脚本前必须先 read skill:// 和 ask 用户 ──
@@ -538,7 +560,14 @@ export default async function (pi: any) {
                 reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未询问用户（或询问已过期）。SKILL.md 要求：执行前必须先用 ask 工具询问用户（如"要不要生图""选哪种管线"等）。请先问用户，再执行。`,
               }
             }
-            // ask >= 1 表示模型已问过用户，现在尝试执行——放行
+            if (rule.requireStyleAsk && !isStyleAskFresh()) {
+              log("tool_call.blocked", `${rule.skill} script called without style ask`)
+              return {
+                block: true,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未 ask 用户选择 HTML 模板风格。SKILL.md 要求：执行前必须先 ask 用户选风格（pptgen 16 种风格之一，见 pptgen SKILL.md 风格列表）。不要替用户默认风格。`,
+              }
+            }
+            // ask >= 1 且风格已确认，现在尝试执行——放行
             break
           }
         }
@@ -978,7 +1007,6 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       return
     }
   })
-
 
   let hasContinuedAfterError = false  // 本轮是否已续行过一次
 
