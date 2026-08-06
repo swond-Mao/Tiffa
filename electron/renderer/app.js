@@ -898,7 +898,7 @@ async function init() {
     { label: '行囊在肩，天地为卷', end: 7500 },
     { label: '静水深流，暗涌潜行', end: 10000 },
     { label: '灯火已明，门扉待启', end: 12500 },
-    { label: '久等了，入席吧',     end: 15000 },
+    { label: '久等了，入戏吧',     end: 15000 },
   ];
   const SCRIPT_DURATION = 15000;
   const _progressBar = document.getElementById('startupProgressBar');
