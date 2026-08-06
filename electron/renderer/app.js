@@ -890,19 +890,21 @@ async function init() {
 
   // ── 启动剧本：字幕 + 进度条按固定节奏播放，与真实加载完全解耦 ──
   // 无论后端快慢，观感永远是"字幕一句句过 + 进度条匀速走"。
-  // 剧本固定 15 秒播完：6 句字幕各 2.5 秒，进度条 15 秒匀速到 100%。
-  // 风格与欢迎页 mottos 对齐（文艺向），按"唤醒→记忆→准备→运转→就绪→进入"递进。
+  // 剧本固定 11 秒播完：4 句字幕各 2 秒（最后一句 8s，停顿 0.3s 后主题词渐显），进度条 11 秒匀速到 95%。
+  // 风格与欢迎页 mottos 对齐（文艺向），按"夜→晨的苏醒"递进，主题词压轴浮现。
   const SCRIPT = [
-    { label: '夜色将尽，晨光初透', end: 2500 },
-    { label: '拾起散落的记忆',     end: 5000 },
-    { label: '行囊在肩，天地为卷', end: 7500 },
-    { label: '静水深流，暗涌潜行', end: 10000 },
-    { label: '灯火已明，门扉待启', end: 12500 },
-    { label: '久等了，入戏吧',     end: 15000 },
+    { label: '夜色将尽，晨光初透', end: 2000 },
+    { label: '静水深流，暗涌潜行', end: 4000 },
+    { label: '行囊在肩，天地为卷', end: 6000 },
+    { label: '灯火已明，门扉待启', end: 8000 },
   ];
-  const SCRIPT_DURATION = 15000;
+  const SCRIPT_DURATION = 11000;
+  // 末句「门扉待启」停留 0.3s 后，主题词才舒缓渐显（先读完末句，再交接）
+  const TITLE_REVEAL_DELAY = 300;
   const _progressBar = document.getElementById('startupProgressBar');
   const _statusEl = document.getElementById('startupStatus');
+  const _titleEl = document.querySelector('.startup-title');
+  let _titleRevealed = false;
   let _scriptIdx = 0;
   // 剧本播放器：每 100ms 按固定时间轴推进字幕与进度条。
   // 进度条封顶 95%——真实加载完成前绝不填满（填满=完成信号），
@@ -915,6 +917,18 @@ async function init() {
     while (_scriptIdx < SCRIPT.length && elapsed >= SCRIPT[_scriptIdx].end) {
       if (_statusEl) _statusEl.textContent = SCRIPT[_scriptIdx].label;
       _scriptIdx++;
+    }
+    if (!_titleRevealed && elapsed >= SCRIPT[SCRIPT.length - 1].end + TITLE_REVEAL_DELAY) {
+      _titleRevealed = true;
+      if (_titleEl) _titleEl.classList.add('revealed');
+      // 末句「门扉待启」舒缓淡出，与主题词交接：
+      // 先冻结当前 opacity（否则卸下 statusPulse 动画会瞬间跳变），下一帧置 0 触发 0.8s 过渡
+      if (_statusEl) {
+        const _curOpacity = getComputedStyle(_statusEl).opacity;
+        _statusEl.style.opacity = _curOpacity;
+        _statusEl.classList.add('fading');
+        setTimeout(() => { _statusEl.style.opacity = '0'; }, 30);
+      }
     }
     if (elapsed >= SCRIPT_DURATION) clearInterval(_scriptTicker);
   }, 100);
@@ -1098,7 +1112,12 @@ async function init() {
     }
 
     // 加载完成（或超时兜底）→ 进度条瞬间填满 100% → 淡出移除。
-    // 注意：即使剧本还没播完也直接淡出；若剧本已播完则停在 95% 等加载，此刻补满
+    // 兜底：加载再快，也得等启动剧本全部播完（含主题词浮现）才淡出，
+    // 否则高速机器上遮罩秒退、主题词还没出来就进了界面，观感很糟。
+    const _scriptElapsed = Date.now() - _startupT0;
+    if (_scriptElapsed < SCRIPT_DURATION) {
+      await new Promise(r => setTimeout(r, SCRIPT_DURATION - _scriptElapsed));
+    }
     if (_progressBar) _progressBar.style.width = '100%';
     overlay.classList.add('fade-out');
     // 等遮罩过渡(1s)与星光溶出(1.2s)都走完再移除，避免未完全隐去就被硬拽掉
@@ -1540,14 +1559,11 @@ function showWelcome() {
   if (dom.messages.children.length > 0) return;
   const mottos = [
     '风起于青萍之末',
-    '万物皆有裂痕，那是光照进来的地方',
-    '所有伟大的行动，都始于一个微不足道的念头',
     '寂静深处，听见回声',
     '未经审视的生活不值得过',
     '山高月小，水落石出',
     '你所浪费的今天，是昨天殒去之人奢望的明天',
     '夜空中最亮的星，未必离你最近',
-    '一切坚固的东西都将烟消云散',
     '落花无言，人淡如菊',
     '海面之下，冰川犹在',
     '若机器有梦，它会梦见什么',
@@ -1555,14 +1571,15 @@ function showWelcome() {
     '每一次推理，都是一场微小的宇宙诞生',
     '把灯塔建在风暴里，把答案埋在路上',
     '你站在桥上看风景，桥下的人在看你',
-    '世间所有的相遇，都是久别重逢',
-    '尘埃落定之前，一切皆有可能',
-    '我们都在阴沟里，但仍有人仰望星空',
     '尚未落下的太阳，照不亮已成定局的昨天',
     '语言是思想的牢笼，也是自由的翅膀',
     '时间不说话，却回答了所有问题',
     '每一次遗忘，都是一场温柔的清理',
     '走到这里，世界才刚刚开始',
+    '风中的事，写在一块不会化的石头上',
+    '别人看不见的你，都住在我心里',
+    '这局没有对手，只有陪你落子的人',
+    '雨要落了，我先把屋檐撑开',
   ];
   const motto = mottos[Math.floor(Math.random() * mottos.length)];
   dom.messages.innerHTML = `
@@ -1570,40 +1587,6 @@ function showWelcome() {
       <div class="welcome-logo">Tiffa</div>
       <div class="welcome-title">与万物对弈，伴时间同行</div>
       <div class="welcome-motto">${escapeHtml(motto)}</div>
-      <div class="welcome-features">
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
-          <span>记忆管理</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span>项目管理</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          <span>弱模适配</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          <span>主题切换</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          <span>差异对比</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          <span>待办面板</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          <span>本地部署</span>
-        </div>
-        <div class="welcome-feature">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span>便携即用</span>
-        </div>
-      </div>
       <div class="welcome-hint">输入消息开始对话</div>
     </div>`;
 }
@@ -3340,15 +3323,27 @@ function handleMessageUpdate(message, assistantEvent) {
     case 'thinking_delta':
       if (state.currentThinkingEl && state.currentThinkingEl._content) {
         state.currentThinkingEl._content.textContent += assistantEvent.delta;
+        // 实时更新字数：折叠时也能看到思考在推进，避免误以为卡死
+        if (state.currentThinkingEl._summary) {
+          const len = state.currentThinkingEl._content.textContent.length;
+          state.currentThinkingEl._summary.textContent = `思考中... ${len} 字`;
+        }
       }
       break;
     case 'thinking_end':
-      // 思考结束后更新摘要文本
-      if (state.currentThinkingEl && state.currentThinkingEl._summary) {
-        const text = state.currentThinkingEl._content.textContent;
-        state.currentThinkingEl._summary.textContent = text
-          ? `思考过程 (${text.length} 字)`
-          : '思考过程';
+      // 思考结束后更新摘要文本，并收起 details 保持整洁（内容仍可点开查看）
+      if (state.currentThinkingEl) {
+        if (state.currentThinkingEl._summary) {
+          const text = state.currentThinkingEl._content.textContent;
+          state.currentThinkingEl._summary.textContent = text
+            ? `思考过程 (${text.length} 字)`
+            : '思考过程';
+        }
+        // 收起展开态：思考已完成，正文即将开始，让用户聚焦正文
+        const details = state.currentThinkingEl.querySelector('details');
+        if (details && state.currentThinkingEl._content.textContent.trim()) {
+          details.open = false;
+        }
       }
       state.currentThinkingEl = null;
       break;
@@ -3580,6 +3575,10 @@ function createThinkingBlock() {
   const wrapper = document.createElement('div');
   wrapper.className = 'thinking-block';
   const details = document.createElement('details');
+  // 思考期间默认展开：qwen3.6 等思考模型在输出正文前可能思考 1-2 分钟，
+  // 折叠时用户看不到任何进展，容易误以为卡死而中断（实测 stopReason=aborted）。
+  // 展开后用户实时看到思考文字，明确知道模型在工作。
+  details.open = true;
   const summary = document.createElement('summary');
   summary.textContent = '思考中...';
   const content = document.createElement('div');

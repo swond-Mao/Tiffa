@@ -2343,12 +2343,12 @@ html[data-mode="light"] .muse-tint {
   font-size: 16px;
   color: hsl(var(--text-200));
   opacity: 0;
-  animation: titleReveal 1.6s ease-out 1.2s both;
+  transform: translateY(10px);
+  transition: opacity 2.5s ease, transform 2.5s ease;
 }
-
-@keyframes titleReveal {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 0.7; transform: translateY(0); }
+.startup-title.revealed {
+  opacity: 0.7;
+  transform: translateY(0);
 }
 
 /* 墨晕涟漪动画 */
@@ -2400,6 +2400,13 @@ html[data-mode="light"] .muse-tint {
   letter-spacing: 1px;
   animation: statusPulse 3s ease-in-out infinite;
   transition: opacity 0.8s ease;
+}
+
+/* 末句字幕淡出：只停掉 statusPulse 呼吸动画（opacity 由 JS 先冻结当前值、
+   下一帧置 0 触发 .startup-status 的 0.8s 过渡）。若在此直接写 opacity:0，
+   卸下动画瞬间无稳定起始值会导致跳变而非渐隐。 */
+.startup-status.fading {
+  animation: none;
 }
 
 @keyframes statusPulse {
