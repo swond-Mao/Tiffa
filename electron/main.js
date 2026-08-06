@@ -2869,7 +2869,7 @@ function setupIpc() {
   // 单次 completion 调用（带 20s 超时）
   async function callCompletion(baseUrl, model, apiKey, prompt, maxTokens) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 20000);
+    const timer = setTimeout(() => ctrl.abort(), 10000);
     try {
       const isDoubao = String(baseUrl).includes('ark');
       const body = {
@@ -2922,7 +2922,16 @@ function setupIpc() {
         }
       }
     } catch {}
-    // 1. 主模型旁路：前端当前模型优先（主力经常变，跟随当前；local 开着就用免费的本地，没开快速失败落下一级）
+    // 1. 豆包云端独立通道（computer-use grounding.json）：本地 11434 撞单槽时优先兜底，
+    //    避免重试同实例的主模型（bypass 与主模型同为 11434 时冗余度为 1，直接跳云端更顺）
+    try {
+      const cfgPath = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (cfg && cfg.api_base && cfg.model && cfg.api_key) {
+        push({ name: 'doubao', baseUrl: cfg.api_base, model: cfg.model, apiKey: cfg.api_key });
+      }
+    } catch {}
+    // 2. 主模型旁路：前端当前模型优先（主力经常变，跟随当前；local 开着就用免费的本地，没开快速失败落下一级）
     let ref = null;
     if (providerHint && modelHint) {
       ref = { provider: providerHint, model: modelHint };
@@ -2935,14 +2944,6 @@ function setupIpc() {
         push({ name: ref.provider, baseUrl: pc.baseUrl, model: ref.model || pc.model, apiKey: pc.apiKey });
       }
     }
-    // 2. 豆包（computer-use grounding.json）
-    try {
-      const cfgPath = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
-      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-      if (cfg && cfg.api_base && cfg.model && cfg.api_key) {
-        push({ name: 'doubao', baseUrl: cfg.api_base, model: cfg.model, apiKey: cfg.api_key });
-      }
-    } catch {}
     // 3. models.yml 里其他有 apiKey 的 provider（兜底：单一模型欠费/限流时仍可用）
     try {
       const data = yaml.load(fs.readFileSync(path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml'), 'utf8'));

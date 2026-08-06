@@ -118,6 +118,9 @@ const state = {
   expandedProjects: new Set(),  // 树中已展开的项目 dirName
   activeTabMeta: new Map(),     // path -> {dirName, title, firstMessage, messageCount, sessionId, lastActiveAt} 跨项目 tab 元数据
   autoNamedSessions: new Set(), // 已自动豆包重命名过的会话 path（防重复触发）
+  // 待用户输入的 extension_ui_request 事件（ask/confirm/select/input），按 sessionId 索引。
+  // 切换会话时收起抽屉、切回时恢复，避免 ask 抽屉丢失导致的假死。
+  pendingExtUI: new Map(), // sessionId -> event
   workspacePath: '',
   // 每个对话记住的模型 { provider, modelId }
   sessionModelMap: {},
@@ -175,6 +178,9 @@ const state = {
   // ── AI 身份 / 用户称呼（记忆系统配置，fallback「助手」）──
   aiName: '助手',                // 对话中 AI 的显示名（取代硬编码"助手"）
   userName: '',                  // 对用户的称呼（来自 USER.md 称呼）
+  // ── 新建对话准备阶段锁 ──
+  preparingNewSessions: new Set(), // 未迁移（__new__）临时会话集合：迁移完成前禁止切走，防重复对话竞态
+  preparingTimers: new Map(),      // path -> setTimeout 句柄（15s 超时兜底释放锁）
 };
 
 // 从 sessionPath 提取 sessionId（UUID）
@@ -239,8 +245,10 @@ function upsertTabMetaLite(sessionPath, dirName) {
 function refreshTreeSelection() {
   document.querySelectorAll('.session-item').forEach(el => {
     const path = el.dataset.path;
+    const sid = el.dataset.sessionid;
     el.classList.toggle('active', path === state.activeSessionPath);
     el.classList.toggle('open', !!path && state.activeSessionPaths.has(path));
+    el.classList.toggle('pending-ask', !!sid && state.pendingExtUI.has(sid));
   });
   // 项目 active 态
   document.querySelectorAll('.project-item').forEach(el => {
@@ -278,6 +286,7 @@ function renderSessionTreeInto(container, dirName, sessions) {
     const ts = session.modified || session.mtime;
     const timeStr = ts ? relTime(ts) : '';
     item.dataset.path = session.path;
+    item.dataset.sessionid = session.sessionId || '';
     item.title = title;
     item.innerHTML = `
       <span class="session-item-dot"></span>
@@ -1405,6 +1414,13 @@ function handleEvent(event) {
             state.autoNamedSessions.delete(oldPath);
             state.autoNamedSessions.add(newPath);
           }
+          // 迁移完成：释放该 __new__ tab 的准备阶段锁
+          if (state.preparingNewSessions.has(oldPath)) {
+            const _pt = state.preparingTimers.get(oldPath);
+            if (_pt) clearTimeout(_pt);
+            state.preparingTimers.delete(oldPath);
+            state.preparingNewSessions.delete(oldPath);
+          }
         }
 
         // 更新 activeSessionId 为真实 sessionId
@@ -2481,6 +2497,18 @@ function setupSessionTabs() {
       state.activeSessionPath = tempSessionPath;
       state.activeSessionId = tempSessionId;
       upsertTabMeta(newSession);  // 跨项目 tab 元数据
+
+      // 准备阶段锁：新建的 __new__ 临时会话在迁移为真实路径前不可被切走，
+      // 防止 session_switch 到达时活跃 tab 已不是该 __new__ tab 而导致重复对话竞态。
+      // 15s 超时兜底：若内核始终未发 session_switch（创建异常），自动释放锁避免卡死。
+      state.preparingNewSessions.add(tempSessionPath);
+      const _prepTimer = setTimeout(() => {
+        state.preparingNewSessions.delete(tempSessionPath);
+        state.preparingTimers.delete(tempSessionPath);
+        renderSessionTabs();
+        if (state.activeProjectDirName) loadSessions(state.activeProjectDirName);
+      }, 15000);
+      state.preparingTimers.set(tempSessionPath, _prepTimer);
       if (state.currentProvider && state.currentModel) {
         state.sessionModelMap[tempSessionPath] = { provider: state.currentProvider, modelId: state.currentModel };
         saveModelMap();
@@ -2662,11 +2690,17 @@ function renderSessionTabs() {
     tab.className = 'session-tab';
     if (meta.path === state.activeSessionPath) tab.classList.add('active');
     if (state.sessionAgentRunning.get(meta.path)) tab.classList.add('running');
+    const hasPendingAsk = !!(meta.sessionId && state.pendingExtUI.has(meta.sessionId));
+    if (hasPendingAsk) tab.classList.add('pending-ask');
+    const isPreparing = state.preparingNewSessions.has(meta.path);
+    if (isPreparing) tab.classList.add('preparing');
     const title = meta.title || '新对话';
     const msgCount = meta.messageCount || 0;
     tab.innerHTML = `
       <span class="session-tab-name">${escapeHtml(title.length > 12 ? title.substring(0, 12) + '…' : title)}</span>
       ${msgCount > 0 ? `<span class="session-tab-msgcount">${msgCount}</span>` : ''}
+      ${isPreparing ? `<span class="session-tab-ask preparing-badge" title="新对话准备中">准备中</span>` : ''}
+      ${hasPendingAsk ? `<span class="session-tab-ask" title="正在等待你的回复">待回复</span>` : ''}
       <span class="session-tab-close" title="关闭标签（不删除对话）">&#10005;</span>`;
     tab.title = title;
     tab.dataset.dirname = meta.dirName || '';
@@ -2703,6 +2737,13 @@ function renderSessionTabs() {
           }).catch(() => {});
         }
         // 关闭标签：从活跃tab移除（不删除对话）
+        // 先释放该 __new__ tab 的准备阶段锁，避免下方内部切回逻辑被拦截
+        if (state.preparingNewSessions.has(meta.path)) {
+          const _pt = state.preparingTimers.get(meta.path);
+          if (_pt) clearTimeout(_pt);
+          state.preparingTimers.delete(meta.path);
+          state.preparingNewSessions.delete(meta.path);
+        }
         state.activeSessionPaths.delete(meta.path);
         state.activeTabMeta.delete(meta.path);
         if (state.activeSessionPath === meta.path) {
@@ -2731,6 +2772,12 @@ function renderSessionTabs() {
 
 async function switchToSession(sessionPath) {
   if (state.activeSessionPath === sessionPath) return;
+  // 准备阶段锁：当前活跃会话是未迁移的 __new__ 临时会话时，禁止切到其它会话，
+  // 防止迁移竞态产生重复对话。仅当活跃 tab 本身就是准备中的会话时才拦截。
+  if (state.preparingNewSessions.has(state.activeSessionPath) && !state.preparingNewSessions.has(sessionPath)) {
+    addNotice('info', '新对话正在准备中，请稍候…');
+    return;
+  }
   // 防抱：300ms 内连续点击只处理最后一次，避免快速切换引发竞态
   const now = Date.now();
   if (now - state.lastSwitchTime < 300) return;
@@ -2739,6 +2786,7 @@ async function switchToSession(sessionPath) {
   if (state.sessionSwitching) return;
   state.sessionSwitching = true;
   updateInputState();
+  hideExtModal(); // 切走时收起旧会话的 ask 抽屉（pending 已记录，切回时恢复）
 
   // 跨项目 tab 切换：先切项目上下文（实例 + 高亮 + 懒加载会话缓存）
   const targetDir = dirNameFromSessionPath(sessionPath);
@@ -2957,6 +3005,7 @@ async function switchToSession(sessionPath) {
   refreshTreeSelection();  // 树中当前会话高亮/标记同步
   state.sessionSwitching = false;
   updateInputState();
+  restorePendingExtUI(targetSessionId);  // 切回会话时恢复其 pending ask 抽屉（无则隐藏）
   restoreTodoPhases();  // 恢复目标会话的 Todo 面板
 }
 
@@ -3839,42 +3888,55 @@ function handleExtensionUI(event) {
   const ssid = event._sessionId || null;
   const resp = (value) => tiffaDesktop.extensionResponse(id, value, ssid);
 
+  // 交互型请求（ask/confirm/select/input）记录到 pendingExtUI，供切换会话后恢复；
+  // 非交互型（setWidget/notify/setStatus/...）即时确认，不记录。
+  const INTERACTIVE = ['editor', 'select', 'confirm', 'input'];
+  if (ssid && INTERACTIVE.includes(method)) {
+    state.pendingExtUI.set(ssid, event);
+    // 立即刷新 tab/树标记，让用户看到「待回复」（即便此刻不弹框）
+    renderSessionTabs();
+    refreshTreeSelection();
+  }
+  // 用户回应后：清除 pending 并刷新标记
+  const done = (payload) => {
+    if (ssid) {
+      state.pendingExtUI.delete(ssid);
+      renderSessionTabs();
+      refreshTreeSelection();
+    }
+    resp(payload);
+  };
+
+  // 后台会话的 ask：仅保留 pending，等用户切到该会话时（restorePendingExtUI）再弹，
+  // 避免盖住当前活跃界面导致误触或丢失。
+  if (ssid && ssid !== state.activeSessionId) {
+    return;
+  }
+
   switch (method) {
     case 'editor': {
       // 编辑器输入（ask 工具等）
       showModalInput(event.title || '请输入', event.prefill || '').then(v => {
-        if (v !== null) {
-          resp({ value: v });
-        } else {
-          resp({ cancelled: true });
-        }
+        done(v !== null ? { value: v } : { cancelled: true });
       });
       break;
     }
     case 'select': {
       const opts = event.options || [];
       showModalSelect(event.title || '请选择', opts).then(value => {
-        if (value !== null && value !== undefined) {
-          resp({ value });
-        } else {
-          resp({ cancelled: true });
-        }
+        done((value !== null && value !== undefined) ? { value } : { cancelled: true });
       });
       break;
     }
     case 'confirm': {
       showModalConfirm(event.title, event.message).then(result => {
-        resp(result ? { confirmed: true } : { cancelled: true });
+        done(result ? { confirmed: true } : { cancelled: true });
       });
       break;
     }
     case 'input': {
       showModalInput(event.title || '请输入', event.placeholder || '').then(v => {
-        if (v !== null) {
-          resp({ value: v });
-        } else {
-          resp({ cancelled: true });
-        }
+        done(v !== null ? { value: v } : { cancelled: true });
       });
       break;
     }
@@ -3917,7 +3979,23 @@ function handleExtensionUI(event) {
       break;
     default:
       console.warn('[Extension UI] 未处理的 method:', method);
-      resp({ confirmed: true });
+      resp({ confirmed: true }); // 兜底响应，避免内核侧死等
+  }
+}
+
+// 隐藏 ask/confirm 抽屉（不 resolve，保留内核侧的等待，切回会话时再恢复）
+function hideExtModal() {
+  const overlay = document.getElementById('extModal');
+  if (overlay) overlay.classList.add('hidden');
+}
+
+// 切换会话后恢复该会话的 pending ask 抽屉；若无 pending 则确保抽屉隐藏
+function restorePendingExtUI(sessionId) {
+  const ev = sessionId && state.pendingExtUI.get(sessionId);
+  if (ev) {
+    handleExtensionUI(ev); // 重新弹框并等待用户，用户输入后回内核
+  } else {
+    hideExtModal();
   }
 }
 
@@ -5238,7 +5316,7 @@ function extractRecentMessages(messages, n) {
   return lines.slice(-n).join('\n');
 }
 
-// 自动 AI 重命名：对话结束后用豆包生成文艺标题（静默，不打扰，防并发）
+// 自动 AI 重命名：对话结束后用轻量模型生成文艺标题（静默，不打扰，可并发）
 // 豆包会根据"原标题是否贴切"决定保留或重命名--内核/工程标题会被替换，用户手动命名的会保留
 // per-session 锁：不同对话可以并行重命名，同一对话不重复触发
 const _autoRenameInFlight = new Set();
@@ -5250,13 +5328,8 @@ async function autoRenameWithLightModel(session) {
   if (_autoRenameInFlight.has(sessPath)) return;
   _autoRenameInFlight.add(sessPath);
   try {
-    // 本地模型是单槽位：agent 运行中旁路补全会被抢占失败。
-    // 扫描命中触发的重命名在此等 agent 结束再执行（顺便拿到完整上下文），最多等 60s
-    let waited = 0;
-    while (state.agentRunning && waited < 60000) {
-      await new Promise(r => setTimeout(r, 1000));
-      waited += 1000;
-    }
+    // 允许在 agent 回复中并行触发：重命名走旁路（10s 超时）+ doubao 兜底，
+    // 与主回复通道解耦，不影响主对话；上下文以当前已落盘历史为准（可能略滞后）。
     // 上下文：优先最近 N 条消息（主题可能漂移），回退 firstMessage
     let context = '';
     try {
@@ -5305,10 +5378,6 @@ async function autoRenameWithLightModel(session) {
 // AI 重命名：读取对话前几条消息，用轻量模型（豆包普通对话 API）生成标题，即时应用
 async function aiRenameSession(session) {
   if (!session || !session.path) return;
-  if (state.agentRunning) {
-    addNotice('warning', 'AI 正在回复中，请等待完成后再重命名');
-    return;
-  }
 
   // 1. 取上下文：优先最近 N 条消息（对话主题可能漂移，以最近为准），回退 firstMessage
   let context = '';
