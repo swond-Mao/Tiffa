@@ -2701,6 +2701,13 @@ html[data-mode="light"] .muse-tint {
   color: hsl(var(--text-400));
 }
 
+.identity-error {
+  color: hsl(var(--danger, 0 70% 50%));
+  font-size: 12px;
+  min-height: 16px;
+  margin: 4px 0;
+}
+
 .constraints-text {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   white-space: pre-wrap;

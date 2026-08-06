@@ -309,6 +309,12 @@
             <button class="settings-btn" id="btnOpenConstraints">用记事本打开约束文件</button>
           </div>
           <div class="settings-section">
+            <div class="settings-section-title">AI 身份</div>
+            <div class="settings-section-desc">配置 AI 的名字与对你的称呼（记忆系统 AI.md / USER.md）</div>
+            <div id="identityPreview" class="constraints-preview">AI 名字：助手</div>
+            <button class="settings-btn" id="btnOpenIdentity">设置 AI 身份</button>
+          </div>
+          <div class="settings-section">
             <div class="settings-section-title">关于</div>
             <div class="about-info">
               <div class="about-row"><span>Tiffa 桌面版</span><span>v1.4</span></div>
@@ -342,6 +348,31 @@
         </div>
       </div>
     </div>
+
+  <!-- AI 身份 / 用户称呼设置浮层 -->
+  <div id="identityOverlay" class="overlay hidden">
+    <div class="settings-panel identity-panel">
+      <div class="settings-header">
+        <h3>设置身份</h3>
+      </div>
+      <div class="settings-body">
+        <div class="settings-section-desc">给 AI 起个名字，并告诉它怎么称呼你。信息会写入记忆系统（AI.md / USER.md），可随时在「设置 → AI 身份」修改。</div>
+        <div class="bypass-field">
+          <label for="identityAiName">AI 的名字</label>
+          <input type="text" id="identityAiName" placeholder="如：小巴 / Tiffa" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="bypass-field">
+          <label for="identityUserName">对我的称呼</label>
+          <input type="text" id="identityUserName" placeholder="如：swond / 朋友" autocomplete="off" spellcheck="false">
+        </div>
+        <div id="identityError" class="identity-error"></div>
+        <div class="model-config-actions" style="margin-top:10px;">
+          <button class="settings-btn" id="identitySkip">稍后再说</button>
+          <button class="settings-btn" id="identitySave" style="margin-left:auto;background:var(--accent);color:white;border-color:var(--accent)">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
     <!-- Toast 通知容器 -->
     <div id="toastContainer"></div>

@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   getUserEntries: (sessionPath) => ipcRenderer.invoke('sessions:getUserEntries', sessionPath),
   exportSessionHtml: (sessionPath) => ipcRenderer.invoke('sessions:exportHtml', sessionPath),
   recallMemory: (query) => ipcRenderer.invoke('memory:recall', query),
+  getIdentity: () => ipcRenderer.invoke('memory:getIdentity'),
+  saveIdentity: (aiName, userName) => ipcRenderer.invoke('memory:saveIdentity', aiName, userName),
   getRemovedCwds: () => ipcRenderer.invoke('sessions:getRemovedCwds'),
   addRemovedCwd: (cwd) => ipcRenderer.invoke('sessions:addRemovedCwd', cwd),
   removeRemovedCwd: (cwd) => ipcRenderer.invoke('sessions:removeRemovedCwd', cwd),
