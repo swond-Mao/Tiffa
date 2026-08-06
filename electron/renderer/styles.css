@@ -2296,7 +2296,7 @@ html[data-mode="light"] .muse-tint {
 .startup-logo {
   font-size: 48px;
   font-weight: 700;
-  color: hsl(var(--accent));
+  color: var(--accent);
   letter-spacing: 2px;
   animation: logoReveal 2.2s ease-out both;
 }
@@ -2333,8 +2333,9 @@ html[data-mode="light"] .muse-tint {
   position: absolute;
   width: 100%;
   height: 100%;
-  border: 1px solid hsl(var(--accent) / 0.5);
+  border: 1px solid var(--accent);
   border-radius: 50%;
+  opacity: 0.5;
   animation: rippleExpand 3.6s ease-out infinite;
 }
 
@@ -2350,13 +2351,13 @@ html[data-mode="light"] .muse-tint {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: hsl(var(--accent));
+  background: var(--accent);
   animation: coreBreathe 3.6s ease-in-out infinite;
 }
 
 @keyframes coreBreathe {
-  0%, 100% { transform: scale(1); opacity: 0.85; box-shadow: 0 0 0 0 hsl(var(--accent) / 0.4); }
-  50% { transform: scale(1.4); opacity: 1; box-shadow: 0 0 24px 6px hsl(var(--accent) / 0.3); }
+  0%, 100% { transform: scale(1); opacity: 0.85; box-shadow: 0 0 0 0 var(--accent); }
+  50% { transform: scale(1.4); opacity: 1; box-shadow: 0 0 24px 6px var(--accent); }
 }
 
 .startup-status {
@@ -2377,19 +2378,23 @@ html[data-mode="light"] .muse-tint {
 .startup-progress {
   width: 200px;
   height: 2px;
-  background: hsl(var(--text-400) / 0.15);
+  /* --text-400 是 HSL 三元组（如 210 8% 40%），可直接进 hsl() 带透明度 */
+  background: hsl(var(--text-400) / 0.2);
   border-radius: 1px;
   overflow: hidden;
 }
 
-
+/* 注意：--accent 是完整 hsl(...) 函数（themes.js 里 --accent: hsl(165 45% 45%)），
+   hsl(var(--accent) / 0.8) 会展开成 hsl(hsl(...)/0.8) 非法、背景失效（2026-08-06 实测透明）。
+   故进度条直接用 var(--accent) 原值，透明度交给外层 opacity。 */
 .startup-progress-bar {
   height: 100%;
   width: 0%;
-  background: hsl(var(--accent) / 0.8);
+  background: var(--accent);
   border-radius: 1px;
-  /* 0.6s 平滑过渡：伪进度每 250ms 推一次，进度条一直处于"追赶"中，
-     视觉上就是持续平滑移动，杜绝"卡住不动"的观感 */
+  opacity: 0.85;
+  /* 0.6s 平滑过渡：剧本播放器每 100ms 推一次，进度条一直处于"追赶"中，
+     视觉上就是持续平滑移动 */
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -2417,7 +2422,7 @@ html[data-mode="light"] .muse-tint {
   width: 36px;
   height: 36px;
   border: 3px solid hsl(var(--border-200));
-  border-top-color: hsl(var(--accent));
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
