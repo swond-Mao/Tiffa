@@ -2144,6 +2144,14 @@ body {
   justify-content: center;
 }
 
+/* 导航层提升到 modal 遮罩(z-index 1000)之上：
+   卡片（ask/审批）弹出时依然可以切换对话——多实例并行 + 全局 ask 队列的设计目标。
+   否则遮罩锁死全局，用户切不出去，原对话的 ask 应答链路被迫中断 → 卡死。 */
+#titlebar, #sessionTabBar, #projectPanel {
+  position: relative;
+  z-index: 1001;
+}
+
 /* 启动全屏遮罩 */
 .startup-overlay {
   position: fixed;
@@ -2793,14 +2801,16 @@ html[data-mode="light"] .muse-tint {
 /* ── 模型快速切换浮层 ── */
 .model-switcher {
   position: fixed;
-  top: calc(var(--titlebar-height) + 4px + 36px); /* below titlebar + tab bar */
+  top: calc(var(--titlebar-height) + 4px + 36px); /* below titlebar + tab bar（JS 会按触发按钮实际位置覆盖）*/
   left: calc(var(--project-panel-width) + 12px);
   width: 320px;
   max-height: min(500px, calc(100vh - var(--titlebar-height) - 60px));
   background: hsl(var(--bg-200));
   border: 1px solid hsl(var(--border-200));
   border-radius: var(--radius-md);
-  z-index: 999;
+  /* 必须高于导航层 #projectPanel/#titlebar/#sessionTabBar(z-index:1001)，
+     否则下拉菜单会被可调宽的左侧栏遮挡。 */
+  z-index: 1100;
   overflow: hidden;
   box-shadow: 0 8px 32px hsl(var(--always-black) / 0.4);
 }
@@ -3130,6 +3140,11 @@ html[data-mode="light"] .muse-tint {
 #extModal {
   align-items: flex-end;  /* 底部对齐，不是居中 */
   justify-content: center;
+  pointer-events: none;    /* 遮罩背景不拦截点击：ask 弹窗打开后仍可切换对话/项目 */
+}
+
+#extModal:not(.hidden) .ext-modal-panel {
+  pointer-events: auto;    /* 只有弹窗面板本身可交互 */
 }
 
 .ext-modal-panel {

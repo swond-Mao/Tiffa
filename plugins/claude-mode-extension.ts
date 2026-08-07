@@ -1129,9 +1129,9 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
   // 按类型删除 PROJECT.md 进度日志条目（day/week/month），返回新内容
   function removeProgressEntries(projectMd: string, kind: "day" | "week" | "month"): string {
     let re: RegExp
-    if (kind === "day") re = /\n### \d{4}-\d{2}-\d{2} 日报\n(?:- [^\n]*\n?)*/g
-    else if (kind === "week") re = /\n### \d{4}-W\d{2} 周报\n(?:- [^\n]*\n?)*/g
-    else re = /\n### \d{4}-\d{2} 月报\n(?:- [^\n]*\n?)*/g
+    if (kind === "day") re = /### \d{4}-\d{2}-\d{2} 日报\n(?:- [^\n]*\n?)*/g
+    else if (kind === "week") re = /### \d{4}-W\d{2} 周报\n(?:- [^\n]*\n?)*/g
+    else re = /### \d{4}-\d{2} 月报\n(?:- [^\n]*\n?)*/g
     return projectMd.replace(re, "\n")
   }
 
@@ -1147,6 +1147,17 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       const needsDay = state.lastAggregatedDay && state.lastAggregatedDay !== today
       const needsWeek = state.lastAggregatedWeek && state.lastAggregatedWeek !== thisWeek
       const needsMonth = state.lastAggregatedMonth && state.lastAggregatedMonth !== thisMonth
+
+      // 首次运行（state 为空）：初始化聚合水位，不聚合历史，仅记录当前水位
+      if (!state.lastAggregatedDay || !state.lastAggregatedWeek || !state.lastAggregatedMonth) {
+        if (!state.lastAggregatedDay) state.lastAggregatedDay = today
+        if (!state.lastAggregatedWeek) state.lastAggregatedWeek = thisWeek
+        if (!state.lastAggregatedMonth) state.lastAggregatedMonth = thisMonth
+        if (!state.lastSeen) state.lastSeen = new Date().toISOString()
+        writeProgressState(projectDir, state)
+        log("progress.aggregate.init", `day=${state.lastAggregatedDay} week=${state.lastAggregatedWeek} month=${state.lastAggregatedMonth}`)
+      }
+
       if (!needsDay && !needsWeek && !needsMonth) return
 
       const projectMdPath = join(projectDir, "PROJECT.md")
@@ -1271,7 +1282,7 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
   // 门控：TIFFA_COMPACT 取值
   //   unset / "0"   -> 不干预，内核照常 snap/LLM（兼容旧行为）
   //   "1" / "auto"  -> 五级降级链
-  //   "force"       -> 跳过 ①②，直接走 ③ 旁路结构化总结
+    //   "force"       -> 跳过 ①②，直接走 ③ 旁路结构化总结
   // 任何失败 return（不抛错）-> 内核回退。绝不让压缩卡死。
   pi.on("session_before_compact", async (event: { preparation?: { messagesToSummarize?: unknown[]; turnPrefixMessages?: unknown[]; firstKeptEntryId?: string }; signal?: AbortSignal } | null, ctx?: any) => {
     const mode = process.env.TIFFA_COMPACT
@@ -1285,7 +1296,24 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       const msgs = ((prep.messagesToSummarize || []).concat(prep.turnPrefixMessages || [])) as Record<string, unknown>[]
       if (msgs.length === 0) return
 
-      const force = mode === "force"
+      let force = mode === "force"
+
+      // ── 体积预判：超大会话跳过 snap 线，直降 ③ 旁路结构化总结 ──
+      // 实测：6.6MB JSONL 会话的 CJK 帧渲染产物超 64MB RPC 传输上限，
+      // 内核报 "RPC response exceeded the transport limit" 或
+      // "snapcompact produced too much standing image payload" 后回退内核 LLM 自压（贵且慢）。
+      // 在 hook 入口按待压缩文本体积预判，超阈直接走 ③（回执仅几 KB 文本，天然安全）。
+      // 阈值可用 TIFFA_COMPACT_SNAP_MAX_MB 覆盖，默认 2MB。
+      if (!force) {
+        const snapMaxMB = Math.max(0.5, Number(process.env.TIFFA_COMPACT_SNAP_MAX_MB) || 2)
+        let byteEstimate = 0
+        try { byteEstimate = JSON.stringify(msgs).length } catch {}
+        if (byteEstimate > snapMaxMB * 1024 * 1024) {
+          force = true
+          log("compact-bypass", `⚠ 待压缩文本 ${(byteEstimate / 1048576).toFixed(1)}MB 超 ${snapMaxMB}MB 阈值，snap 帧产物将爆 64MB RPC 上限 -> 跳过 ①② 直降 ③`)
+          writeCompactRoute("claude-route", `体积预判降级：待压缩文本超 ${snapMaxMB}MB，跳过 snap 线直走 ③ 旁路结构化摘要`)
+        }
+      }
 
       // 解析 default 角色（localmodel）和当前会话主模型的 endpoint
       const defaultEp = resolveBypassEndpoint()
@@ -1312,8 +1340,8 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       } catch {}
       const mainIsVision = mainProvider && mainModelId ? isModelVision(mainProvider, mainModelId) : false
 
-      // ① local 视觉 snapcompact：default 模型视觉 + 可达 + 非 force
-      if (!force && defaultIsVision && defaultEp) {
+            // ① local 视觉 snapcompact：default 模型视觉 + 可达 + 非 force
+            if (!force && defaultIsVision && defaultEp) {
         const reachable = await probeEndpoint(defaultEp.baseUrl, defaultEp.apiKey)
         if (reachable) {
           log("compact-bypass", `① local vision snapcompact: ${defaultEp.model} reachable`)
@@ -1323,8 +1351,8 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
         log("compact-bypass", `① local vision ${defaultEp.model} not reachable -> try ②`)
       }
 
-      // ② 旁路主模型 snapcompact：当前会话模型视觉 + 可达
-      if (!force && mainIsVision && mainEp && mainEp.model !== defaultEp?.model) {
+            // ② 旁路主模型 snapcompact：当前会话模型视觉 + 可达
+            if (!force && mainIsVision && mainEp && mainEp.model !== defaultEp?.model) {
         const reachable = await probeEndpoint(mainEp.baseUrl, mainEp.apiKey)
         if (reachable) {
           log("compact-bypass", `② main vision snapcompact: ${mainEp.model} reachable`)
