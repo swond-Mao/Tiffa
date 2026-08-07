@@ -1,0 +1,24 @@
+<!-- ============================================================
+  shared-visual-components / components/text/typing-effect.html
+  打字机效果 — 片段（含 JS）
+  用法：<span id="typewriter" data-text="要打的字"></span>
+  ============================================================ -->
+<span id="typewriter" style="font-size:var(--font-size-2xl);font-weight:var(--font-weight-bold);color:var(--accent);">_</span>
+<script>
+  (function () {
+    var el = document.getElementById("typewriter");
+    if (!el) return;
+    var text = el.dataset.text || "默认打字内容，请设置 data-text 属性";
+    var i = 0;
+    el.textContent = "";
+    var interval = setInterval(function () {
+      if (i <= text.length) {
+        el.textContent = text.slice(0, i) + "|";
+        i++;
+      } else {
+        clearInterval(interval);
+        el.textContent = text;
+      }
+    }, 90);
+  })();
+</script>

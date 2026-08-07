@@ -101,4 +101,24 @@ skills/canvas-design/canvas-fonts/MiSans-*.ttf
 
 # OS files
 Thumbs.db
+
+# Electron 便携 userData（main.js setPath 重定向后的 %APPDATA%，纯运行时缓存/Local Storage，随包再生，绝不入库）
+data/electron-userdata/
+
+# WorkBuddy 临时草稿
+.workbuddy/temp/
+
+# 生成产物目录
+output/
+
+# Agent 运行时状态（随运行再生，与已忽略的 projects.json/session-model-map.json 同类）
+data/agent/bypass-model.json
+data/agent/current-model.json
+data/agent/last-compact-route.json
+data/agent/last-compact-summary.md
+data/agent/computer-use-enabled
+
+# Skill 渲染缓冲（临时产物）
+skills/*/project/*_buffer.png
+skills/*/*_buffer.png
 Desktop.ini

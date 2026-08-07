@@ -31,6 +31,17 @@ const COMPUTER_USE_EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'compute
 const DEFAULT_WORKSPACE_DIR = path.join(PORTABLE_ROOT, 'workspace');
 let currentWorkspaceDir = DEFAULT_WORKSPACE_DIR;
 
+// ── 自包含便携：把 Electron userData 锁到便携目录，localStorage/openTabs 等随 U 盘走 ──
+// 必须在 app.ready 之前调用（此处模块顶层、BrowserWindow 创建前，时机正确）。
+try {
+  const portableUserData = path.join(PORTABLE_ROOT, 'data', 'electron-userdata');
+  fs.mkdirSync(portableUserData, { recursive: true });
+  app.setPath('userData', portableUserData);
+  console.log('[portable] userData 锁定到:', portableUserData);
+} catch (e) {
+  console.warn('[portable] setPath(userData) 失败，回退系统默认:', e.message);
+}
+
 // ── Windows 进程树杀杀（SIGTERM/SIGKILL 在 Windows 上不可靠） ──
 function _killTree(pid, sync = false) {
   if (!pid) return;
@@ -90,6 +101,43 @@ function _encodeSessionDirName(cwdPath) {
   return '--' + encoded + '--';
 }
 
+// ── 提取 workspace/ 之后的相对路径后缀（模块顶层，供 stableSessionDirName 与 setupIpc 内各调用点共用）──
+// 原为 setupIpc 内部的嵌套函数声明；但 stableSessionDirName 被加在模块顶层后会跨作用域拿不到它，
+// 导致启动时 ReferenceError 崩溃。提升到模块顶层后，模块顶层与 setupIpc 内部都可经作用域链解析。
+// 品牌无关：优先按当前 PORTABLE_ROOT 下的 workspace 匹配（根目录改名也兼容），
+// 并兼容旧包曾放到其他盘符的迁移场景（任意 .../workspace/ 都提取后缀）。
+// 例如: E:\Tiffa\workspace\omp调试 → omp调试
+//       E:\OldPackage\workspace\ppt制作\sub → ppt制作\sub
+//       G:\some\other\path → null（不在任何 workspace 下）
+function extractWorkspaceSuffix(absPath) {
+  const normalized = absPath.replace(/\\/g, '/');
+  // 1) 当前 PORTABLE_ROOT 下的 workspace（推荐，根目录叫什么都行）
+  const workspaceRoot = path.join(PORTABLE_ROOT, 'workspace').replace(/\\/g, '/');
+  if (normalized.toLowerCase().startsWith(workspaceRoot.toLowerCase() + '/')) {
+    return normalized.slice(workspaceRoot.length + 1).replace(/\//g, path.sep);
+  }
+  // 2) 兼容迁移：旧包挪到别的盘符，按 .../workspace/ 提取相对后缀
+  const match = normalized.match(/\/workspace\/(.+)$/i);
+  if (match) return match[1].replace(/\//g, path.sep);
+  return null;
+}
+
+// ── 稳定会话目录名（与盘符/路径解耦）──
+// 内核默认按 cwd 编码目录名（含盘符），换机器盘符一变，会话就落到不同目录，
+// 导致 A/B 进度互不连续（"前端停在昨天A状态"真凶）。
+// 对 workspace 项目改用「workspace 相对后缀」做稳定名（盘符无关），main.js 与
+// 内核（通过 --session-dir 传同一目录）共用，A/B 天然映射同一目录，进度连续。
+// 外部文件夹（extractWorkspaceSuffix 为 null）保持原 cwd 编码，行为不变。
+function stableSessionDirName(cwdPath) {
+  const normalized = path.resolve(cwdPath);
+  const suffix = extractWorkspaceSuffix(normalized);
+  if (suffix) {
+    const safe = suffix.replace(/[/\\:]/g, '-');
+    return '--wks-' + safe + '--';
+  }
+  return _encodeSessionDirName(cwdPath);
+}
+
 // ── 查找会话 JSONL 文件：给定 cwd + sessionId，在 SESSIONS_DIR 下定位匹配的 .jsonl ──
 // 会话文件有两种存放模式：
 //   1. 直接在项目目录下：*_<uuid>.jsonl
@@ -98,7 +146,7 @@ function _encodeSessionDirName(cwdPath) {
 const _SESSIONS_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions');
 function _findSessionFile(cwd, sessionId) {
   if (!cwd || !sessionId) return null;
-  const dirName = _encodeSessionDirName(cwd);
+  const dirName = stableSessionDirName(cwd);
   const projectDir = path.join(_SESSIONS_DIR, dirName);
   if (!fs.existsSync(projectDir)) return null;
   const uuidLower = sessionId.toLowerCase();
@@ -115,6 +163,25 @@ function _findSessionFile(cwd, sessionId) {
       const sdPath = path.join(projectDir, sd.name);
       const jsonlFiles = fs.readdirSync(sdPath).filter(f => f.endsWith('.jsonl'));
       if (jsonlFiles.length > 0) return path.join(sdPath, jsonlFiles[0]);
+    }
+  } catch {}
+
+  // 兜底：稳定目录未命中（极少见，如历史遗留盘符目录、或 extractWorkspaceSuffix 边界），
+  // 扫描所有会话目录按 sessionId(UUID) 匹配，确保不丢失任一可定位的会话。
+  try {
+    const allDirs = fs.readdirSync(_SESSIONS_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name !== dirName);
+    for (const ad of allDirs) {
+      const haystack = path.join(_SESSIONS_DIR, ad.name);
+      const direct = fs.readdirSync(haystack)
+        .filter(f => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
+      if (direct.length > 0) return path.join(haystack, direct[0]);
+      const sub = fs.readdirSync(haystack, { withFileTypes: true })
+        .filter(d => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
+      for (const sd of sub) {
+        const js = fs.readdirSync(path.join(haystack, sd.name)).filter(f => f.endsWith('.jsonl'));
+        if (js.length > 0) return path.join(haystack, sd.name, js[0]);
+      }
     }
   } catch {}
   return null;
@@ -197,6 +264,14 @@ class TiffaInstance {
     delete env.ELECTRON_RUN_AS_NODE;
 
     const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH, '-e', COMPUTER_USE_EXTENSION_PATH];
+
+    // ── 稳定会话目录：与盘符/路径解耦，跨机器（移动硬盘盘符变化）自动连续 ──
+    // 内核接受 --session-dir 后，会把该目录下所有会话（新建 / 续接）写到这里，
+    // 不再用 cwd 编码的 --E--…-- 目录。main.js 读侧用同一 stableSessionDirName
+    // 定位（_findSessionFile / encodeSessionDirName 已委托），二者同源。
+    // A/B 机器盘符不同但 workspace 后缀相同 → 映射到同一 --wks-…-- 目录 → 进度连续。
+    const stableSessionDir = path.join(_SESSIONS_DIR, stableSessionDirName(this.cwd));
+    args.push('--session-dir', stableSessionDir);
 
     console.log(`[TiffaInstance] Starting Tiffa cwd=${this.cwd}`, BUN_EXE, args.join(' '));
 
@@ -1787,15 +1862,10 @@ function setupIpc() {
   }
 
   // Encode cwd path to Tiffa session dir name
+  // 委托给 stableSessionDirName：workspace 项目用盘符无关的稳定名（与内核 --session-dir 同源），
+  // 外部文件夹退回原 cwd 编码。cli.js WR5/d46 的编码规则保留在 _encodeSessionDirName 作兜底。
   function encodeSessionDirName(cwdPath) {
-    // Tiffa 的编码规则 (cli.js WR5/d46):
-    //   path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")
-    //   然后首尾加 -- 
-    // G:\Tiffa\workspace → --G--Tiffa-workspace--
-    const resolved = path.resolve(cwdPath);
-    const stripped = resolved.replace(/^[/\\]/, '');
-    const encoded = stripped.replace(/[/\\:]/g, '-');
-    return '--' + encoded + '--';
+    return stableSessionDirName(cwdPath);
   }
 
   // Decode Tiffa session dir name back to cwd path
@@ -1824,26 +1894,32 @@ function setupIpc() {
   // 从 JSONL 文件中提取 cwd（可靠来源）
   function extractCwdFromSessionDir(dirPath) {
     try {
-      const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
-      for (const file of files) {
-        const filePath = path.join(dirPath, file);
-        const stat = fs.statSync(filePath);
-        const headSize = Math.min(4096, stat.size);
-        const fd = fs.openSync(filePath, 'r');
-        let text;
-        try {
-          const buf = Buffer.alloc(headSize);
-          fs.readSync(fd, buf, 0, headSize, 0);
-          text = buf.toString('utf8');
-        } finally {
-          fs.closeSync(fd);
-        }
-        const lines = text.split('\n').filter(l => l.trim());
-        for (const line of lines) {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          // 递归进分支子目录（mode 2 布局：目录/<uuid>/<uuid>.jsonl），否则嵌套会话的 cwd 提取不到会被误判为孤儿而跳过迁移
+          const found = extractCwdFromSessionDir(full);
+          if (found) return found;
+        } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          const stat = fs.statSync(full);
+          const headSize = Math.min(4096, stat.size);
+          const fd = fs.openSync(full, 'r');
+          let text;
           try {
-            const obj = JSON.parse(line);
-            if (obj.cwd) return obj.cwd;
-          } catch {}
+            const buf = Buffer.alloc(headSize);
+            fs.readSync(fd, buf, 0, headSize, 0);
+            text = buf.toString('utf8');
+          } finally {
+            fs.closeSync(fd);
+          }
+          const lines = text.split('\n').filter(l => l.trim());
+          for (const line of lines) {
+            try {
+              const obj = JSON.parse(line);
+              if (obj.cwd) return obj.cwd;
+            } catch {}
+          }
         }
       }
     } catch {}
@@ -1874,7 +1950,12 @@ function setupIpc() {
     let changed = false;
 
     if (fs.existsSync(SESSIONS_DIR)) {
-      const dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
+      let dirs = [];
+      try {
+        dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
+      } catch (err) {
+        console.warn('[migrate] 扫描 sessions 目录失败（可能被 NTFS 损坏目录阻塞）:', err.message);
+      }
       for (const dir of dirs) {
         // 优先从 JSONL 文件中读取 cwd（可靠）
         const dirPath = path.join(SESSIONS_DIR, dir.name);
@@ -2007,7 +2088,12 @@ function setupIpc() {
     }
 
     // 步骤2: 扫描 sessions 目录，找孤儿目录并迁移
-    const dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
+    let dirs = [];
+    try {
+      dirs = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
+    } catch (err) {
+      console.warn('[migrate-path] 扫描 sessions 目录失败（可能被 NTFS 损坏目录阻塞）:', err.message);
+    }
     for (const dir of dirs) {
       const dirPath = path.join(SESSIONS_DIR, dir.name);
 
@@ -2089,26 +2175,7 @@ function setupIpc() {
     if (changed) writeProjectsJson(projects);
   }
 
-  /**
-   * 从绝对路径中提取 workspace/ 之后的相对路径后缀。
-   * 品牌无关：优先按当前 PORTABLE_ROOT 下的 workspace 匹配（根目录改名也兼容），
-   * 并兼容旧包曾放到其他盘符的迁移场景（任意 .../workspace/ 都提取后缀）。
-   * 例如: E:\Tiffa\workspace\omp调试 → omp调试
-   *       E:\OldPackage\workspace\ppt制作\sub → ppt制作\sub
-   *       G:\some\other\path → null（不在任何 workspace 下）
-   */
-  function extractWorkspaceSuffix(absPath) {
-    const normalized = absPath.replace(/\\/g, '/');
-    // 1) 当前 PORTABLE_ROOT 下的 workspace（推荐，根目录叫什么都行）
-    const workspaceRoot = path.join(PORTABLE_ROOT, 'workspace').replace(/\\/g, '/');
-    if (normalized.toLowerCase().startsWith(workspaceRoot.toLowerCase() + '/')) {
-      return normalized.slice(workspaceRoot.length + 1).replace(/\//g, path.sep);
-    }
-    // 2) 兼容迁移：旧包挪到别的盘符，按 .../workspace/ 提取相对后缀
-    const match = normalized.match(/\/workspace\/(.+)$/i);
-    if (match) return match[1].replace(/\//g, path.sep);
-    return null;
-  }
+  // 注：extractWorkspaceSuffix 已提升到模块顶层（见上方），setupIpc 内部经作用域链直接复用，此处不再重复定义。
 
   // 自动发现 workspace 下的子目录，注册到 projects.json
   function discoverWorkspaceProjects() {
@@ -3399,7 +3466,7 @@ app.on('before-quit', (e) => {
   const forceKillTimer = setTimeout(() => {
     tiffaManager.killAll();
     app.quit();
-  }, 3000);
+  }, 5000);
 
   if (pending === 0) { clearTimeout(forceKillTimer); app.quit(); return; }
 

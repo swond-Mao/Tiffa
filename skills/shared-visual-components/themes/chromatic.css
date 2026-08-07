@@ -1,0 +1,36 @@
+/* ============================================================
+   shared-visual-components / themes/chromatic.css
+   色谱图表风 (Chromatic Data)
+   适用场景: 数据报告、市场分析、KPI 复盘、行业研究
+   目标受众: 数据分析师、咨询顾问、研究员
+   主题类型: light
+   效果: color-band, spectrum-swatches, data-heavy, panel-layout
+   ============================================================ */
+
+[data-theme="chromatic"] {
+  /* ── 颜色层 ── */
+  --bg-primary: #f2efe4;
+  --bg-secondary: #e8e4d8;
+  --bg-elevated: #ffffff;
+  --fg-primary: #1a1814;
+  --fg-muted: #6b6558;
+  --fg-faint: #6b6558;
+  --accent: #d8402e;
+  --accent-2: #e2742c;
+  --accent-warm: #efbe2e;
+  --accent-hot: #d8402e;
+  --accent-cool: #2c44a0;
+  --accent-gradient: linear-gradient(90deg, #d8402e, #efbe2e, #3c9a52, #2c44a0, #7a3c90);
+  --glass-border: #d4cfc4;
+  --glass-bg: #ffffff;
+  --glass-blur: none;
+
+  /* ── 字体层 ── */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', Consolas, monospace;
+  --font-display: 'Inter', sans-serif;
+  --font-weight-heading: 700;
+  --font-weight-body: 400;
+  --cover-title-size: 44px;
+  --cover-subtitle-size: 15px;
+}

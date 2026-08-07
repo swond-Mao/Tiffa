@@ -1,0 +1,36 @@
+/* ============================================================
+   shared-visual-components / themes/sonic-neon.css
+   声波霓虹风 (Sonic Neon)
+   适用场景: 音乐娱乐、潮流活动、直播内容、年轻化发布
+   目标受众: 娱乐品牌、活动策划、内容团队
+   主题类型: vibrant
+   效果: neon-masthead, identity-seal, geometric-shape, barcode
+   ============================================================ */
+
+[data-theme="sonic-neon"] {
+  /* ── 颜色层 ── */
+  --bg-primary: #fdf8f4;
+  --bg-secondary: #f0e8e0;
+  --bg-elevated: rgba(255,255,255,0.7);
+  --fg-primary: #1a1414;
+  --fg-muted: #8a7a7a;
+  --fg-faint: #8a7a7a;
+  --accent: #f15a29;
+  --accent-2: #d61fb5;
+  --accent-warm: #facc15;
+  --accent-hot: #f15a29;
+  --accent-cool: #3bb6ec;
+  --accent-gradient: linear-gradient(135deg, #f15a29, #d61fb5);
+  --glass-border: rgba(0,0,0,0.08);
+  --glass-bg: rgba(255,255,255,0.7);
+  --glass-blur: 16px;
+
+  /* ── 字体层 ── */
+  --font-sans: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', Consolas, monospace;
+  --font-display: 'Nunito', sans-serif;
+  --font-weight-heading: 800;
+  --font-weight-body: 400;
+  --cover-title-size: 52px;
+  --cover-subtitle-size: 16px;
+}

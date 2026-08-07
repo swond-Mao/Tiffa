@@ -24,9 +24,10 @@ AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传
 
 | 技能名 | 类型 | 说明 |
 |--------|------|------|
+| `shared-visual-components` | 组件库 | **视觉设计底座**：12 套主题 + 18 个组件 + 5 个布局模板。AI 做任何视觉 HTML 先读它选组件拼装，禁止从零手写 CSS |
 | `pptgen` | CLI | 生成交互式 HTML 网页演示（含翻页、动画、主题切换等完整框架，调用 `pptgen.py`） |
 | `comfyui` | CLI | AI 生图（调用 `comfy.py`，需要本地 ComfyUI 服务） |
-| `canvas-design` | LLM | AI 在对话中生成 HTML+CSS+SVG 设计，通过 `html_content` 或 `html_file` 参数传入 |
+| `canvas-design` | 拼装 | AI 基于 shared-visual-components 组件库拼装视觉设计，通过 `html_file` 参数传入 |
 
 ## AI 用法（必读，严格按步骤执行）
 
@@ -66,12 +67,13 @@ AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传
 
 ### canvas-design 特殊说明
 
-canvas-design 是"LLM 型"技能--AI 先用 Write 工具生成 HTML 文件到项目目录下，craftman 负责复制到输出目录做合并并输出链接。
+canvas-design 是"拼装型"技能——AI 先 read `skill://shared-visual-components` 选布局/主题/组件，拼装 HTML 文件到项目目录下，craftman 负责复制到输出目录做合并并输出链接。
 
 **craftman 流程：**
-1. AI 用 Write 工具创建 HTML 文件到 `<项目目录>/.craftman/cover.html`
-2. AI 写 plan JSON，params 通过 `html_file` 引用该路径
-3. craftman 复制到输出目录，自动输出链接
+1. AI 先 read `skill://shared-visual-components` 获取组件库
+2. AI 用 Write 工具基于组件库拼装 HTML 文件到 `<项目目录>/.craftman/cover.html`
+3. AI 写 plan JSON，params 通过 `html_file` 引用该路径
+4. craftman 复制到输出目录，自动输出链接
 
 ```json
 {
@@ -84,10 +86,13 @@ canvas-design 是"LLM 型"技能--AI 先用 Write 工具生成 HTML 文件到项
 
 ### pptgen 特殊说明
 
+**AI 必须先 ask 用户选 HTML 模板风格**（pptgen 16 种风格，见 pptgen SKILL.md 风格列表），不许替用户默认。风格是视觉决策，与生图同级别——任何阶段 AI 都不替用户做决定。
+
 pptgen 默认调外部 LLM 失败（医院内网 22023/22024 便携包不可达）。**正确做法：AI 预生成内容 JSON，craftman 用 `--cache` 跳过 LLM**。
 
 **craftman 流程：**
-1. AI 用 Write 工具写出符合 pptgen schema 的内容 JSON 到 `<项目目录>/.craftman/content.json`
+0. **先 ask 用户选风格**（pptgen 16 种风格之一），拿到答案再继续
+1. AI 用 Write 工具写出符合 pptgen schema 的内容 JSON 到 `<项目目录>/.craftman/content.json`（`style` 字段填用户选的风格）
 2. AI 写 plan JSON 到 `<项目目录>/.craftman/plan.json`，plan 的 params 中通过 `content_file` 引用 content.json
 3. AI 调用 `python "<craftman.py绝对路径>" --plan-file "<cwd>/.craftman/plan.json" --no-confirm`
 4. craftman 调 pptgen --cache content.json --no-image，跳过 LLM 和生图
@@ -207,6 +212,23 @@ python "<craftman.py绝对路径>" --plan-file "<cwd>/.craftman/plan.json" --no-
 ```
 
 > `<craftman.py绝对路径>` 替换为本文件末尾 [系统注入] 中给出的实际路径。
+
+## 导出成品（可选）
+
+交互式 HTML 产出后，可按需导出为 PNG/PDF（调用共享组件库的 tools）：
+
+```powershell
+# PNG 导出（海报/设计稿，指定尺寸和选择器）
+node "$env:PORTABLE_ROOT/skills/shared-visual-components/tools/html2png.js" "<输出目录>/output.html" --output "<输出目录>/poster.png" --width 1080 --height 1440
+
+# PDF 导出（演示文稿/报告）
+node "$env:PORTABLE_ROOT/skills/shared-visual-components/tools/html2pdf.js" "<输出目录>/output.html" --output "<输出目录>/deck.pdf" --format A4
+```
+
+**注意**：
+- html2png/html2pdf 需要 playwright-core（dashiai-ppt 项目内已装）和系统 Chrome/Edge，自动探测无需配置
+- 海报建议 `--selector "#poster"` 只截画布区域，避免截到自适应缩放后的窗口背景
+- 工具会自动用 PORTABLE_ROOT 解析路径，**禁止硬编码盘符**
 
 ## 输出
 

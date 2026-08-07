@@ -1,0 +1,36 @@
+/* ============================================================
+   shared-visual-components / themes/dark-atlas.css
+   深色图谱风 (Dark Atlas)
+   适用场景: 高密度数据展示、战略分析、科技/金融/产业报告
+   目标受众: 战略团队、投资人、产业研究团队
+   主题类型: dark
+   效果: glowing-accent, watermark-text, radial-glow, data-dense
+   ============================================================ */
+
+[data-theme="dark-atlas"] {
+  /* ── 颜色层 ── */
+  --bg-primary: #0f1219;
+  --bg-secondary: #1a1f2e;
+  --bg-elevated: #1a1f2e;
+  --fg-primary: #e2e8f0;
+  --fg-muted: #64748b;
+  --fg-faint: #64748b;
+  --accent: #c8f135;
+  --accent-2: #3ca0ff;
+  --accent-warm: #ffd23c;
+  --accent-hot: #ff5a3c;
+  --accent-cool: #3ca0ff;
+  --accent-gradient: linear-gradient(135deg, #c8f135, #3ca0ff);
+  --glass-border: #2a3040;
+  --glass-bg: #1a1f2e;
+  --glass-blur: none;
+
+  /* ── 字体层 ── */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', Consolas, monospace;
+  --font-display: 'Inter', sans-serif;
+  --font-weight-heading: 700;
+  --font-weight-body: 300;
+  --cover-title-size: 48px;
+  --cover-subtitle-size: 16px;
+}

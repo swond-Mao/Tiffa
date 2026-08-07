@@ -1,0 +1,39 @@
+<!-- ============================================================
+  shared-visual-components / effects/interactions/ripple-click.html
+  点击涟漪效果 — 片段（含 JS）
+  用法：给任意元素加 .ripple 类
+  ============================================================ -->
+<style>
+  .ripple {
+    position: relative;
+    overflow: hidden;
+  }
+  .ripple-ink {
+    position: absolute;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent) 40%, transparent);
+    transform: scale(0);
+    animation: ripple-spread 0.6s ease-out;
+    pointer-events: none;
+  }
+  @keyframes ripple-spread {
+    to { transform: scale(4); opacity: 0; }
+  }
+</style>
+<script>
+  (function () {
+    document.addEventListener("click", function (e) {
+      var el = e.target.closest(".ripple");
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      var size = Math.max(r.width, r.height);
+      var ink = document.createElement("span");
+      ink.className = "ripple-ink";
+      ink.style.width = ink.style.height = size + "px";
+      ink.style.left = (e.clientX - r.left - size / 2) + "px";
+      ink.style.top = (e.clientY - r.top - size / 2) + "px";
+      el.appendChild(ink);
+      setTimeout(function () { ink.remove(); }, 700);
+    });
+  })();
+</script>

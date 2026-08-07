@@ -1,0 +1,36 @@
+/* ============================================================
+   shared-visual-components / themes/neumorphism.css
+   轻拟态风 (Neumorphism)
+   适用场景: 产品介绍、企业汇报、方案说明
+   目标受众: 创业团队、产品经理、销售顾问
+   主题类型: light
+   效果: glassmorphism, bokeh, soft-shadow, orb
+   ============================================================ */
+
+[data-theme="neumorphism"] {
+  /* ── 颜色层 ── */
+  --bg-primary: #f0ebe3;
+  --bg-secondary: #e8e3db;
+  --bg-elevated: rgba(255,255,255,0.6);
+  --fg-primary: #2b2b30;
+  --fg-muted: #6b6b70;
+  --fg-faint: #6b6b70;
+  --accent: #5b8def;
+  --accent-2: #46b083;
+  --accent-warm: #e0a23a;
+  --accent-hot: #e8503a;
+  --accent-cool: #7a5ae0;
+  --accent-gradient: linear-gradient(135deg, #5b8def, #46b083);
+  --glass-border: rgba(255,255,255,0.3);
+  --glass-bg: rgba(255,255,255,0.6);
+  --glass-blur: 20px;
+
+  /* ── 字体层 ── */
+  --font-sans: 'Noto Sans SC', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Space Mono', 'SF Mono', Consolas, monospace;
+  --font-display: 'Noto Sans SC', 'Segoe UI', sans-serif;
+  --font-weight-heading: 700;
+  --font-weight-body: 400;
+  --cover-title-size: 48px;
+  --cover-subtitle-size: 18px;
+}

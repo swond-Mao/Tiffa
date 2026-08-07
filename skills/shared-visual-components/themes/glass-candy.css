@@ -1,0 +1,36 @@
+/* ============================================================
+   shared-visual-components / themes/glass-candy.css
+   玻璃糖果风 (Glass Candy)
+   适用场景: 年轻化品牌、消费产品、创意提案、社媒感内容
+   目标受众: 品牌团队、设计师、内容创作者
+   主题类型: light
+   效果: glass-candy, starburst, tilt-card, pill-highlight
+   ============================================================ */
+
+[data-theme="glass-candy"] {
+  /* ── 颜色层 ── */
+  --bg-primary: #faf8f5;
+  --bg-secondary: #f0ece6;
+  --bg-elevated: rgba(255,255,255,0.7);
+  --fg-primary: #1a1a2e;
+  --fg-muted: #6b7280;
+  --fg-faint: #6b7280;
+  --accent: #27E021;
+  --accent-2: #15A7F0;
+  --accent-warm: #FFC700;
+  --accent-hot: #FF9FE2;
+  --accent-cool: #8b5cf6;
+  --accent-gradient: linear-gradient(135deg, #27E021, #15A7F0);
+  --glass-border: rgba(255,255,255,0.5);
+  --glass-bg: rgba(255,255,255,0.7);
+  --glass-blur: 24px;
+
+  /* ── 字体层 ── */
+  --font-sans: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'SF Mono', Consolas, monospace;
+  --font-display: 'Nunito', sans-serif;
+  --font-weight-heading: 800;
+  --font-weight-body: 400;
+  --cover-title-size: 46px;
+  --cover-subtitle-size: 16px;
+}

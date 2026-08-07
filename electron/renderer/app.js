@@ -1464,6 +1464,11 @@ function handleEvent(event) {
           refreshSessionTreeWithRetry(state.activeProjectDirName, newPath);
         }
       }
+      // 后台实例的 session_switch：活跃 tab 不是 __new__ 时，上面的迁移不会处理后台的
+      // __new__ tab。补齐迁移，让后台新建对话的「待回复」徽标与 ask 抽屉及时生效。
+      if (state.sessions.some(s => s.path.startsWith('__new__') && s.path !== state.activeSessionPath)) {
+        migrateStuckNewTabs().catch(() => {});
+      }
       break;
   }
 }
@@ -2778,6 +2783,17 @@ async function switchToSession(sessionPath) {
   updateInputState();
   hideExtModal(); // 切走时收起旧会话的 ask 抽屉（pending 已记录，切回时恢复）
 
+  // 后台新建对话的 __new__ tab：内核 session_switch 已把它重命名为真实路径，
+  // 但渲染层 session_switch 处理器只在「当前活跃 tab 是 __new__」时才迁移，
+  // 后台 tab 不会被迁移 → 切回时命中 __new__ 分支提前 return，跳过 ask 抽屉恢复。
+  // 这里先补齐迁移并重新定位路径，让后续走真实路径分支（正确恢复 pending ask）。
+  if (sessionPath.startsWith('__new__')) {
+    const migrationMap = await migrateStuckNewTabs();
+    if (migrationMap[sessionPath]) {
+      sessionPath = migrationMap[sessionPath];
+    }
+  }
+
   // 跨项目 tab 切换：先切项目上下文（实例 + 高亮 + 懒加载会话缓存）
   const targetDir = dirNameFromSessionPath(sessionPath);
   if (targetDir && targetDir !== state.activeProjectDirName) {
@@ -4040,6 +4056,91 @@ function restorePendingExtUI(sessionId) {
   } else {
     hideExtModal();
   }
+}
+
+// 兜底迁移：把停留在 __new__ 临时路径、但内核已分配真实 session 的 tab，
+// 通过实例的 sessionFilePath 匹配磁盘会话，迁移为真实路径。
+//
+// 为什么必须存在：渲染层 session_switch 处理器（handleEvent 内）只在「当前活跃 tab 是
+// __new__」时才迁移；后台对话的 __new__ tab 永远不会被它迁移。于是后台新建对话：
+//   ① 徽标用 extractSessionId(__new__路径)=null 匹配不到 pendingExtUI；
+//   ② 切回时命中 switchToSession 的 __new__ 分支提前 return，跳过 restorePendingExtUI，
+//      后台 ask 卡片永不弹出。
+// 这里是唯一能补全 state.sessions 条目自身 .path/.sessionId 的地方（loadSessions 内联版漏了
+// 这一步，导致 __new__ 条目长期残留、切回仍走 __new__ 分支）。
+// 返回 { 旧__new__路径: 新真实路径 } 映射，供调用方重新定位会话。
+// diskSessions 可选：调用方已持有磁盘会话列表时传入，避免重复 IPC。
+async function migrateStuckNewTabs(diskSessions = null) {
+  const map = {};
+  if (!state.activeProjectDirName) return map;
+  const newTabsToMigrate = state.sessions.filter(s => s.path.startsWith('__new__') && s.sessionId);
+  if (newTabsToMigrate.length === 0) return map;
+  let instances = null;
+  try { instances = await tiffaDesktop.getInstances(); } catch {}
+  if (!instances || !Array.isArray(instances)) return map;
+  if (!diskSessions) {
+    try {
+      const r = await tiffaDesktop.listSessions(state.activeProjectDirName);
+      diskSessions = (r && r.sessions) ? r.sessions : (Array.isArray(r) ? r : null);
+    } catch {}
+  }
+  if (!diskSessions) return map;
+  for (const nt of newTabsToMigrate) {
+    // main.js 的 session_switch 拦截可能已把实例 sessionId 从 tempSessionId 迁移到 realSessionId，
+    // 所以精确匹配会失败。兜底：也用 cwd 查找该项目下有 sessionFilePath 的实例。
+    const inst = instances.find(i => i.sessionId === nt.sessionId)
+      || instances.find(i => i.cwd === state.workspacePath && i.sessionFilePath
+          && !state.activeTabMeta.has(i.sessionFilePath));
+    if (inst && inst.sessionFilePath) {
+      const realSession = diskSessions.find(rs => {
+        const norm = s => s ? s.replace(/\//g, '\\').toLowerCase() : '';
+        return norm(rs.path) === norm(inst.sessionFilePath);
+      });
+      if (realSession) {
+        const oldPath = nt.path;
+        const newPath = realSession.path;
+        map[oldPath] = newPath;
+        if (state.sessionModelMap[oldPath]) {
+          state.sessionModelMap[newPath] = state.sessionModelMap[oldPath];
+          delete state.sessionModelMap[oldPath];
+          saveModelMap();
+        }
+        if (state.sessionAgentRunning.has(oldPath)) {
+          state.sessionAgentRunning.set(newPath, state.sessionAgentRunning.get(oldPath));
+          state.sessionAgentRunning.delete(oldPath);
+        }
+        if (state.sessionMessageCache.has(oldPath)) {
+          state.sessionMessageCache.set(newPath, state.sessionMessageCache.get(oldPath));
+          state.sessionMessageCache.delete(oldPath);
+        }
+        state.activeSessionPaths.delete(oldPath);
+        state.activeSessionPaths.add(newPath);
+        if (state.activeTabMeta.has(oldPath)) {
+          state.activeTabMeta.set(newPath, state.activeTabMeta.get(oldPath));
+          state.activeTabMeta.delete(oldPath);
+        }
+        if (state.autoNamedSessions.has(oldPath)) {
+          state.autoNamedSessions.delete(oldPath);
+          state.autoNamedSessions.add(newPath);
+        }
+        // 补全 state.sessions 条目自身的路径/sessionId（关键：loadSessions 内联版漏了，
+        // 否则 __new__ 条目长期残留、切回仍走 __new__ 分支提前 return）
+        const ns = state.sessions.find(s => s.path === oldPath);
+        if (ns) {
+          ns.path = newPath;
+          const realSid = extractSessionId(newPath);
+          if (realSid) ns.sessionId = realSid;
+        }
+        if (state.activeSessionPath === oldPath) {
+          state.activeSessionPath = newPath;
+          state.activeSessionId = extractSessionId(newPath) || nt.sessionId;
+        }
+      }
+    }
+  }
+  renderSessionTabs();
+  refreshTreeSelection();
+  return map;
 }
 
 // ── Input ──

@@ -2,7 +2,7 @@
 name: canvas-design
 description: Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations.
 name_cn: "创意海报设计"
-description_cn: "程序化视觉设计（非AI生图）：几何图形、排版、抽象艺术海报。需要真实感照片/人物/实景时走 image-gen-router，本 skill 只做代码绘制的视觉设计。"
+description_cn: "程序化视觉设计（非AI生图）：几何图形、排版、抽象艺术海报。**实现必须基于 shared-visual-components 组件库拼装**（先 read skill://shared-visual-components，选布局/主题/组件，禁止从零手写 CSS）。需要真实感照片/人物/实景时走 image-gen-router。"
 license: Complete terms in LICENSE.txt
 ---
 
@@ -118,13 +118,39 @@ Output the final result as a single, downloadable .pdf or .png file, alongside t
 
 ---
 
+## COMPONENT LIBRARY OVERRIDE (强制覆盖)
+
+**CANVAS CREATION 必须基于 shared-visual-components 组件库拼装，禁止从零手写 CSS。**
+
+执行顺序（不可跳步）：
+
+1. **先 read `skill://shared-visual-components`** 读取组件库 SKILL.md 和 `registry.json`
+2. **选布局**：从 `layouts/` 选模板（海报/落地页/演示文稿），作为页面骨架
+3. **选主题**：从 `themes/` 选 12 套主题之一，在 `<body data-theme="<主题id>">` 设置
+4. **拼组件**：从 `components/` 复制需要的组件片段（hero/card/data/text 等）
+5. **替换占位符**：把 {TITLE}、{SUBTITLE} 等替换为实际内容
+6. **微调**：只改 CSS 变量（颜色/字号/间距），不重写样式
+
+仅在现有组件完全无法满足需求时，才允许手写少量补充 CSS（不超过页面样式的 20%）。
+
+引入方式（每个 HTML 必须）：
+```html
+<link rel="stylesheet" href="$PORTABLE_ROOT/skills/shared-visual-components/core/reset.css">
+<link rel="stylesheet" href="$PORTABLE_ROOT/skills/shared-visual-components/core/variables.css">
+<link rel="stylesheet" href="$PORTABLE_ROOT/skills/shared-visual-components/core/utils.css">
+<link rel="stylesheet" href="$PORTABLE_ROOT/skills/shared-visual-components/themes/{THEME}.css">
+<body data-theme="{THEME}">
+```
+
+---
+
 ## FINAL STEP
 
 **IMPORTANT**: The user ALREADY said "It isn't perfect enough. It must be pristine, a masterpiece if craftsmanship, as if it were about to be displayed in a museum."
 
 **CRITICAL**: To refine the work, avoid adding more graphics; instead refine what has been created and make it extremely crisp, respecting the design philosophy and the principles of minimalism entirely. Rather than adding a fun filter or refactoring a font, consider how to make the existing composition more cohesive with the art. If the instinct is to call a new function or draw a new shape, STOP and instead ask: "How can I make what's already here more of a piece of art?"
 
-Take a second pass. Go back to the code and refine/polish further to make this a philosophically designed masterpiece.
+Take a second pass. Go back to the code and refine/polish further to make this a philosophically designed masterpiece. 精修阶段仍遵循组件库约束：优先调整 CSS 变量和组件组合，不推翻重建。
 
 ## MULTI-PAGE OPTION
 
