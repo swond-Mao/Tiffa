@@ -121,4 +121,5 @@ data/agent/computer-use-enabled
 # Skill 渲染缓冲（临时产物）
 skills/*/project/*_buffer.png
 skills/*/*_buffer.png
+skills/dashiai-ppt/project/*.png
 Desktop.ini
