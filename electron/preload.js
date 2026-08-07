@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   steer: (message, sessionId) => ipcRenderer.invoke('tiffa:steer', message, sessionId),
   followUp: (message, sessionId) => ipcRenderer.invoke('tiffa:followUp', message, sessionId),
   extensionResponse: (id, value, sessionId) => ipcRenderer.invoke('tiffa:extensionResponse', id, value, sessionId),
+  rendererLog: (tag, msg) => ipcRenderer.send('renderer:log', tag, msg),
   compact: () => ipcRenderer.invoke('tiffa:compact'),
   command: (type, payload) => ipcRenderer.invoke('tiffa:command', type, payload),
 

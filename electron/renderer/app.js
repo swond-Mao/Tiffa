@@ -118,9 +118,11 @@ const state = {
   expandedProjects: new Set(),  // 树中已展开的项目 dirName
   activeTabMeta: new Map(),     // path -> {dirName, title, firstMessage, messageCount, sessionId, lastActiveAt} 跨项目 tab 元数据
   autoNamedSessions: new Set(), // 已自动豆包重命名过的会话 path（防重复触发）
-  // 待用户输入的 extension_ui_request 事件（ask/confirm/select/input），按 sessionId 索引。
-  // 切换会话时收起抽屉、切回时恢复，避免 ask 抽屉丢失导致的假死。
-  pendingExtUI: new Map(), // sessionId -> event
+  // ── 全局 ask 队列（参考 dim oh-my-pi-UI 的 uiQueue）──
+  // 所有会话的 extension_ui_request（editor/select/confirm/input）入同一队列，
+  // 队列头常显（与当前活跃会话无关），应答后出队自动进下一个。
+  // 不再"隐藏后台 ask、等切回时恢复"——彻底消除"切走丢卡片"这类 bug。
+  uiQueue: [], // Array<event> 按 id 去重，插入序=展示序
   workspacePath: '',
   // 每个对话记住的模型 { provider, modelId }
   sessionModelMap: {},
@@ -183,6 +185,14 @@ const state = {
   preparingTimers: new Map(),      // path -> setTimeout 句柄（15s 超时兜底释放锁）
 };
 
+// 会话 DOM 缓存上限 3：长会话 innerHTML 可达 5-20MB，10 份缓存 = 50-200MB 堆内存
+function trimSessionMessageCache() {
+  while (state.sessionMessageCache.size > 3) {
+    const oldest = state.sessionMessageCache.keys().next().value;
+    state.sessionMessageCache.delete(oldest);
+  }
+}
+
 // 从 sessionPath 提取 sessionId（UUID）
 // sessionPath 格式: .../sessions/<dir>/<timestamp>_<uuid>.jsonl
 function extractSessionId(sessionPath) {
@@ -190,6 +200,11 @@ function extractSessionId(sessionPath) {
   const match = sessionPath.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
   return match ? match[1] : null;
 }
+// 诊断日志：落 data/logs/renderer.log（ask 抽屉等疑难排查），静默失败不影响 UI
+function dbgLog(tag, msg) {
+  try { tiffaDesktop.rendererLog(tag, String(msg)); } catch {}
+}
+
 // 反查：通过 sessionId 找到对应的 sessionPath（用于后台事件路由）
 function findSessionPathById(sessionId) {
   if (!sessionId) return null;
@@ -250,7 +265,7 @@ function refreshTreeSelection() {
     el.classList.toggle('active', path === state.activeSessionPath);
     el.classList.toggle('open', !!path && state.activeSessionPaths.has(path));
     // 同样回退到路径 UUID，防止 sid 残留临时随机 UUID（与 renderSessionTabs 一致）
-    el.classList.toggle('pending-ask', (!!(sid && state.pendingExtUI.has(sid)) || !!(pid && state.pendingExtUI.has(pid))));
+    el.classList.toggle('pending-ask', hasPendingAsk(sid) || hasPendingAsk(pid));
   });
   // 项目 active 态
   document.querySelectorAll('.project-item').forEach(el => {
@@ -422,21 +437,17 @@ async function ensureProjectContext(dirName) {
   stopStallCheck();
   if (project.cwd !== state.workspacePath) {
     updateStatus('切换项目...');
-    try {
-      const result = await tiffaDesktop.activateInstance(project.cwd);
-      if (result.error) {
-        addNotice('error', `切换项目失败: ${result.error}`);
-        updateStatus('就绪');
-        return false;
+    // 直接设置 workspace 路径（不依赖实例）：历史显示、文件树、审批模式等都只需路径，
+    // 不需要等项目级 Bun 实例就绪。实例激活放到后台，避免阻塞历史渲染（几十秒）。
+    state.workspacePath = project.cwd;
+    state.fileTreeRoot = null;
+    // 后台激活项目级实例（fire-and-forget）：就绪后仅回填 tiffaReady。
+    // 对话级实例由 switchToSession 的 activateSession 单独激活，发消息不受影响。
+    tiffaDesktop.activateInstance(project.cwd).then(result => {
+      if (!result.error && state.workspacePath === project.cwd) {
+        state.tiffaReady = result.ready !== false;
       }
-      state.workspacePath = result.cwd || project.cwd;
-      state.fileTreeRoot = null;
-      state.tiffaReady = result.ready !== false;
-    } catch (err) {
-      addNotice('error', `切换项目失败: ${err.message}`);
-      updateStatus('就绪');
-      return false;
-    }
+    }).catch(() => {});
   }
   state.activeProjectDirName = dirName;
   restoreApprovalMode(state.workspacePath);
@@ -885,6 +896,45 @@ function showIdentityModal(prefillAi, prefillUser) {
   }, 0);
 }
 
+// ── 欢迎页预加载：利用遮罩空闲时间预载数据，进入后切换秒开 ──
+// 预载内容：① 所有已打开 tab 的会话历史  ② 所有项目的会话列表
+// 使用节流顺序加载（每次间隔 100ms）避免 IPC 洪水
+function preloadDuringWelcome() {
+  // ① 预载已打开 tab 的会话历史（排除当前活跃和 __new__）
+  const historyTargets = [...state.activeSessionPaths]
+    .filter(p => p !== state.activeSessionPath && !p.startsWith('__new__'))
+    .slice(0, 8);  // 上限与最大实例数对齐
+  let histIdx = 0;
+  const loadNextHistory = () => {
+    if (histIdx >= historyTargets.length) return;
+    const p = historyTargets[histIdx++];
+    if (state.historyCache.has(p)) { loadNextHistory(); return; }
+    tiffaDesktop.loadSessionHistory(p).then(res => {
+      if (res && !res.error && res.messages) {
+        state.historyCache.set(p, res.messages);
+      }
+    }).catch(e => console.warn('[preload] 历史预载失败:', e.message))
+      .finally(() => setTimeout(loadNextHistory, 100));  // 节流：100ms 间隔
+  };
+  loadNextHistory();
+
+  // ② 预载所有项目的会话列表（避免展开时懒加载等待）
+  const projTargets = state.projects.filter(p => p.dirName);
+  let projIdx = 0;
+  const loadNextProject = () => {
+    if (projIdx >= projTargets.length) return;
+    const dirName = projTargets[projIdx++].dirName;
+    if (state.projectSessions[dirName]) { loadNextProject(); return; }
+    tiffaDesktop.listSessions(dirName).then(res => {
+      if (res && !res.error && res.sessions) {
+        state.projectSessions[dirName] = res.sessions;
+      }
+    }).catch(e => console.warn('[preload] 会话列表预载失败:', e.message))
+      .finally(() => setTimeout(loadNextProject, 100));  // 节流：100ms 间隔
+  };
+  loadNextProject();
+}
+
 // ── Initialize ──
 async function init() {
   // 启动时刻，用于计算各阶段时间
@@ -892,17 +942,17 @@ async function init() {
 
   // ── 启动剧本：字幕 + 进度条按固定节奏播放，与真实加载完全解耦 ──
   // 无论后端快慢，观感永远是"字幕一句句过 + 进度条匀速走"。
-  // 剧本固定 11 秒播完：4 句字幕各 2 秒（最后一句 8s，停顿 0.3s 后主题词渐显），进度条 11 秒匀速到 95%。
+  // 剧本固定 11.5 秒播完：4 句字幕各 2 秒（最后一句 8.5s，停顿 0.8s 后主题词渐显），进度条 11.5 秒匀速到 95%。
   // 风格与欢迎页 mottos 对齐（文艺向），按"夜→晨的苏醒"递进，主题词压轴浮现。
   const SCRIPT = [
     { label: '夜色将尽，晨光初透', end: 2000 },
     { label: '静水深流，暗涌潜行', end: 4000 },
     { label: '行囊在肩，天地为卷', end: 6000 },
-    { label: '灯火已明，门扉待启', end: 8000 },
+    { label: '灯火已明，门扉待启', end: 8500 },
   ];
-  const SCRIPT_DURATION = 11000;
-  // 末句「门扉待启」停留 0.3s 后，主题词才舒缓渐显（先读完末句，再交接）
-  const TITLE_REVEAL_DELAY = 300;
+  const SCRIPT_DURATION = 11500;
+  // 末句「门扉待启」停留 0.8s 后，主题词才舒缓渐显（先读完末句，再交接）
+  const TITLE_REVEAL_DELAY = 800;
   const _progressBar = document.getElementById('startupProgressBar');
   const _statusEl = document.getElementById('startupStatus');
   const _titleEl = document.querySelector('.startup-title');
@@ -1016,8 +1066,11 @@ async function init() {
     // ── 多对话实例事件路由（严格模式） ──
     if (state.activeSessionId != null) {
       // session_switch 必须透传：CLI 分配真实 sessionId 后，_sessionId 已更新为真实值，
-      // 与渲染层的临时 sessionId 不匹配，但此事件是迁移 __new__ tab 的唯一途径，不能过滤
-      if (event._sessionId !== state.activeSessionId && event.type !== 'session_switch') {
+      // 与渲染层的临时 sessionId 不匹配，但此事件是迁移 __new__ tab 的唯一途径，不能过滤。
+      // extension_ui_request 必须透传：阻塞型审批请求内核无限等待，后台会话发出的 ask
+      // 若在此被丢弃会导致模型永久卡死（切走对话后审批不弹、回来模型不响应）。
+      if (event._sessionId !== state.activeSessionId && event.type !== 'session_switch'
+          && event.type !== 'extension_ui_request') {
         // 非当前对话（含项目级 _sessionId=null）：仅同步后台状态，不渲染
         if (event._sessionId != null) {
           if (event.type === 'agent_start' || event.type === 'prompt_result') {
@@ -1041,7 +1094,9 @@ async function init() {
       }
     } else {
       // 无活跃会话（刚切项目未选对话）：按 cwd 过滤，只接受项目级事件
-      if (event._cwd && state.workspacePath && event._cwd !== state.workspacePath) {
+      // （extension_ui_request 豁免：阻塞型审批不可丢，否则后台实例死等卡死）
+      if (event._cwd && state.workspacePath && event._cwd !== state.workspacePath
+          && event.type !== 'extension_ui_request') {
         return;
       }
     }
@@ -1072,6 +1127,11 @@ async function init() {
   await yieldFrame();
   await loadProjects();
   await yieldFrame();
+
+  // ── 欢迎页预加载：利用 11.5s 遮罩时间预载会话历史和项目会话列表 ──
+  // 遮罩期间 IPC 通道空闲，提前加载后进入界面切换对话可秒开。
+  // 使用节流顺序加载避免 IPC 洪水。
+  preloadDuringWelcome();
 
   const ready = await tiffaDesktop.isReady();
   if (ready) {
@@ -1125,20 +1185,7 @@ async function init() {
     // 等遮罩过渡(1s)与星光溶出(1.2s)都走完再移除，避免未完全隐去就被硬拽掉
     await new Promise(r => setTimeout(r, 1400));
     overlay.remove();
-
-    // 预载其余已打开对话的历史（进入后切换 tab 秒开）：
-    // 不阻塞进入，异步后台预载
-    if (state.tiffaReady) {
-      const preloadTargets = [...state.activeSessionPaths]
-        .filter(p => p !== state.activeSessionPath && !p.startsWith('__new__'))
-        .slice(0, 8);  // 上限与最大实例数对齐
-      preloadTargets.forEach(p => {
-        if (state.historyCache.has(p)) return;
-        tiffaDesktop.loadSessionHistory(p).then(res => {
-          if (res && !res.error && res.messages) state.historyCache.set(p, res.messages);
-        }).catch(e => console.warn('[init] 预载对话失败:', p, e.message));
-      });
-    }
+    // 历史预载已在欢迎页期间完成（preloadDuringWelcome），此处不再重复
   }
   // 遮罩已在上方等待消息加载完成，无需重渲染；仅当消息区确实为空时显示欢迎页
   if (dom.messages.children.length === 0) showWelcome();
@@ -1155,37 +1202,8 @@ function handleEvent(event) {
   // 记录事件时间，用于卡住检测
   state.lastEventTime = Date.now();
 
-  // 多实例事件路由：对话级实例(_sessionId 非空)的事件按 sessionId 路由。
-  // 非当前活跃对话的后台实例事件，只更新该对话的 sessionAgentRunning 映射，
-  // 不污染全局 state.agentRunning / 不渲染到当前 DOM（切回时从 JSONL 补全内容）。
-  // 例外 1：extension_ui_request 是阻塞型审批请求，丢弃会导致后台实例死等卡死，
-  // 必须透传给 handleExtensionUI 处理（响应时带 sessionId 路由回原实例）。
-  // 例外 2：session_switch 是 __new__ tab 迁移的唯一途径，必须透传。
-  if (event._sessionId && state.activeSessionId && event._sessionId !== state.activeSessionId
-      && event.type !== 'session_switch') {
-    const bgPath = findSessionPathById(event._sessionId);
-    if (event.type === 'agent_start' || (event.type === 'prompt_result' && event.agentInvoked)) {
-      if (bgPath) state.sessionAgentRunning.set(bgPath, true);
-      renderSessionTabs();
-      return;
-    } else if (event.type === 'agent_end') {
-      if (bgPath) {
-        state.sessionAgentRunning.set(bgPath, false);
-        // 后台对话结束也触发自动重命名（路径已迁移且未被命名过时）
-        const bgSess = state.sessions.find(s => s.path === bgPath);
-        if (bgSess && !bgPath.startsWith('__new__') && !state.autoNamedSessions.has(bgPath)) {
-          autoRenameWithLightModel(bgSess);
-        }
-      }
-      renderSessionTabs();
-      return;
-    } else if (event.type !== 'extension_ui_request') {
-      // 其他后台事件（message_*/tool_* 等）：不渲染、不改全局状态
-      return;
-    }
-    // extension_ui_request 透传：阻塞型审批请求丢弃会导致后台实例死等卡死，
-    // 必须交给下方 handleExtensionUI 处理（响应时带 _sessionId 路由回原实例）
-  }
+  // 多实例事件路由已统一在 onEvent 外层守卫完成（后台会话的 agent_start/agent_end
+  // 同步状态后直接 return；session_switch 与 extension_ui_request 豁免透传）。
 
   switch (event.type) {
     case 'ready':
@@ -2070,11 +2088,7 @@ async function selectProject(dirName) {
       html: dom.messages.innerHTML,
       scrollPos: dom.messages.scrollTop,
     });
-    // 上限 3：长会话 innerHTML 可达 5-20MB，10 份缓存 = 50-200MB 堆内存
-    if (state.sessionMessageCache.size > 3) {
-      const oldest = state.sessionMessageCache.keys().next().value;
-      state.sessionMessageCache.delete(oldest);
-    }
+    trimSessionMessageCache();
   }
 
   // 保存旧实例的 agentRunning 状态
@@ -2462,10 +2476,7 @@ function setupSessionTabs() {
           html: dom.messages.innerHTML,
           scrollPos: dom.messages.scrollTop,
         });
-        if (state.sessionMessageCache.size > 3) {
-          const oldest = state.sessionMessageCache.keys().next().value;
-          state.sessionMessageCache.delete(oldest);
-        }
+        trimSessionMessageCache();
       }
       if (state.activeSessionPath) {
         state.sessionAgentRunning.set(state.activeSessionPath, state.agentRunning);
@@ -2680,13 +2691,10 @@ function renderSessionTabs() {
     tab.className = 'session-tab';
     if (meta.path === state.activeSessionPath) tab.classList.add('active');
     if (state.sessionAgentRunning.get(meta.path)) tab.classList.add('running');
-    // 徽标匹配：优先用 meta.sessionId，并回退到路径 UUID（防止迁移/重启恢复时
-    // meta.sessionId 残留临时随机 UUID 导致与 pendingExtUI 的 key=路径UUID 不匹配，
-    // 从而「待回复」徽标不显示）。与 restorePendingExtUI 的 candidateSessionIds 思路一致。
+    // 徽标判定：会话（sessionId 或路径 UUID）在全局 uiQueue 中有未应答 ask 即亮。
     const tabPathId = (meta.path && !meta.path.startsWith('__new__')) ? extractSessionId(meta.path) : null;
-    const hasPendingAsk = !!(meta.sessionId && state.pendingExtUI.has(meta.sessionId))
-      || !!(tabPathId && state.pendingExtUI.has(tabPathId));
-    if (hasPendingAsk) tab.classList.add('pending-ask');
+    const hasAsk = hasPendingAsk(meta.sessionId) || hasPendingAsk(tabPathId);
+    if (hasAsk) tab.classList.add('pending-ask');
     const isPreparing = state.preparingNewSessions.has(meta.path);
     if (isPreparing) tab.classList.add('preparing');
     const title = meta.title || '新对话';
@@ -2695,7 +2703,7 @@ function renderSessionTabs() {
       <span class="session-tab-name">${escapeHtml(title.length > 12 ? title.substring(0, 12) + '…' : title)}</span>
       ${msgCount > 0 ? `<span class="session-tab-msgcount">${msgCount}</span>` : ''}
       ${isPreparing ? `<span class="session-tab-ask preparing-badge" title="新对话准备中">准备中</span>` : ''}
-      ${hasPendingAsk ? `<span class="session-tab-ask" title="正在等待你的回复">待回复</span>` : ''}
+      ${hasAsk ? `<span class="session-tab-ask" title="正在等待你的回复">待回复</span>` : ''}
       <span class="session-tab-close" title="关闭标签（不删除对话）">&#10005;</span>`;
     tab.title = title;
     tab.dataset.dirname = meta.dirName || '';
@@ -2781,7 +2789,7 @@ async function switchToSession(sessionPath) {
   if (state.sessionSwitching) return;
   state.sessionSwitching = true;
   updateInputState();
-  hideExtModal(); // 切走时收起旧会话的 ask 抽屉（pending 已记录，切回时恢复）
+  // 全局 ask 队列：队列头常显，切换会话不隐藏（不再"切走收起、切回恢复"）
 
   // 后台新建对话的 __new__ tab：内核 session_switch 已把它重命名为真实路径，
   // 但渲染层 session_switch 处理器只在「当前活跃 tab 是 __new__」时才迁移，
@@ -2870,10 +2878,7 @@ async function switchToSession(sessionPath) {
         html: dom.messages.innerHTML,
         scrollPos: dom.messages.scrollTop,
       });
-      if (state.sessionMessageCache.size > 3) {
-        const oldest = state.sessionMessageCache.keys().next().value;
-        state.sessionMessageCache.delete(oldest);
-      }
+      trimSessionMessageCache();
     }
 
     // __new__ tab 还没写盘，不能 loadHistory，但可以从缓存恢复
@@ -2929,7 +2934,10 @@ async function switchToSession(sessionPath) {
     }
 
     // 先渲染历史（从文件系统读取，不依赖 Tiffa ready）
-    const cached = state.sessionMessageCache.get(sessionPath);
+    // 仅当 agent 正在运行时才使用 DOM 缓存（后台事件持续写入 DOM，缓存是新鲜的）；
+    // agent 已停止时缓存可能是旧的（后台事件未渲染到 DOM 就切走了），必须从 JSONL 重新加载。
+    const agentWasRunning = state.sessionAgentRunning.get(sessionPath);
+    const cached = agentWasRunning ? state.sessionMessageCache.get(sessionPath) : null;
     if (cached && cached.html && cached.html.trim()) {
       if (state.welcomePhase === 'showing') {
         setTimeout(() => {
@@ -2966,9 +2974,9 @@ async function switchToSession(sessionPath) {
   // 恢复目标对话的 agentRunning 状态（每个对话独立跟踪）
   state.agentRunning = state.sessionAgentRunning.get(sessionPath) || false;
   updateInputState();
-  if (state.agentRunning) {
-    updateStatus('运行中...');
-  }
+  // 无论空闲/运行中都必须刷新全局状态标签：否则上一次（如后台 bash）残留的
+  // "bash"/"思考中" 会停留在标签上，切回来误判为卡死（实际早已结束可正常发送）。
+  updateStatus(state.agentRunning ? '运行中...' : '就绪');
 
   // 激活对话级实例（独立进程，切换不干扰其他对话）
   // 使用 await 确保实例就绪后再允许用户发送消息，避免发给未 ready 的进程
@@ -3011,7 +3019,11 @@ async function switchToSession(sessionPath) {
   refreshTreeSelection();  // 树中当前会话高亮/标记同步
   state.sessionSwitching = false;
   updateInputState();
-  restorePendingExtUI(targetSessionId);  // 切回会话时恢复其 pending ask 抽屉（无则隐藏）
+  // 重置队列头标记，强制 renderUiQueue 重新展示当前 ask 弹窗
+  // （否则 _uiQueueActiveId 与队列头 id 相同 → displayUiRequest 被跳过 → 切回后弹窗不显示）
+  _uiQueueActiveId = null;
+  renderUiQueue();  // 全局 ask 队列：队列头常显，切换会话后仍展示（无则隐藏）
+  dbgLog('ask', `switchToSession done, path=${(sessionPath || '').slice(-50)} targetSessionId=${targetSessionId} activeSessionId=${state.activeSessionId}`);
   restoreTodoPhases();  // 恢复目标会话的 Todo 面板
 }
 
@@ -3330,11 +3342,14 @@ function handleMessageUpdate(message, assistantEvent) {
         break;
       }
       state.currentTextBuffer += assistantEvent.delta;
-      updateAssistantContent(state.currentTextBuffer);
+      // 节流渲染：每个 delta 全量 markdown+DOM 重建是 O(n²)，长输出会卡；
+      // 80ms 节流 + 流式期无 hljs 高亮，text_end 再做完整高亮渲染
+      scheduleStreamRender();
       scrollToBottom();
       break;
     case 'text_end':
       state.currentTextBuffer = assistantEvent.content || state.currentTextBuffer;
+      cancelStreamRender();
       updateAssistantContent(state.currentTextBuffer);
       break;
     case 'thinking_start': {
@@ -3461,12 +3476,32 @@ function createAssistantMessageElement() {
   return div;
 }
 
-function updateAssistantContent(rawText) {
+// ── 流式渲染节流：text_delta 高频到达，全量重渲染合并到 80ms 一次 ──
+let _streamRenderTimer = null;
+function scheduleStreamRender() {
+  if (_streamRenderTimer) return;
+  _streamRenderTimer = setTimeout(() => {
+    _streamRenderTimer = null;
+    if (state.currentAssistantEl) {
+      // fast=true：流式期用 markedNoHighlight（代码块进入视口再懒高亮）
+      updateAssistantContent(state.currentTextBuffer, true);
+      scrollToBottom();
+    }
+  }, 80);
+}
+function cancelStreamRender() {
+  if (_streamRenderTimer) { clearTimeout(_streamRenderTimer); _streamRenderTimer = null; }
+}
+
+function updateAssistantContent(rawText, fast = false) {
   if (!state.currentAssistantEl) return;
   const body = state.currentAssistantEl.querySelector('.message-body');
   if (!body) return;
   const text = applyOutputFixes(rawText);
-  body.innerHTML = sanitizeHtml(tiffaDesktop.marked(text));
+  // fast：流式期不做 hljs 同步高亮（每 delta 全量高亮是主要开销），
+  // 由 codeBlockObserver 视口懒高亮 + text_end 完整渲染兜底
+  const html = fast ? tiffaDesktop.markedNoHighlight(text) : tiffaDesktop.marked(text);
+  body.innerHTML = sanitizeHtml(html);
   enhanceCodeBlocks(body);
 }
 
@@ -3564,6 +3599,8 @@ function enhanceCodeBlocks(container) {
 }
 
 function finalizeAssistantMessage() {
+  // 取消未触发的节流渲染，避免用已清空的 buffer 白跑一次
+  cancelStreamRender();
   // AI 消息结束，加复制按钮
   if (state.currentAssistantEl) {
     const header = state.currentAssistantEl.querySelector('.message-header');
@@ -3792,6 +3829,7 @@ function showModalInput(title, prefill) {
     bodyEl.appendChild(textarea);
 
     overlay.classList.remove('hidden');
+    dbgLog('ask', 'modal shown: showModalInput');
     textarea.focus();
 
     const cleanup = () => {
@@ -3824,6 +3862,9 @@ function showModalSelect(title, options) {
     const bodyEl = document.getElementById('extModalBody');
     let btnCancel = document.getElementById('extModalCancel');
     let btnOk = document.getElementById('extModalOk');
+    // 重置 OK 按钮可见性：上一次 showModalSelect 可能隐藏了它，
+    // 若切换会话导致 cleanup 未执行，hidden 状态会残留到下次调用
+    btnOk.classList.remove('hidden');
     // 切换恢复时会被重复调用；先剥离残留监听器，避免一次回答触发两次 response
     btnOk.replaceWith(btnOk.cloneNode(true));
     btnCancel.replaceWith(btnCancel.cloneNode(true));
@@ -3856,6 +3897,7 @@ function showModalSelect(title, options) {
     btnOk.classList.add('hidden');
 
     overlay.classList.remove('hidden');
+    dbgLog('ask', 'modal shown: showModalSelect');
 
     const cleanup = () => {
       overlay.classList.add('hidden');
@@ -3900,6 +3942,7 @@ function showModalConfirm(title, message) {
     bodyEl.innerHTML = `<div style="color:var(--text-secondary);white-space:pre-wrap;">${escapeHtml(message || '')}</div>`;
 
     overlay.classList.remove('hidden');
+    dbgLog('ask', 'modal shown: showModalConfirm');
 
     const cleanup = () => {
       overlay.classList.add('hidden');
@@ -3920,64 +3963,109 @@ function showModalConfirm(title, message) {
   });
 }
 
-function handleExtensionUI(event) {
-  const { id, method } = event;
-  // 多实例：审批响应必须带回发请求的实例 sessionId，否则会发给当前活跃实例（可能已切换）
-  const ssid = event._sessionId || null;
-  const resp = (value) => tiffaDesktop.extensionResponse(id, value, ssid);
+// ═══════════════════════════════════════════════════════════════
+// 全局 ask 队列（参考 dim oh-my-pi-UI：所有会话 ask 入同一队列、队列头常显）
+// ═══════════════════════════════════════════════════════════════
 
-  // 交互型请求（ask/confirm/select/input）记录到 pendingExtUI，供切换会话后恢复；
-  // 非交互型（setWidget/notify/setStatus/...）即时确认，不记录。
-  const INTERACTIVE = ['editor', 'select', 'confirm', 'input'];
-  if (ssid && INTERACTIVE.includes(method)) {
-    state.pendingExtUI.set(ssid, event);
-    // 立即刷新 tab/树标记，让用户看到「待回复」（即便此刻不弹框）
+// 某会话是否有未应答 ask（tab/树徽标用）。key 可以是 sessionId 或 sessionPath。
+function hasPendingAsk(key) {
+  if (!key) return false;
+  return state.uiQueue.some(q => {
+    const qPath = q._sessionPath || '';
+    const qSid = q._sessionId || '';
+    return qSid === key || qPath === key || extractSessionId(qPath) === key;
+  });
+}
+
+// 入队（按 id 去重，插入序=展示序）
+function enqueueUi(req) {
+  if (!req || !req.id) return;
+  if (state.uiQueue.some(q => q.id === req.id)) return;
+  state.uiQueue.push(req);
+  dbgLog('ask', `enqueueUi id=${req.id} method=${req.method} ssid=${req._sessionId} sp=${req._sessionPath} queue=${state.uiQueue.length}`);
+  renderSessionTabs();
+  refreshTreeSelection();
+}
+
+// 出队（应答 / cancel 后移除对应请求）
+function dequeueUi(id) {
+  const before = state.uiQueue.length;
+  state.uiQueue = state.uiQueue.filter(q => q.id !== id);
+  if (state.uiQueue.length !== before) {
+    dbgLog('ask', `dequeueUi id=${id} queue=${state.uiQueue.length}`);
     renderSessionTabs();
     refreshTreeSelection();
   }
-  // 用户回应后：清除 pending 并刷新标记
-  const done = (payload) => {
-    if (ssid) {
-      state.pendingExtUI.delete(ssid);
-      renderSessionTabs();
-      refreshTreeSelection();
-    }
-    resp(payload);
-  };
+}
 
-  // 后台会话的 ask：仅保留 pending，等用户切到该会话时（restorePendingExtUI）再弹，
-  // 避免盖住当前活跃界面导致误触或丢失。
-  if (ssid && ssid !== state.activeSessionId) {
-    return;
+// 当前正在展示的队列头 id（防止同一请求被重复渲染，把用户已输入的文字冲掉）
+let _uiQueueActiveId = null;
+
+// 展示队列头：队列非空则弹 uiQueue[0]（与当前活跃会话无关），空则隐藏抽屉。
+// 这是整个模型的核心——不存在"后台 ask 被藏起来等切回恢复"，因此不存在丢失。
+function renderUiQueue() {
+  const head = state.uiQueue[0];
+  if (head) {
+    if (_uiQueueActiveId !== head.id) {
+      _uiQueueActiveId = head.id;
+      displayUiRequest(head);
+    }
+  } else {
+    _uiQueueActiveId = null;
+    hideExtModal();
   }
+}
 
+// 队列头来源会话标注：非当前会话的 ask，标题前加【来自「会话名」】，让用户知道谁在问。
+function sessionTagOf(event) {
+  const sp = event._sessionPath;
+  if (!sp || state.activeSessionPath === sp) return '';
+  const sess = state.sessions.find(s => s.path === sp);
+  const title = (sess && (sess.title || sess.firstMessage)) || (state.activeTabMeta.get(sp) || {}).title || '';
+  return title ? `【来自「${title}」】` : '';
+}
+
+// 展示单个 ask 请求（队列头）并等待用户应答；应答后回源会话进程并出队、进下一个。
+function displayUiRequest(event) {
+  const { id, method } = event;
+  const ssid = event._sessionId || null;
+  const resp = (value) => tiffaDesktop.extensionResponse(id, value, ssid);
+  const done = (payload) => {
+    resp(payload);
+    dequeueUi(id);
+    _uiQueueActiveId = null;
+    renderUiQueue();
+  };
+  const tag = sessionTagOf(event);
+  const title = (tag ? tag + ' ' : '') + (event.title || (method === 'confirm' ? '确认' : method === 'select' ? '请选择' : '请输入'));
   switch (method) {
-    case 'editor': {
-      // 编辑器输入（ask 工具等）
-      showModalInput(event.title || '请输入', event.prefill || '').then(v => {
-        done(v !== null ? { value: v } : { cancelled: true });
-      });
+    case 'editor':
+      showModalInput(title, event.prefill || '').then(v => done(v !== null ? { value: v } : { cancelled: true }));
       break;
-    }
     case 'select': {
       const opts = event.options || [];
-      showModalSelect(event.title || '请选择', opts).then(value => {
-        done((value !== null && value !== undefined) ? { value } : { cancelled: true });
-      });
+      showModalSelect(title, opts).then(value => done((value !== null && value !== undefined) ? { value } : { cancelled: true }));
       break;
     }
-    case 'confirm': {
-      showModalConfirm(event.title, event.message).then(result => {
-        done(result ? { confirmed: true } : { cancelled: true });
-      });
+    case 'confirm':
+      showModalConfirm(title, event.message).then(result => done(result ? { confirmed: true } : { cancelled: true }));
       break;
-    }
-    case 'input': {
-      showModalInput(event.title || '请输入', event.placeholder || '').then(v => {
-        done(v !== null ? { value: v } : { cancelled: true });
-      });
+    case 'input':
+      showModalInput(title, event.placeholder || '').then(v => done(v !== null ? { value: v } : { cancelled: true }));
       break;
-    }
+    default:
+      console.warn('[Extension UI] 未处理的交互 method:', method);
+      resp({ confirmed: true }); // 兜底响应，避免内核侧死等
+      dequeueUi(id);
+      _uiQueueActiveId = null;
+      renderUiQueue();
+  }
+}
+
+// 非交互型 extension_ui_request：即时处理，不入队、不弹窗。
+function handleNonInteractiveUi(event, id, ssid) {
+  const resp = (value) => tiffaDesktop.extensionResponse(id, value, ssid);
+  switch (event.method) {
     case 'setWidget':
       // 终端 UI 控件展示（ask 工具的交互面板等），桌面端不需要渲染，直接确认
       resp({ confirmed: true });
@@ -3987,14 +4075,17 @@ function handleExtensionUI(event) {
       resp({ confirmed: true });
       break;
     case 'setStatus':
-      updateStatus(event.statusText || '');
+      // 仅当前活跃会话的状态字符串写入全局标签，避免后台会话的 setStatus
+      // （如 "bash"/"思考中"）污染当前视图的状态显示。与 config_update /
+      // session_info_update 的 _sessionId 守护规则一致。项目级(_sessionId=null)
+      // 且当前正停留在项目级视图时也允许写入。
+      if (!ssid || !state.activeSessionId || ssid === state.activeSessionId) {
+        updateStatus(event.statusText || '');
+      }
       resp({ confirmed: true });
       break;
     case 'setTitle':
       document.title = `Tiffa - ${event.title || ''}`;
-      resp({ confirmed: true });
-      break;
-    case 'cancel':
       resp({ confirmed: true });
       break;
     case 'open_url':
@@ -4016,58 +4107,54 @@ function handleExtensionUI(event) {
       resp({ confirmed: true });
       break;
     default:
-      console.warn('[Extension UI] 未处理的 method:', method);
+      console.warn('[Extension UI] 未处理的 method:', event.method);
       resp({ confirmed: true }); // 兜底响应，避免内核侧死等
   }
 }
 
-// 隐藏 ask/confirm 抽屉（不 resolve，保留内核侧的等待，切回会话时再恢复）
+// 入口：交互型（editor/select/confirm/input）入全局队列并展示队列头；
+// cancel 移除对应请求；其余非交互型即时处理。
+function handleExtensionUI(event) {
+  const { id, method } = event;
+  const ssid = event._sessionId || null;
+  dbgLog('ask', `handleExtensionUI id=${id} method=${method} ssid=${ssid} sp=${event._sessionPath} active=${state.activeSessionId} queue=${state.uiQueue.length}`);
+
+  if (method === 'cancel') {
+    // cancel：关闭/移除对应请求（可能已在队列里，也可能 targetId 指向其它）
+    dequeueUi(event.targetId || id);
+    dequeueUi(id);
+    renderUiQueue();
+    return;
+  }
+
+  const INTERACTIVE = ['editor', 'select', 'confirm', 'input'];
+  if (INTERACTIVE.includes(method)) {
+    // 所有会话的 ask 统一入全局队列——不再隐藏后台 ask，队列头常显
+    enqueueUi(event);
+    renderUiQueue();
+    return;
+  }
+
+  handleNonInteractiveUi(event, id, ssid);
+}
+
+// 隐藏 ask/confirm 抽屉（队列为空时调用；不 resolve，内核侧等待仍在）
 function hideExtModal() {
   const overlay = document.getElementById('extModal');
-  if (overlay) overlay.classList.add('hidden');
-}
-
-// 解析当前活跃会话所有可能的 sessionId 候选：
-// 内核透传的 _sessionId 与路径 UUID 在子会话/特殊路径下可能不完全一致，
-// 恢复 pending ask 时逐一尝试，避免“取不到 pending”导致切回看不到卡片。
-function candidateSessionIds() {
-  const ids = new Set();
-  if (state.activeSessionId) ids.add(state.activeSessionId);
-  const path = state.activeSessionPath;
-  if (path) {
-    const fromPath = extractSessionId(path);
-    if (fromPath) ids.add(fromPath);
-    const sessObj = state.sessions.find(s => s.path === path);
-    if (sessObj && sessObj.sessionId) ids.add(sessObj.sessionId);
-  }
-  return [...ids];
-}
-
-// 切换会话后恢复该会话的 pending ask 抽屉；若无 pending 则确保抽屉隐藏
-function restorePendingExtUI(sessionId) {
-  const candidates = sessionId ? [sessionId, ...candidateSessionIds()] : candidateSessionIds();
-  let ev = null;
-  for (const id of candidates) {
-    ev = state.pendingExtUI.get(id);
-    if (ev) break;
-  }
-  if (ev) {
-    handleExtensionUI(ev); // 重新弹框并等待用户，用户输入后回内核
-  } else {
-    hideExtModal();
+  if (overlay) {
+    if (!overlay.classList.contains('hidden')) dbgLog('ask', 'hideExtModal called while modal VISIBLE (who hid it?)');
+    overlay.classList.add('hidden');
   }
 }
 
 // 兜底迁移：把停留在 __new__ 临时路径、但内核已分配真实 session 的 tab，
 // 通过实例的 sessionFilePath 匹配磁盘会话，迁移为真实路径。
 //
-// 为什么必须存在：渲染层 session_switch 处理器（handleEvent 内）只在「当前活跃 tab 是
-// __new__」时才迁移；后台对话的 __new__ tab 永远不会被它迁移。于是后台新建对话：
-//   ① 徽标用 extractSessionId(__new__路径)=null 匹配不到 pendingExtUI；
-//   ② 切回时命中 switchToSession 的 __new__ 分支提前 return，跳过 restorePendingExtUI，
-//      后台 ask 卡片永不弹出。
-// 这里是唯一能补全 state.sessions 条目自身 .path/.sessionId 的地方（loadSessions 内联版漏了
-// 这一步，导致 __new__ 条目长期残留、切回仍走 __new__ 分支）。
+// 背景（2026-08-07 全局 ask 队列重构后）：卡片展示已不再依赖本迁移（队列头常显，
+// 与活跃会话无关，后台 ask 不会丢）。本迁移现在只负责：
+//   ① tab/树的「待回复」徽标能正确匹配（__new__ 路径提取不出 UUID）；
+//   ② state.sessions 条目自身的 .path/.sessionId 补全（loadSessions 内联版漏了这步，
+//      导致 __new__ 条目长期残留、切回仍走 __new__ 分支）。
 // 返回 { 旧__new__路径: 新真实路径 } 映射，供调用方重新定位会话。
 // diskSessions 可选：调用方已持有磁盘会话列表时传入，避免重复 IPC。
 async function migrateStuckNewTabs(diskSessions = null) {
@@ -4336,8 +4423,9 @@ function renderImagePreview() {
 
 // ── Slash 命令自动补全 ──
 const slashCommands = [
-  { name: '/compact',   desc: '压缩对话上下文' },
-  { name: '/clear',     desc: '清空当前对话' },
+  { name: '/ask',      desc: '提出一个问题，弹卡片回答后发给模型' },
+  { name: '/compact',  desc: '压缩对话上下文' },
+  { name: '/clear',    desc: '清空当前对话' },
   { name: '/model',     desc: '切换模型' },
   { name: '/skills',    desc: '列出可用技能' },
   { name: '/help',      desc: '显示帮助信息' },
@@ -4400,8 +4488,21 @@ function moveSlashSelection(delta) {
 }
 
 async function sendMessage() {
-  const message = dom.input.value.trim();
+  let message = dom.input.value.trim();
   if (!message && state.pendingImages.length === 0) return;
+
+  // ── /ask 命令（渲染层原生入口，解决"手动 /ask 被当普通消息吞掉"）──
+  // 语义：`/ask 你的问题` → 弹卡片（标题=问题）→ 你输入答案 →
+  // 答案作为你的消息发给模型继续。100% 可靠，不依赖模型主动调 ask 工具。
+  if (message.startsWith('/ask') && state.activeSessionPath && state.pendingImages.length === 0) {
+    const question = message.replace(/^\/ask\s*/, '').trim();
+    if (question) {
+      const answer = await showModalInput('问题：' + question, '');
+      if (answer === null || answer.trim() === '') return; // 取消/空答 → 不发送
+      message = answer.trim();
+    }
+  }
+
   // 强制等待：切换会话/模型期间禁止发送，避免消息落入错误实例
   if (state.sessionSwitching) { addNotice('warning', '正在切换会话，请稍候'); return; }
   if (state.modelSwitching) { addNotice('warning', '正在切换模型，请稍候'); return; }
@@ -6406,6 +6507,16 @@ function setupModelSwitcher() {
     e.stopPropagation();
     dom.modelSwitcher.classList.toggle('hidden');
     if (!dom.modelSwitcher.classList.contains('hidden')) {
+      // 动态定位：对齐到触发按钮正下方，避免被可调宽的左侧栏遮挡/错位。
+      // CSS 里的 left/top 仅作 JS 失效时的兜底。
+      const rect = dom.currentModel.getBoundingClientRect();
+      const sw = dom.modelSwitcher;
+      const swWidth = sw.offsetWidth || 320;
+      // 左边对齐按钮，但不超出视口右缘
+      let left = rect.left;
+      if (left + swWidth > window.innerWidth - 8) left = Math.max(8, window.innerWidth - swWidth - 8);
+      sw.style.left = left + 'px';
+      sw.style.top = (rect.bottom + 6) + 'px';
       loadModelSwitcherList();
       const searchInput = document.getElementById('modelSearchInput');
       if (searchInput) {
