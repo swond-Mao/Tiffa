@@ -246,9 +246,11 @@ function refreshTreeSelection() {
   document.querySelectorAll('.session-item').forEach(el => {
     const path = el.dataset.path;
     const sid = el.dataset.sessionid;
+    const pid = path ? extractSessionId(path) : null;
     el.classList.toggle('active', path === state.activeSessionPath);
     el.classList.toggle('open', !!path && state.activeSessionPaths.has(path));
-    el.classList.toggle('pending-ask', !!sid && state.pendingExtUI.has(sid));
+    // 同样回退到路径 UUID，防止 sid 残留临时随机 UUID（与 renderSessionTabs 一致）
+    el.classList.toggle('pending-ask', (!!(sid && state.pendingExtUI.has(sid)) || !!(pid && state.pendingExtUI.has(pid))));
   });
   // 项目 active 态
   document.querySelectorAll('.project-item').forEach(el => {
@@ -2673,7 +2675,12 @@ function renderSessionTabs() {
     tab.className = 'session-tab';
     if (meta.path === state.activeSessionPath) tab.classList.add('active');
     if (state.sessionAgentRunning.get(meta.path)) tab.classList.add('running');
-    const hasPendingAsk = !!(meta.sessionId && state.pendingExtUI.has(meta.sessionId));
+    // 徽标匹配：优先用 meta.sessionId，并回退到路径 UUID（防止迁移/重启恢复时
+    // meta.sessionId 残留临时随机 UUID 导致与 pendingExtUI 的 key=路径UUID 不匹配，
+    // 从而「待回复」徽标不显示）。与 restorePendingExtUI 的 candidateSessionIds 思路一致。
+    const tabPathId = (meta.path && !meta.path.startsWith('__new__')) ? extractSessionId(meta.path) : null;
+    const hasPendingAsk = !!(meta.sessionId && state.pendingExtUI.has(meta.sessionId))
+      || !!(tabPathId && state.pendingExtUI.has(tabPathId));
     if (hasPendingAsk) tab.classList.add('pending-ask');
     const isPreparing = state.preparingNewSessions.has(meta.path);
     if (isPreparing) tab.classList.add('preparing');
@@ -4004,9 +4011,30 @@ function hideExtModal() {
   if (overlay) overlay.classList.add('hidden');
 }
 
+// 解析当前活跃会话所有可能的 sessionId 候选：
+// 内核透传的 _sessionId 与路径 UUID 在子会话/特殊路径下可能不完全一致，
+// 恢复 pending ask 时逐一尝试，避免“取不到 pending”导致切回看不到卡片。
+function candidateSessionIds() {
+  const ids = new Set();
+  if (state.activeSessionId) ids.add(state.activeSessionId);
+  const path = state.activeSessionPath;
+  if (path) {
+    const fromPath = extractSessionId(path);
+    if (fromPath) ids.add(fromPath);
+    const sessObj = state.sessions.find(s => s.path === path);
+    if (sessObj && sessObj.sessionId) ids.add(sessObj.sessionId);
+  }
+  return [...ids];
+}
+
 // 切换会话后恢复该会话的 pending ask 抽屉；若无 pending 则确保抽屉隐藏
 function restorePendingExtUI(sessionId) {
-  const ev = sessionId && state.pendingExtUI.get(sessionId);
+  const candidates = sessionId ? [sessionId, ...candidateSessionIds()] : candidateSessionIds();
+  let ev = null;
+  for (const id of candidates) {
+    ev = state.pendingExtUI.get(id);
+    if (ev) break;
+  }
   if (ev) {
     handleExtensionUI(ev); // 重新弹框并等待用户，用户输入后回内核
   } else {
