@@ -1298,20 +1298,21 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
 
       let force = mode === "force"
 
-      // ── 体积预判：超大会话跳过 snap 线，直降 ③ 旁路结构化总结 ──
-      // 实测：6.6MB JSONL 会话的 CJK 帧渲染产物超 64MB RPC 传输上限，
-      // 内核报 "RPC response exceeded the transport limit" 或
-      // "snapcompact produced too much standing image payload" 后回退内核 LLM 自压（贵且慢）。
-      // 在 hook 入口按待压缩文本体积预判，超阈直接走 ③（回执仅几 KB 文本，天然安全）。
-      // 阈值可用 TIFFA_COMPACT_SNAP_MAX_MB 覆盖，默认 2MB。
+      // ── 帧容量预判：超大会话跳过 snap 线，直降 ③ 旁路结构化总结 ──
+      // 内核实测参数（cli.js）：silver16-bw CJK 帧 cellWidth/cellHeight=16，frameSize=1568
+      // → 每帧容量 = 98列 × 98行 = 9604 字符；帧预算 r$=3000000，单帧 kz2=170000
+      // → 最多 floor(3000000/170000)=17 帧，总容量 ≈ 163268 字符。
+      // 超限后内核抛 "standing image payload exceeds the per-request budget"（无 LLM 兜底）。
+      // 故按待压缩文本的可渲染字符数预判（1 字符 = 1 单元格，与内核同口径），
+      // 留 20% 余量防序列化开销。阈值可用 TIFFA_COMPACT_SNAP_MAX_CHARS 覆盖，默认 130000。
       if (!force) {
-        const snapMaxMB = Math.max(0.5, Number(process.env.TIFFA_COMPACT_SNAP_MAX_MB) || 2)
-        let byteEstimate = 0
-        try { byteEstimate = JSON.stringify(msgs).length } catch {}
-        if (byteEstimate > snapMaxMB * 1024 * 1024) {
+        const snapMaxChars = Math.max(1000, Number(process.env.TIFFA_COMPACT_SNAP_MAX_CHARS) || 130000)
+        let charCount = 0
+        try { charCount = (JSON.stringify(msgs).match(/[^\s"\\{}[\],:]/g) || []).length } catch {}
+        if (charCount > snapMaxChars) {
           force = true
-          log("compact-bypass", `⚠ 待压缩文本 ${(byteEstimate / 1048576).toFixed(1)}MB 超 ${snapMaxMB}MB 阈值，snap 帧产物将爆 64MB RPC 上限 -> 跳过 ①② 直降 ③`)
-          writeCompactRoute("claude-route", `体积预判降级：待压缩文本超 ${snapMaxMB}MB，跳过 snap 线直走 ③ 旁路结构化摘要`)
+          log("compact-bypass", `⚠ 待压缩文本约 ${charCount} 字符超 ${snapMaxChars} 阈值（内核 17 帧总容量 ≈163268 字符），将爆 3MB 帧预算 -> 跳过 ①② 直降 ③`)
+          writeCompactRoute("claude-route", `帧容量预判降级：待压缩文本超 ${snapMaxChars} 字符，跳过 snap 线直走 ③ 旁路结构化摘要`)
         }
       }
 
