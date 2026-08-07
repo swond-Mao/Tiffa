@@ -3752,8 +3752,14 @@ function showModalInput(title, prefill) {
     const overlay = document.getElementById('extModal');
     const titleEl = document.getElementById('extModalTitle');
     const bodyEl = document.getElementById('extModalBody');
-    const btnOk = document.getElementById('extModalOk');
-    const btnCancel = document.getElementById('extModalCancel');
+    let btnOk = document.getElementById('extModalOk');
+    let btnCancel = document.getElementById('extModalCancel');
+    // 切换恢复时 showModalInput 会被重复调用；先剥离残留监听器，
+    // 否则一次回答会触发两次 response（内核收到重复回复）
+    btnOk.replaceWith(btnOk.cloneNode(true));
+    btnCancel.replaceWith(btnCancel.cloneNode(true));
+    btnOk = document.getElementById('extModalOk');
+    btnCancel = document.getElementById('extModalCancel');
 
     titleEl.textContent = title || '请输入';
     bodyEl.innerHTML = '';
@@ -3793,8 +3799,13 @@ function showModalSelect(title, options) {
     const overlay = document.getElementById('extModal');
     const titleEl = document.getElementById('extModalTitle');
     const bodyEl = document.getElementById('extModalBody');
-    const btnCancel = document.getElementById('extModalCancel');
-    const btnOk = document.getElementById('extModalOk');
+    let btnCancel = document.getElementById('extModalCancel');
+    let btnOk = document.getElementById('extModalOk');
+    // 切换恢复时会被重复调用；先剥离残留监听器，避免一次回答触发两次 response
+    btnOk.replaceWith(btnOk.cloneNode(true));
+    btnCancel.replaceWith(btnCancel.cloneNode(true));
+    btnOk = document.getElementById('extModalOk');
+    btnCancel = document.getElementById('extModalCancel');
 
     titleEl.textContent = title || '请选择';
     bodyEl.innerHTML = '';
@@ -3854,8 +3865,13 @@ function showModalConfirm(title, message) {
     const overlay = document.getElementById('extModal');
     const titleEl = document.getElementById('extModalTitle');
     const bodyEl = document.getElementById('extModalBody');
-    const btnOk = document.getElementById('extModalOk');
-    const btnCancel = document.getElementById('extModalCancel');
+    let btnOk = document.getElementById('extModalOk');
+    let btnCancel = document.getElementById('extModalCancel');
+    // 切换恢复时会被重复调用；先剥离残留监听器，避免一次回答触发两次 response
+    btnOk.replaceWith(btnOk.cloneNode(true));
+    btnCancel.replaceWith(btnCancel.cloneNode(true));
+    btnOk = document.getElementById('extModalOk');
+    btnCancel = document.getElementById('extModalCancel');
 
     titleEl.textContent = title || '确认';
     bodyEl.innerHTML = `<div style="color:var(--text-secondary);white-space:pre-wrap;">${escapeHtml(message || '')}</div>`;
