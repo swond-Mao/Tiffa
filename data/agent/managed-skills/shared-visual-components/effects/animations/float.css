@@ -1,0 +1,15 @@
+/* ============================================================
+   shared-visual-components / effects/animations/float.css
+   悬浮浮动效果（装饰元素/卡片）
+   ============================================================ */
+@keyframes anim-float {
+  0%   { transform: translateY(0); }
+  50%  { transform: translateY(-12px); }
+  100% { transform: translateY(0); }
+}
+.anim-float {
+  animation: anim-float 4s ease-in-out infinite;
+}
+.anim-float-slow {
+  animation: anim-float 6s ease-in-out infinite;
+}

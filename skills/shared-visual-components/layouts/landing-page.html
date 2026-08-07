@@ -1,0 +1,154 @@
+<!-- ============================================================
+  shared-visual-components / layouts/landing-page.html
+  落地页 — 单页介绍/产品页
+  结构：Hero + 特性区 + 数据区 + CTA + 页脚
+  用法：设置 data-theme，替换 {TITLE} 等占位符，
+        可换成组件库中的其他 hero/card 组件
+  ============================================================ -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{TITLE}</title>
+<link rel="stylesheet" href="{BASE}/core/reset.css">
+<link rel="stylesheet" href="{BASE}/core/variables.css">
+<link rel="stylesheet" href="{BASE}/core/utils.css">
+<link rel="stylesheet" href="{BASE}/themes/{THEME}.css">
+<link rel="stylesheet" href="{BASE}/effects/animations/slide-up.css">
+<style>
+  /* Hero */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-primary);
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 60% 50% at 20% 20%, var(--accent-gradient));
+    opacity: 0.12;
+    filter: blur(50px);
+  }
+  .hero-content { position: relative; z-index: 1; max-width: 800px; padding: var(--space-2xl) var(--space-lg); }
+  .hero-kicker { font-size: var(--font-size-sm); letter-spacing: 0.25em; text-transform: uppercase; color: var(--accent); margin-bottom: var(--space-md); font-weight: var(--font-weight-semibold); }
+  .hero-title { font-size: var(--font-size-5xl); font-weight: var(--font-weight-black); line-height: var(--line-height-tight); margin-bottom: var(--space-lg); }
+  .hero-subtitle { font-size: var(--font-size-xl); color: var(--fg-muted); font-weight: var(--font-weight-light); margin-bottom: var(--space-xl); max-width: 560px; margin-left: auto; margin-right: auto; }
+
+  /* 特性区 */
+  .features { padding: var(--space-2xl) var(--space-lg); background: var(--bg-secondary); }
+  .section-title { text-align: center; font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); margin-bottom: var(--space-xl); }
+  .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-lg); max-width: var(--container-max); margin: 0 auto; }
+  .feature-card { background: var(--bg-elevated); border-radius: var(--radius-lg); padding: var(--space-xl); box-shadow: var(--shadow-sm); transition: var(--transition-base); }
+  .feature-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-md); }
+  .feature-icon { font-size: var(--font-size-4xl); margin-bottom: var(--space-md); }
+  .feature-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); margin-bottom: var(--space-sm); }
+  .feature-body { font-size: var(--font-size-base); color: var(--fg-muted); line-height: var(--line-height-normal); }
+
+  /* 数据区 */
+  .stats { padding: var(--space-2xl) var(--space-lg); background: var(--bg-primary); }
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-lg); max-width: var(--container-max); margin: 0 auto; }
+  .stat-item { text-align: center; }
+  .stat-num { font-size: var(--font-size-5xl); font-weight: var(--font-weight-black); font-family: var(--font-mono); line-height: 1; }
+  .stat-label { margin-top: var(--space-sm); font-size: var(--font-size-sm); color: var(--fg-muted); }
+
+  /* CTA 区 */
+  .cta { padding: var(--space-2xl) var(--space-lg); text-align: center; background: var(--accent-gradient); color: #fff; }
+  .cta-title { font-size: var(--font-size-3xl); font-weight: var(--font-weight-black); margin-bottom: var(--space-lg); }
+  .cta-btn { display: inline-block; padding: 14px 36px; border-radius: var(--radius-full); background: #fff; color: var(--fg-primary); font-weight: var(--font-weight-semibold); transition: var(--transition-base); }
+  .cta-btn:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+
+  @media (max-width: 768px) {
+    .features-grid, .stats-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body data-theme="{THEME}">
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-kicker anim-slide-up">{KICKER}</div>
+      <h1 class="hero-title text-gradient anim-slide-up">{TITLE}</h1>
+      <p class="hero-subtitle anim-slide-up">{SUBTITLE}</p>
+      <div>
+        <a href="#features" class="btn anim-slide-up">{CTA_PRIMARY}</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 特性区 -->
+  <section class="features" id="features">
+    <h2 class="section-title">{FEATURES_TITLE}</h2>
+    <div class="features-grid">
+      <div class="feature-card anim-slide-up">
+        <div class="feature-icon">🎨</div>
+        <h3 class="feature-title">{FEATURE1_TITLE}</h3>
+        <p class="feature-body">{FEATURE1_BODY}</p>
+      </div>
+      <div class="feature-card anim-slide-up">
+        <div class="feature-icon">⚡</div>
+        <h3 class="feature-title">{FEATURE2_TITLE}</h3>
+        <p class="feature-body">{FEATURE2_BODY}</p>
+      </div>
+      <div class="feature-card anim-slide-up">
+        <div class="feature-icon">🚀</div>
+        <h3 class="feature-title">{FEATURE3_TITLE}</h3>
+        <p class="feature-body">{FEATURE3_BODY}</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 数据区 -->
+  <section class="stats">
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="stat-num text-gradient">{STAT1_VALUE}</div>
+        <div class="stat-label">{STAT1_LABEL}</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num text-gradient">{STAT2_VALUE}</div>
+        <div class="stat-label">{STAT2_LABEL}</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num text-gradient">{STAT3_VALUE}</div>
+        <div class="stat-label">{STAT3_LABEL}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <h2 class="cta-title">{CTA_TITLE}</h2>
+    <a href="#contact" class="cta-btn">{CTA_BUTTON}</a>
+  </section>
+
+  <!-- 页脚 -->
+  <footer style="padding:var(--space-xl) var(--space-lg);background:var(--bg-secondary);text-align:center;">
+    <p style="font-size:var(--font-size-sm);color:var(--fg-faint);">© {YEAR} {BRAND}. All rights reserved.</p>
+  </footer>
+
+  <!-- 滚动触发动画 -->
+  <script>
+    (function () {
+      if (!("IntersectionObserver" in window)) return;
+      var els = document.querySelectorAll(".anim-slide-up");
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.style.animationDelay = (Array.prototype.indexOf.call(e.target.parentElement.children, e.target) * 0.1) + "s";
+            e.target.classList.add("in-view");
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.2 });
+      els.forEach(function (el) { el.classList.add("scroll"); io.observe(el); });
+    })();
+  </script>
+</body>
+</html>

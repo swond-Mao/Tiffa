@@ -1,0 +1,38 @@
+<!-- ============================================================
+  shared-visual-components / effects/interactions/magnetic-btn.html
+  磁性按钮 — 片段（含 JS，鼠标靠近吸附）
+  用法：<button class="magnetic">按钮</button>
+  ============================================================ -->
+<style>
+  .magnetic {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 28px;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    color: #fff;
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    will-change: transform;
+  }
+</style>
+<button class="magnetic">{TEXT}</button>
+<script>
+  (function () {
+    var els = document.querySelectorAll(".magnetic");
+    els.forEach(function (el) {
+      el.addEventListener("mousemove", function (e) {
+        var r = el.getBoundingClientRect();
+        var x = e.clientX - r.left - r.width / 2;
+        var y = e.clientY - r.top - r.height / 2;
+        el.style.transform = "translate(" + x * 0.3 + "px, " + y * 0.3 + "px)";
+      });
+      el.addEventListener("mouseleave", function () {
+        el.style.transform = "translate(0, 0)";
+      });
+    });
+  })();
+</script>

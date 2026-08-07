@@ -1,0 +1,19 @@
+<!-- ============================================================
+  shared-visual-components / effects/backgrounds/mesh-gradient.html
+  网格渐变背景 — 片段（嵌入 layout 的 body 背景）
+  用法：复制 <div class="mesh-bg"> 到 body 最前
+  ============================================================ -->
+<style>
+  .mesh-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(at 20% 30%, color-mix(in srgb, var(--accent) 30%, transparent) 0, transparent 50%),
+      radial-gradient(at 80% 20%, color-mix(in srgb, var(--accent-2, var(--accent)) 25%, transparent) 0, transparent 50%),
+      radial-gradient(at 70% 80%, color-mix(in srgb, var(--accent) 20%, transparent) 0, transparent 50%),
+      radial-gradient(at 30% 90%, color-mix(in srgb, var(--accent-2, var(--accent)) 20%, transparent) 0, transparent 50%),
+      var(--bg-primary);
+  }
+</style>
+<div class="mesh-bg"></div>

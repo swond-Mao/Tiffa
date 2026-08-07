@@ -150,18 +150,28 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 
 ## Claude 化扩展 (v6.2)
 
-扩展文件：`plugins/claude-mode-extension.ts`（1063 行），通过 `-e` 参数加载。
+扩展文件：`plugins/claude-mode-extension.ts`（1477 行），通过 `-e` 参数加载。
 
 ### 6 个 Hooks
 
 | # | 事件 | 功能 |
 |---|------|------|
 | 0 | `session_start` | 移除 eval/hub 工具 |
-| 1 | `before_agent_start` | 注入 USER.md + PROJECT.md（含脚手架自动生成）+ 静默工具调用计数重置 |
-| 2 | `tool_call` | 危险拦截 + 熔断 + 技能强制 + 静默检测（见第 3 层约束） |
+| 1 | `before_agent_start` | 注入 USER.md + PROJECT.md（含脚手架自动生成）+ 进度聚合（跨天/周/月 → 日报/周报/月报）+ 项目目标推演提示 + 静默工具调用计数重置 |
+| 2 | `tool_call` | 危险拦截 + 熔断 + 技能强制 + 静默检测 + git commit 检测（记录 pendingGitCommit）（见第 3 层约束） |
 | 3 | `session.compacting` | 压缩路由：① 本地视觉 snapcompact → ② 主模型视觉 snapcompact → ③ 旁路模型结构化总结（9 段）→ ④ 内核自压兜底（gap-fill 已废弃） |
 | 4 | `session_stop` | error 续行一次（最多一次，5 秒延迟），其他不干预 |
-| 5 | `tool_result` | 审计日志（JSONL） |
+| 5 | `tool_result` | 审计日志（JSONL）+ git commit 成功 → 读最近会话消息 → 旁路总结 → 写 `.progress/log.md` 流水账 |
+
+### 进度追踪器（Progress Tracker · 2026-08-08）
+
+**功能**：git commit 成功后自动记流水账，跨天/周/月聚合成日报/周报/月报写入 PROJECT.md「进度日志」区，项目目标长期未定时提示推演。
+
+**触发链路**：`tool_call` 检测 `git commit` → 记 `pendingGitCommit` → `tool_result` 确认 bash 成功且未超时（30s）→ `readRecentSessionMessages()` 读当前会话最新 JSONL → `callBypassModel(msgs, PROGRESS_SUMMARY_PROMPT)` 旁路总结 → `appendProgressLog()` 写入 `.progress/log.md`；旁路失败兜底用 commit message（`-m`/`-am`），无则「完成一次提交」。
+
+**存储**：`.progress/log.md`（流水账）+ `.progress/state.json`（lastSeen / lastAggregatedDay / lastAggregatedWeek / lastAggregatedMonth 水位）+ PROJECT.md「进度日志」区（只保留当前层级：有周报删日报，有月报删周报）。
+
+**聚合时机**：每次 `before_agent_start` 调 `aggregateProgress()`，幂等（水位不变不重复聚合）。**项目目标推演**：`buildGoalHint()` 检测「项目目标=暂未确定」+ 有周报/月报 → 注入提示，让模型 ask 用户确认后更新（不自动改写）。
 
 ### 压缩摘要（替代 gap-fill · 2026-08-05 废弃 gap-fill）
 

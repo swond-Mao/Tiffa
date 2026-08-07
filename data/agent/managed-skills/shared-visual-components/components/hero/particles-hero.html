@@ -1,0 +1,107 @@
+<!-- ============================================================
+  shared-visual-components / components/hero/particles-hero.html
+  粒子背景封面 Hero — 依赖 particles.js CDN
+  用法：复制到项目，替换 {TITLE}/{SUBTITLE}，设置 data-theme
+  注意：需要网络加载 particles.js；离线环境请用 gradient-hero
+  ============================================================ -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{TITLE}</title>
+<link rel="stylesheet" href="{BASE}/core/reset.css">
+<link rel="stylesheet" href="{BASE}/core/variables.css">
+<link rel="stylesheet" href="{BASE}/core/utils.css">
+<link rel="stylesheet" href="{BASE}/themes/{THEME}.css">
+<style>
+  #particles-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    overflow: hidden;
+    background: var(--bg-primary);
+  }
+  .hero-content {
+    position: relative;
+    z-index: 1;
+    max-width: 800px;
+    padding: var(--space-2xl) var(--space-lg);
+  }
+  .hero-kicker {
+    font-size: var(--font-size-sm);
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: var(--space-md);
+    font-weight: var(--font-weight-semibold);
+  }
+  .hero-title {
+    font-size: var(--cover-title-size, var(--font-size-5xl));
+    font-weight: var(--font-weight-heading, var(--font-weight-black));
+    line-height: var(--line-height-tight);
+    margin-bottom: var(--space-lg);
+    color: var(--fg-primary);
+  }
+  .hero-subtitle {
+    font-size: var(--cover-subtitle-size, var(--font-size-lg));
+    color: var(--fg-muted);
+    font-weight: var(--font-weight-body, var(--font-weight-light));
+    margin-bottom: var(--space-xl);
+    max-width: 560px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .hero-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-md);
+  }
+</style>
+</head>
+<body data-theme="{THEME}">
+  <section class="hero">
+    <div id="particles-bg"></div>
+    <div class="hero-content">
+      <div class="hero-kicker">{KICKER}</div>
+      <h1 class="hero-title text-gradient">{TITLE}</h1>
+      <p class="hero-subtitle">{SUBTITLE}</p>
+      <div class="hero-cta">
+        <a href="#main" class="btn">{CTA_PRIMARY}</a>
+        <a href="#more" class="btn btn-outline">{CTA_SECONDARY}</a>
+      </div>
+    </div>
+  </section>
+  <main id="main">
+    <!-- 在此处放置你的内容 -->
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
+  <script>
+    particlesJS("particles-bg", {
+      particles: {
+        number: { value: 60, density: { enable: true, value_area: 800 } },
+        color: { value: "var(--accent)" },
+        shape: { type: "circle" },
+        opacity: { value: 0.4, random: true },
+        size: { value: 3, random: true },
+        line_linked: { enable: true, distance: 120, color: "var(--accent)", opacity: 0.2, width: 1 },
+        move: { enable: true, speed: 1.5, direction: "none", random: true }
+      },
+      interactivity: {
+        detect_on: "canvas",
+        events: { onhover: { enable: true, mode: "grab" }, onclick: { enable: true, mode: "push" } },
+        modes: { grab: { distance: 140, line_linked: { opacity: 0.5 } }, push: { particles_nb: 4 } }
+      },
+      retina_detect: true
+    });
+  </script>
+</body>
+</html>

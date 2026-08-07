@@ -1,0 +1,56 @@
+<!-- ============================================================
+  shared-visual-components / components/grid/masonry.html
+  瀑布流 — 片段（CSS columns 实现，无 JS 依赖）
+  用法：复制 <div class="masonry"> 块
+  ============================================================ -->
+<style>
+  .masonry {
+    columns: 3;
+    column-gap: var(--space-md);
+    padding: var(--space-lg);
+  }
+  .masonry-item {
+    break-inside: avoid;
+    margin-bottom: var(--space-md);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    transition: var(--transition-base);
+  }
+  .masonry-item:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
+  .masonry-item img { width: 100%; height: auto; display: block; }
+  .masonry-item .cap { padding: var(--space-md); font-size: var(--font-size-sm); color: var(--fg-muted); }
+  @media (max-width: 768px) {
+    .masonry { columns: 2; }
+  }
+  @media (max-width: 480px) {
+    .masonry { columns: 1; }
+  }
+</style>
+<div class="masonry">
+  <div class="masonry-item">
+    <img src="{IMG1}" alt="">
+    <div class="cap">{CAP1}</div>
+  </div>
+  <div class="masonry-item">
+    <img src="{IMG2}" alt="">
+    <div class="cap">{CAP2}</div>
+  </div>
+  <div class="masonry-item">
+    <img src="{IMG3}" alt="">
+    <div class="cap">{CAP3}</div>
+  </div>
+  <div class="masonry-item">
+    <img src="{IMG4}" alt="">
+    <div class="cap">{CAP4}</div>
+  </div>
+  <div class="masonry-item">
+    <img src="{IMG5}" alt="">
+    <div class="cap">{CAP5}</div>
+  </div>
+  <div class="masonry-item">
+    <img src="{IMG6}" alt="">
+    <div class="cap">{CAP6}</div>
+  </div>
+</div>

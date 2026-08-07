@@ -1,0 +1,107 @@
+<!-- ============================================================
+  shared-visual-components / components/data/chart-container.html
+  数据图表容器 — 多类型（折线/柱状/饼图/雷达）
+  依赖：vendor/chart.umd.min.js（本地，离线可用；无网络也 OK）
+        若无本地文件，自动 fallback 到 jsdelivr CDN
+
+  用法：
+  1. 引入本组件（含 JS 注册 __createChart 全局函数）
+  2. <canvas id="myChart" data-type="line" data-labels='["周一","周二"]' data-series='[{"label":"A","data":[12,19]}]'></canvas>
+  3. 页面加载后调用 window.__createChart("myChart")
+
+  支持的 data-type：line(折线) / bar(柱状) / doughnut(环形饼图) / radar(雷达)
+  可配置 data-options='{"height":120}' 调整图表高度
+  ============================================================ -->
+<script src="{BASE}/vendor/chart.umd.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';document.head.appendChild(s);"></script>
+<script>
+(function () {
+  if (typeof window.__chartCreated === "undefined") {
+    window.__chartCreated = true;
+  }
+
+  window.__createChart = function (canvasId) {
+    if (typeof Chart === "undefined") {
+      console.warn("Chart.js 未加载");
+      return;
+    }
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+
+    var type = canvas.getAttribute("data-type") || "line";
+    var labels = [];
+    try { labels = JSON.parse(canvas.getAttribute("data-labels") || "[]"); } catch (e) { labels = []; }
+    var series = [];
+    try { series = JSON.parse(canvas.getAttribute("data-series") || "[]"); } catch (e) { series = []; }
+    var opts = {};
+    try { opts = JSON.parse(canvas.getAttribute("data-options") || "{}"); } catch (e) { opts = {}; }
+
+    var cs = getComputedStyle(document.body);
+    var accent = cs.getPropertyValue("--accent").trim() || "#4f46e5";
+    var accent2 = cs.getPropertyValue("--accent-2").trim() || "#06b6d4";
+    var fgMuted = cs.getPropertyValue("--fg-muted").trim() || "#6b7280";
+
+    // 为 series 应用主题色（未指定颜色时）
+    var palettes = [accent, accent2, "#f59e0b", "#ef4444", "#10b981", "#8b5cf6"];
+    series.forEach(function (s, i) {
+      if (!s.borderColor) s.borderColor = palettes[i % palettes.length];
+      if (!s.backgroundColor) s.backgroundColor = palettes[i % palettes.length] + (type === "doughnut" ? "" : "33");
+    });
+
+    var config = { type: type, data: { labels: labels, datasets: series } };
+
+    if (type === "doughnut") {
+      config.options = {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom", labels: { color: fgMuted } }
+        }
+      };
+    } else if (type === "radar") {
+      config.options = {
+        responsive: true,
+        plugins: { legend: { labels: { color: fgMuted } } },
+        scales: {
+          r: { ticks: { color: fgMuted, backdropColor: "transparent" }, grid: { color: fgMuted + "22" }, angleLines: { color: fgMuted + "22" } }
+        }
+      };
+    } else {
+      config.options = {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: fgMuted } }
+        },
+        scales: {
+          x: { ticks: { color: fgMuted }, grid: { color: fgMuted + "22" } },
+          y: { ticks: { color: fgMuted }, grid: { color: fgMuted + "22" } }
+        }
+      };
+    }
+
+    if (opts.height) canvas.style.height = opts.height + "px";
+    new Chart(canvas, config);
+  };
+
+  // 自动初始化页面中带 data-auto 的图表
+  document.addEventListener("DOMContentLoaded", function () {
+    var charts = document.querySelectorAll("canvas[data-auto]");
+    charts.forEach(function (c) { window.__createChart(c.id); });
+  });
+})();
+</script>
+
+<!-- 使用示例（取消注释并放到你的页面）：
+<canvas id="lineChart" data-auto data-type="line"
+  data-labels='["1月","2月","3月","4月"]'
+  data-series='[{"label":"收入","data":[120,190,160,240],"fill":true,"tension":0.4},{"label":"支出","data":[80,110,90,130]}]'>
+</canvas>
+
+<canvas id="barChart" data-auto data-type="bar"
+  data-labels='["产品A","产品B","产品C"]'
+  data-series='[{"label":"销量","data":[42,68,35]}]'>
+</canvas>
+
+<canvas id="donutChart" data-auto data-type="doughnut"
+  data-labels='["研发","市场","销售","运营"]'
+  data-series='[{"label":"预算分配","data":[40,25,20,15]}]'>
+</canvas>
+-->

@@ -1,0 +1,53 @@
+<!-- ============================================================
+  shared-visual-components / components/data/progress-bar.html
+  动画进度条 — 片段（含 JS）
+  用法：<div class="progress-bar" data-value="80"></div>
+  ============================================================ -->
+<style>
+  .progress-bar {
+    width: 100%;
+    height: 10px;
+    background: color-mix(in srgb, var(--fg-muted) 15%, transparent);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin: var(--space-sm) 0;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    width: 0;
+    background: var(--accent-gradient);
+    border-radius: var(--radius-full);
+    transition: width 1s ease;
+  }
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: var(--font-size-sm);
+    color: var(--fg-muted);
+    margin-bottom: var(--space-xs);
+  }
+</style>
+<div class="progress-label"><span>{LABEL1}</span><span>{VALUE1}%</span></div>
+<div class="progress-bar" data-value="{VALUE1}"><div class="fill"></div></div>
+<div class="progress-label"><span>{LABEL2}</span><span>{VALUE2}%</span></div>
+<div class="progress-bar" data-value="{VALUE2}"><div class="fill"></div></div>
+<script>
+  (function () {
+    var bars = document.querySelectorAll(".progress-bar");
+    var fill = function (bar) {
+      var v = Number(bar.dataset.value || 0);
+      var f = bar.querySelector(".fill");
+      if (f) f.style.width = v + "%";
+    };
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { fill(e.target); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.3 });
+      bars.forEach(function (b) { io.observe(b); });
+    } else {
+      bars.forEach(fill);
+    }
+  })();
+</script>
