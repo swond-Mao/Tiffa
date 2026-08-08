@@ -4,6 +4,8 @@
 
 **与万物对弈，伴时间同行**
 
+> 🔗 **本项目基于 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi) 深度定制** —— 并非从零手搓，而是在 OMP 这套开源 AI 编码智能体框架之上做改造。上游仓库：<https://github.com/can1357/oh-my-pi> · 官网：<https://omp.sh>
+
 ---
 
 你有没有过这种感觉——
@@ -22,7 +24,7 @@
 
 ## 它是什么
 
-Tiffa 是一个**完全便携、绝对隐私**的本地 AI 助手，基于 `@oh-my-pi/pi-coding-agent` v17.0.7，做了七层改造，套了一层 Electron 桌面壳。
+Tiffa 是一个**完全便携、绝对隐私**的本地 AI 助手。它**基于开源框架 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi)（v17.0.7）** 深度定制——在 `@oh-my-pi/pi-coding-agent` 这套 AI 编码智能体内核之上做了七层改造，再套一层 Electron 桌面壳。上游官网：<https://omp.sh>。
 
 **三个核心特点：**
 
@@ -216,6 +218,12 @@ start-tiffa.bat       # TUI/WebUI/RPC 终端模式
 ```
 
 七层合在一起，效果是：**Q1_0 极限量化模型也能稳定干活。**
+
+---
+
+## 致谢
+
+Tiffa 站在 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi) 的肩膀上。它是一套开源的 AI 编码智能体框架，Tiffa 的全部能力都生长在这套内核之上。如果你喜欢 Tiffa，请也去上游点个 Star ⭐，让更多人知道 OMP：<https://github.com/can1357/oh-my-pi> · 官网 <https://omp.sh>。
 
 ---
 
