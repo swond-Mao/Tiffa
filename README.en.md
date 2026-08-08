@@ -4,6 +4,8 @@
 
 **Play against all things; walk with time as your companion.**
 
+> 🔗 **Built on [oh my pi (OMP)](https://github.com/can1357/oh-my-pi)** — Tiffa is a deep customization of the open-source OMP AI coding-agent framework, not built from scratch. Upstream: <https://github.com/can1357/oh-my-pi> · Site: <https://omp.sh>
+
 ---
 
 Have you ever felt this way—
@@ -22,7 +24,7 @@ What matters even more — it leaves no trace anywhere. Pull the drive and take 
 
 ## What It Is
 
-Tiffa is a **fully portable, absolutely private** local AI assistant. Built on `@oh-my-pi/pi-coding-agent` v17.0.7, with seven layers of modification wrapped in an Electron desktop shell.
+Tiffa is a **fully portable, absolutely private** local AI assistant. It is a **deep customization of the open-source [oh my pi (OMP)](https://github.com/can1357/oh-my-pi) framework (v17.0.7)** — seven layers of modification built on top of the `@oh-my-pi/pi-coding-agent` coding-agent core, wrapped in an Electron desktop shell. Upstream site: <https://omp.sh>.
 
 **Three core traits:**
 
@@ -216,6 +218,12 @@ A bare model is like an unsharpened knife. Tiffa's seven-layer architecture is t
 ```
 
 All seven layers together produce this effect: **even a Q1_0 extreme-quantized model works stably.**
+
+---
+
+## Credits
+
+Tiffa stands on the shoulders of [oh my pi (OMP)](https://github.com/can1357/oh-my-pi) — an open-source AI coding-agent framework that provides the entire core Tiffa is built upon. If you like Tiffa, please also star the upstream project ⭐ so more people discover OMP: <https://github.com/can1357/oh-my-pi> · Site: <https://omp.sh>.
 
 ---
 
