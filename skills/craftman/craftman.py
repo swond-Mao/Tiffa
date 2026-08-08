@@ -49,9 +49,109 @@ def eprint(*a, **kw):
 
 TEMPLATE_PLAN = {
     "analysis": "由 AI 提供需求分析",
+    "user_decisions": {
+        "gen_image": False,
+        "image_style": "",
+        "theme": "",
+        "confirmed": False
+    },
     "plan": [],
     "merge_instruction": "由 AI 提供合并方案"
 }
+
+# 弱模型防呆：关键决策字段，AI 不能代填，必须由用户亲手输入
+THEMES = ["neumorphism", "aurora", "code", "glass-candy", "chromatic",
+          "dark-atlas", "research-white", "black-gold", "navy-magazine",
+          "gold-index", "growth", "sonic-neon"]
+
+
+def validate_plan_structure(plan_data):
+    """校验 plan 结构（plan 非空、每步有 skill/prompt）。
+    结构错误无法通过交互修复，直接退出（返回码 2）。"""
+    errors = []
+    plan = plan_data.get("plan", [])
+    if not isinstance(plan, list) or not plan:
+        errors.append("plan 为空（至少需要一个步骤）")
+    else:
+        for step in plan:
+            if not step.get("skill"):
+                errors.append(f"步骤 {step.get('step', '?')} 缺少 skill")
+            if not step.get("prompt"):
+                errors.append(f"步骤 {step.get('step', '?')} 缺少 prompt")
+    if errors:
+        eprint("[craftman] ⛔ plan 结构校验失败，拒绝执行：")
+        for e in errors:
+            eprint(f"  - {e}")
+        sys.exit(2)
+
+
+def check_decisions(plan_data):
+    """返回缺失的决策项列表（可交互修复）。"""
+    missing = []
+    ud = plan_data.get("user_decisions")
+    if not isinstance(ud, dict):
+        return ["gen_image", "image_style", "theme", "confirmed"]
+    if "gen_image" not in ud:
+        missing.append("gen_image")
+    elif ud.get("gen_image") is True and not ud.get("image_style"):
+        missing.append("image_style")
+    if "theme" not in ud or not ud.get("theme"):
+        missing.append("theme")
+    if "confirmed" not in ud or ud.get("confirmed") is not True:
+        missing.append("confirmed")
+    return missing
+
+
+def collect_decisions(plan_data):
+    """交互式采集缺失的决策。用户亲手 input() 输入，AI 无法代答。
+    返回合并后的完整 user_decisions dict。"""
+    ud = dict(plan_data.get("user_decisions") or {})
+    missing = check_decisions(plan_data)
+
+    print("\n[craftman] ⚠ plan.json 缺少关键决策，需要你亲手确认（AI 无法代答）：")
+
+    if "gen_image" in missing:
+        while True:
+            ch = input("  要不要生成图片？(y/n): ").strip().lower()
+            if ch in ("y", "yes"):
+                ud["gen_image"] = True
+                break
+            if ch in ("n", "no"):
+                ud["gen_image"] = False
+                break
+            print("    请输入 y 或 n")
+
+    if ud.get("gen_image") is True and "image_style" in missing:
+        while True:
+            st = input("  选生图风格 (krea2/ernie/klein/zimage): ").strip().lower()
+            if st in ("krea2", "ernie", "klein", "zimage"):
+                ud["image_style"] = st
+                break
+            print("    请输入 krea2/ernie/klein/zimage")
+    elif ud.get("gen_image") is False and "image_style" not in ud:
+        ud["image_style"] = ""
+
+    if "theme" in missing:
+        while True:
+            t = input(f"  选 HTML 主题 ({'/'.join(THEMES)}): ").strip().lower()
+            if t in THEMES:
+                ud["theme"] = t
+                break
+            print("    无效主题，请从列表中选择")
+
+    if "confirmed" in missing:
+        while True:
+            ch = input("  确认执行此方案？(Y/n): ").strip().lower()
+            if ch in ("", "y", "yes"):
+                ud["confirmed"] = True
+                break
+            if ch in ("n", "no"):
+                ud["confirmed"] = False
+                break
+            print("    请输入 Y 或 n")
+
+    print("[craftman] 决策已采集：" + json.dumps(ud, ensure_ascii=False))
+    return ud
 
 
 # ── Step 2: Show ───────────────────────
@@ -237,47 +337,55 @@ def merge(plan_data, results, out_dir):
     eprint(f"\n[craftman] 合并输出...")
     outputs = []
 
+    # 按 plan 顺序收集各 skill 结果（results 以步骤序号为 key，同 skill 多步骤不再覆盖）
+    by_skill = {}
     for step in plan:
+        sn = step.get("step", 0)
         sname = step.get("skill", "?")
-        result = results.get(sname)
+        result = results.get(sn)
         if result:
+            by_skill.setdefault(sname, []).append(result)
             outputs.append(f"  [{sname}] {result}")
 
-    # canvas + pptgen → embed canvas into cover
-    pptgen_out = results.get("pptgen")
-    canvas_out = results.get("canvas-design")
-    if pptgen_out and canvas_out and os.path.isfile(pptgen_out) and os.path.isfile(canvas_out):
-        eprint("[craftman]  检测到 pptgen + canvas-design，尝试嵌入封面...")
-        try:
-            with open(pptgen_out, "r", encoding="utf-8") as f:
-                html = f.read()
-            canvas_rel = os.path.relpath(canvas_out, os.path.dirname(pptgen_out))
-            cover_iframe = f'<iframe src="{canvas_rel}" style="width:100%;height:100%;border:none;position:absolute;top:0;left:0;z-index:0"></iframe>'
-            html = html.replace('<div class="slide slide-cover',
-                                f'<div class="slide slide-cover" style="position:relative;overflow:hidden">{cover_iframe}<div style="position:relative;z-index:1"')
+    pptgen_outs = by_skill.get("pptgen", [])
+    canvas_outs = by_skill.get("canvas-design", [])
+    comfyui_outs = by_skill.get("comfyui", [])
 
-            merged_path = out_dir / "merged.html"
-            with open(merged_path, "w", encoding="utf-8") as f:
-                f.write(html)
-            outputs.append(f"  [merged] {merged_path}")
-            eprint(f"[craftman]  封面已嵌入: {merged_path}")
-        except Exception as e:
-            eprint(f"[craftman]  合并失败: {e}")
-
-    # comfyui 图片复制到 pptgen 目录和/或 canvas-design 目录
-    comfyui_out = results.get("comfyui")
-    if comfyui_out and os.path.isfile(comfyui_out):
-        copy_targets = []
-        if pptgen_out:
-            copy_targets.append(Path(pptgen_out).parent)
-        if canvas_out:
-            copy_targets.append(Path(canvas_out).parent)
-        for target_dir in copy_targets:
+    # canvas + pptgen → embed canvas into cover（取第一个组合）
+    if pptgen_outs and canvas_outs:
+        pptgen_out, canvas_out = pptgen_outs[0], canvas_outs[0]
+        if os.path.isfile(pptgen_out) and os.path.isfile(canvas_out):
+            eprint("[craftman]  检测到 pptgen + canvas-design，尝试嵌入封面...")
             try:
-                shutil.copy2(comfyui_out, target_dir / os.path.basename(comfyui_out))
-                eprint(f"[craftman]  图片已复制到 {target_dir.name}")
+                with open(pptgen_out, "r", encoding="utf-8") as f:
+                    html = f.read()
+                canvas_rel = os.path.relpath(canvas_out, os.path.dirname(pptgen_out))
+                cover_iframe = f'<iframe src="{canvas_rel}" style="width:100%;height:100%;border:none;position:absolute;top:0;left:0;z-index:0"></iframe>'
+                html = html.replace('<div class="slide slide-cover',
+                                    f'<div class="slide slide-cover" style="position:relative;overflow:hidden">{cover_iframe}<div style="position:relative;z-index:1"')
+
+                merged_path = out_dir / "merged.html"
+                with open(merged_path, "w", encoding="utf-8") as f:
+                    f.write(html)
+                outputs.append(f"  [merged] {merged_path}")
+                eprint(f"[craftman]  封面已嵌入: {merged_path}")
             except Exception as e:
-                eprint(f"[craftman]  复制图片到 {target_dir.name} 失败: {e}")
+                eprint(f"[craftman]  合并失败: {e}")
+
+    # comfyui 图片逐张复制到 pptgen 目录和/或 canvas-design 目录
+    copy_targets = []
+    for pptgen_out in pptgen_outs:
+        copy_targets.append(Path(pptgen_out).parent)
+    for canvas_out in canvas_outs:
+        copy_targets.append(Path(canvas_out).parent)
+    for comfyui_out in comfyui_outs:
+        if os.path.isfile(comfyui_out):
+            for target_dir in set(copy_targets):
+                try:
+                    shutil.copy2(comfyui_out, target_dir / os.path.basename(comfyui_out))
+                    eprint(f"[craftman]  图片已复制到 {target_dir.name}")
+                except Exception as e:
+                    eprint(f"[craftman]  复制图片到 {target_dir.name} 失败: {e}")
 
     print("\n" + "=" * 60)
     print("输出汇总")
@@ -287,8 +395,8 @@ def merge(plan_data, results, out_dir):
     print()
     print("可点击链接（session_server 4097 服务）:")
     for step in plan:
-        sname = step.get("skill", "?")
-        result = results.get(sname)
+        sn = step.get("step", 0)
+        result = results.get(sn)
         if result and os.path.isfile(result):
             url = "http://localhost:4097/srv/" + urllib.parse.quote(result.replace("\\", "/"))
             print(f"  🔗 [{os.path.basename(result)}]({url})")
@@ -331,9 +439,27 @@ def main():
         print("方案由 AI 根据需求生成，craftman 只做执行。")
         sys.exit(1)
 
+    # 弱模型防呆：先校验结构（错误退出），再检查决策（缺失则交互采集）
+    validate_plan_structure(plan_data)
+    missing = check_decisions(plan_data)
+    if missing:
+        plan_data["user_decisions"] = collect_decisions(plan_data)
+        if plan_data.get("user_decisions", {}).get("confirmed") is not True:
+            print("用户未确认，已取消")
+            return
+
+    # 打印 checklist 提醒（若存在）
+    checklist_path = Path(os.getcwd()) / ".craftman" / "checklist.md"
+    if checklist_path.is_file():
+        eprint(f"\n[craftman] 检测到 checklist: {checklist_path}")
+        eprint("[craftman] 请确认 AI 已逐项打勾：生图？风格？主题？plan？用户确认？")
+
     # Step 2: Show + confirm
     show_plan(plan_data)
-    if args.no_confirm:
+    # --no-confirm 仅在用户已确认过（user_decisions.confirmed=true）时才生效，
+    # 否则强制走交互确认，防止弱模型用 --no-confirm 拆掉最后一道闸门
+    ud = plan_data.get("user_decisions", {})
+    if args.no_confirm and ud.get("confirmed") is True:
         ans = True
     else:
         ans = confirm()
@@ -366,7 +492,8 @@ def main():
         sname = step.get("skill", "?")
         eprint(f"\n[craftman] === 执行步骤 {sn}: {sname} ===")
         r = exec_step(step, out_dir)
-        results[sname] = r
+        # 以步骤序号为 key，避免同 skill 多步骤互相覆盖
+        results[sn] = r
         if r is None and step.get("required", True):
             eprint(f"[craftman]  步骤 {sn} 失败，终止")
             break
