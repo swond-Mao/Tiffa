@@ -1,5 +1,7 @@
 # Tiffa
 
+> English version: [README.en.md](README.en.md) · 中文文档如下。
+
 **与万物对弈，伴时间同行**
 
 ---
