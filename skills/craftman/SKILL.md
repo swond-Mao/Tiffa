@@ -46,6 +46,12 @@ AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传
 ```json
 {
   "analysis": "需求分析",
+  "user_decisions": {
+    "gen_image": true,
+    "image_style": "krea2",
+    "theme": "glass-candy",
+    "confirmed": true
+  },
   "plan": [
     {
       "step": 1,
@@ -58,6 +64,12 @@ AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传
   "merge_instruction": "如何合并"
 }
 ```
+
+**user_decisions 必填（弱模型防呆，缺失则 craftman.py 报错退出）：**
+- `gen_image`: 要不要生图（必须先 ask 用户，不许替用户默认）
+- `image_style`: 生图风格（krea2/ernie/klein/zimage），gen_image=false 时可留空
+- `theme`: HTML 主题（组件库 12 套之一，必须先 ask 用户选，不许自己默认）
+- `confirmed`: 用户是否已确认方案（必须 true，否则 --no-confirm 不生效，强制走交互确认）
 
 ### 路径约定
 
