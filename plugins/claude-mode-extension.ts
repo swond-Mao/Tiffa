@@ -932,7 +932,7 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
   const PROGRESS_LOG_NAME = "log.md"
   const PROGRESS_STATE_NAME = "state.json"
   // 压缩记账 prompt：把本次待压缩会话内容精炼成一行流水账（与压缩摘要同款「数据/指令隔离铁律」）
-  const PROGRESS_COMPACT_PROMPT = `CRITICAL: 只输出纯文本，不要调用任何工具。
+  const PROGRESS_COMPACT_PROMPT = `不要思考。直接输出格式：完成/修复/讨论 <一句话>（不超过 40 字），不要解释。
 
 下面是某次对话压缩前的内容（可能含用户请求、助手回复、工具调用）。请提炼出这次工作会话完成的核心进展，用于项目流水账。
 
@@ -1199,14 +1199,39 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
   }
 
   // 压缩记账：把本次待压缩会话内容精炼成一行流水账，追加到项目 .progress/log.md
+  // 候选 fallback 与 ③ 旁路总结同源：旁路模型（env > bypass-model.json）→ 主模型
+  // 每次尝试都打日志（候选/不可达/成功/失败），失败静默跳过，绝不影响压缩本身
   async function recordCompactProgress(msgs: Record<string, unknown>[]): Promise<void> {
     try {
-      const line = await callBypassModel(msgs, PROGRESS_COMPACT_PROMPT, undefined, 30000)
-      if (line && line.trim()) {
-        appendProgressLog(currentProjectDir(), line.trim().replace(/\s+/g, " ").slice(0, 80))
+      const bypassEp = resolveBypassEndpoint()
+      const mainEp = resolveMainModelEndpoint()
+      const candidates: { baseUrl: string; apiKey: string; model: string }[] = []
+      if (bypassEp && bypassEp.model !== mainEp?.model) candidates.push(bypassEp)
+      if (mainEp) candidates.push(mainEp)
+      if (candidates.length === 0) {
+        log("progress.compact.record.skip", "无可用旁路/主模型 endpoint")
+        return
       }
-    } catch (e: any) {
-      log("progress.compact.record.error", e?.message || String(e))
+      for (const ep of candidates) {
+        log("progress.compact.record.try", `候选 ${ep.model} (${ep.baseUrl})`)
+        const reachable = await probeEndpoint(ep.baseUrl, ep.apiKey)
+        if (!reachable) {
+          log("progress.compact.record.probe-fail", `${ep.model} 不可达 -> next`)
+          continue
+        }
+        const line = await callBypassModel(msgs, PROGRESS_COMPACT_PROMPT, undefined, 30000, ep)
+        if (line && line.trim()) {
+          const text = line.trim().replace(/\s+/g, " ").slice(0, 80)
+          appendProgressLog(currentProjectDir(), text)
+          log("progress.compact.record.ok", `已用 ${ep.model} 写入流水账: ${text}`)
+          return
+        }
+        log("progress.compact.record.empty", `${ep.model} 返回空 -> next`)
+      }
+      log("progress.compact.record.skip", "全部候选失败/空")
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log("progress.compact.record.error", msg)
     }
   }
 

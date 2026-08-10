@@ -105,8 +105,11 @@ Thumbs.db
 # Electron 便携 userData（main.js setPath 重定向后的 %APPDATA%，纯运行时缓存/Local Storage，随包再生，绝不入库）
 data/electron-userdata/
 
-# WorkBuddy 临时草稿
-.workbuddy/temp/
+# WorkBuddy（用户记忆与运行时数据，不入库）
+.workbuddy/
+
+# Qoder（AI 生成的知识库，不入库）
+.qoder/
 
 # 生成产物目录
 output/

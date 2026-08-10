@@ -13,6 +13,8 @@ import urllib.parse
 SKILL_DIR = Path(__file__).parent
 OUT_DIR = Path(os.getcwd()) / "output"  # 输出到当前项目目录，不是技能目录
 SKILLS_DIR = SKILL_DIR.parent
+PORTABLE_ROOT = SKILLS_DIR.parent  # 便携根目录（skills/ 的父目录），用于定位共享工具
+HTML2PNG = PORTABLE_ROOT / "skills" / "shared-visual-components" / "tools" / "html2png.js"
 
 # === Available skills registry ===
 SKILLS = {
@@ -331,6 +333,84 @@ def exec_canvas(prompt, params, out_dir):
 
 # ── Step 4: Merge ──────────────────────
 
+# ── 产物完整性校验（代码级强制）──────
+
+def count_slides(html):
+    """统计 HTML 中的 slide 页面数。"""
+    return len(re.findall(r'<div class="slide ', html))
+
+
+def build_expected_map(plan_data):
+    """按步骤序号建立预期 slide 数量：优先 content_file 的 slides 长度，其次 params.pages。"""
+    m = {}
+    for step in plan_data.get("plan", []):
+        sn = step.get("step", 0)
+        params = step.get("params", {}) or {}
+        cf = params.get("content_file", "")
+        if cf and os.path.isfile(cf):
+            try:
+                with open(cf, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                slides = data.get("slides", [])
+                if slides:
+                    m[sn] = len(slides)
+                    continue
+            except Exception:
+                pass
+        pages = params.get("pages", 0)
+        if pages:
+            m[sn] = int(pages)
+    return m
+
+
+def render_probe(html_path):
+    """渲染级测试：用 html2png.js 截图验证页面能正常渲染。
+    环境缺失（node/浏览器不可用）返回 None（跳过）；渲染失败返回 False。"""
+    try:
+        node = shutil.which("node")
+        if not node or not HTML2PNG.is_file():
+            return None
+        probe_png = Path(str(html_path) + ".probe.png")
+        r = subprocess.run(
+            [node, str(HTML2PNG), str(html_path), "--output", str(probe_png)],
+            capture_output=True, text=True, timeout=120)
+        if r.returncode == 0 and probe_png.is_file():
+            probe_png.unlink(missing_ok=True)
+            return True
+        return False
+    except Exception:
+        return None
+
+
+def verify_html_artifact(path, expected_slides=None, render_check=False):
+    """静态 + 渲染级产物校验。返回 (ok, issues)。
+    静态项（强制）：文件非空、HTML 完整闭合、deck 结构、slide 数量达标。
+    渲染项（自动测试）：截图能正常渲染则通过，环境缺失则跳过。"""
+    issues = []
+    p = Path(path)
+    if not p.is_file():
+        return False, [f"产物不存在: {p}"]
+    if p.stat().st_size == 0:
+        return False, ["产物为空文件"]
+    text = p.read_text(encoding="utf-8", errors="replace")
+    if "</html>" not in text.lower() or not text.rstrip().lower().endswith("</html>"):
+        issues.append("HTML 未闭合（缺少 </html> 结尾）→ 产物可能只有半份")
+    if '<div class="deck"' not in text:
+        issues.append("缺少 .deck 容器结构")
+    n = count_slides(text)
+    if n == 0:
+        issues.append("未找到任何 slide 页面")
+    elif expected_slides and n < expected_slides:
+        issues.append(f"slide 数量不足：期望 {expected_slides} 页，实际仅 {n} 页 → 产物不完整")
+    if render_check:
+        r = render_probe(p)
+        if r is False:
+            issues.append("渲染测试失败：浏览器截图无法正常渲染页面")
+        elif r is None:
+            issues.append("渲染测试跳过：node/浏览器不可用（仅提示，不计失败）")
+    return (len(issues) == 0), issues
+
+
 def merge(plan_data, results, out_dir):
     plan = plan_data.get("plan", [])
 
@@ -387,6 +467,36 @@ def merge(plan_data, results, out_dir):
                 except Exception as e:
                     eprint(f"[craftman]  复制图片到 {target_dir.name} 失败: {e}")
 
+    # 产物完整性校验（代码级强制）：对每个 HTML 产物做静态 + 渲染级检查
+    print("\n" + "=" * 60)
+    print("产物校验")
+    print("=" * 60)
+    verify_failed = False
+    expected_map = build_expected_map(plan_data)
+    verified_paths = set()
+    for step in plan:
+        sn = step.get("step", 0)
+        result = results.get(sn)
+        if not result or not os.path.isfile(result):
+            continue
+        if Path(result).suffix.lower() not in (".html",):
+            continue
+        if str(result) in verified_paths:
+            continue
+        verified_paths.add(str(result))
+        ok, issues = verify_html_artifact(
+            result, expected_slides=expected_map.get(sn), render_check=True)
+        if ok:
+            print(f"  ✅ {Path(result).name}: 校验通过")
+        else:
+            verify_failed = True
+            print(f"  ❌ {Path(result).name}:")
+            for it in issues:
+                print(f"     - {it}")
+            print("     → 产物不完整，建议重新生成（或换更强模型）")
+    if verify_failed:
+        eprint("\n[craftman] ⚠ 存在校验失败的产物，退出码置为 2")
+
     print("\n" + "=" * 60)
     print("输出汇总")
     print("=" * 60)
@@ -401,7 +511,7 @@ def merge(plan_data, results, out_dir):
             url = "http://localhost:4097/srv/" + urllib.parse.quote(result.replace("\\", "/"))
             print(f"  🔗 [{os.path.basename(result)}]({url})")
     print()
-    return outputs
+    return outputs, verify_failed
 
 
 # ── Main ───────────────────────────────
@@ -423,21 +533,31 @@ def main():
             print(f"  {name}: {info['description']} ({info['invoke']})")
         return
 
-    out_dir = Path(args.output) if args.output else OUT_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Step 1: Load plan
+    # Step 1: Load plan（先加载，才能基于 plan 位置推导输出目录）
+    plan_source = None  # plan 文件绝对路径（用于推导输出目录，天然适配盘符变化）
     if args.plan_json:
         plan_data = json.loads(args.plan_json)
         eprint(f"[craftman] 已加载 inline 方案")
     elif args.plan_file:
-        with open(args.plan_file, "r", encoding="utf-8") as f:
+        plan_source = Path(args.plan_file).resolve()
+        with open(plan_source, "r", encoding="utf-8") as f:
             plan_data = json.load(f)
         eprint(f"[craftman] 已加载方案: {args.plan_file}")
     else:
         print("错误: 必须通过 --plan-file 或 --plan-json 提供方案")
         print("方案由 AI 根据需求生成，craftman 只做执行。")
         sys.exit(1)
+
+    # 输出目录：--output 显式指定 > plan 文件所在项目目录 > 当前 cwd/output
+    # 约定：plan 位于 <项目目录>/.craftman/plan.json → 输出 <项目目录>/output
+    if args.output:
+        out_dir = Path(args.output)
+    elif plan_source is not None:
+        out_dir = (plan_source.parent.parent if plan_source.parent.name == ".craftman"
+                   else plan_source.parent) / "output"
+    else:
+        out_dir = OUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # 弱模型防呆：先校验结构（错误退出），再检查决策（缺失则交互采集）
     validate_plan_structure(plan_data)
@@ -499,7 +619,9 @@ def main():
             break
 
     # Step 4: Merge
-    merge(plan_data, results, out_dir)
+    _, verify_failed = merge(plan_data, results, out_dir)
+    if verify_failed:
+        sys.exit(2)
     print("\n完成!")
 
 
