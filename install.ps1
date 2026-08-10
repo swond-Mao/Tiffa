@@ -328,13 +328,15 @@ if (Test-Path $pyExe) {
         Copy-Item -Path $pySrcRoot -Destination $pyDir -Recurse -Force
         Remove-Item $pyExtract -Recurse -Force -ErrorAction SilentlyContinue
         if (-not (Test-Path $pyExe)) { throw "python.exe 未出现在 $pyDir" }
-        # embeddable 需开启 import site 才能用 pip
+        # embeddable 需开启 import site 才能用 pip。
+        # 必须用 .NET 方法读改写：PS 的 Get-Content/Set-Content -Encoding UTF8 会写坏 _pth（加 BOM/丢内容），
+        # 导致 Python 启动报 "Failed to import encodings module"。
         $pth = Join-Path $pyDir "python313._pth"
         if (Test-Path $pth) {
-            $c = Get-Content $pth -Raw
+            $c = [System.IO.File]::ReadAllText($pth)
             if ($c -notmatch "(?m)^import site") {
-                $c = $c -replace "(?m)^#\s*import site", "import site"
-                Set-Content $pth $c -Encoding UTF8
+                $c = $c.Replace("#import site", "import site")
+                [System.IO.File]::WriteAllText($pth, $c)
             }
         }
         # ensurepip（embeddable 可能不含）→ 回退 get-pip.py（官方源；清华镜像已失效返回 404）
