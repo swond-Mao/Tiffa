@@ -203,9 +203,11 @@ if (Test-Path $agentDir) {
             INFO "第 $attempt/3 次尝试 ..."
             Start-Sleep -Seconds 3
         }
+        # 用 cmd /c 直接执行完整命令字符串，绕开 PowerShell 函数参数绑定/引号/splatting 等全部陷阱。
         # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装。
-        # 包名必须用引号包裹：PowerShell 会把 @ 开头裸 token 当 splatting 展开而吞掉参数。
-        $npmCode = Invoke-Npm install '@oh-my-pi/pi-coding-agent' --save --force --loglevel=error
+        $npmCmdLine = "cd /d `"$npmGlobalDir`" && npm install @oh-my-pi/pi-coding-agent --save --force --loglevel=error"
+        cmd /c $npmCmdLine 2>&1 | Out-String | Out-Null
+        $npmCode = $LASTEXITCODE
         if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
