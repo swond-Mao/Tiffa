@@ -151,19 +151,29 @@ if (Test-Path $agentDir) {
     $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
     OK "@oh-my-pi/pi-coding-agent v$ver"
 } else {
-    INFO "安装 Tiffa 内核 ..."
+    INFO "安装 Tiffa 内核（国内镜像，失败自动重试）..."
     $npmGlobalDir = Join-Path $ROOT "npm-global"
     Push-Location $npmGlobalDir
-    try {
-        Invoke-Npm install @oh-my-pi/pi-coding-agent --save --loglevel=error 2>&1 | Out-Null
-        if (-not (Test-Path $agentDir)) { throw "kernel not found" }
+    $installed = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        if ($attempt -gt 1) {
+            INFO "第 $attempt/3 次尝试 ..."
+            Start-Sleep -Seconds 3
+        }
+        $installOut = Invoke-Npm install @oh-my-pi/pi-coding-agent --save --loglevel=error 2>&1
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $agentDir)) {
+            $installed = $true
+            break
+        }
+        Write-Host "    [WARN] npm 安装失败（退出码 $LASTEXITCODE）：$installOut" -ForegroundColor Yellow
+    }
+    if ($installed) {
         $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
         OK "Tiffa 内核 v$ver 安装成功"
-    } catch {
-        FAIL "Tiffa 内核安装失败，请检查网络后重试"
-    } finally {
-        Pop-Location
+    } else {
+        FAIL "Tiffa 内核安装失败：npm install 3 次均失败。请手动执行：cd $ROOT\npm-global && npm install @oh-my-pi/pi-coding-agent --save（需联网），或拷贝源机器 npm-global 目录"
     }
+    Pop-Location
 }
 
 # Step 5: 初始化目录和配置
