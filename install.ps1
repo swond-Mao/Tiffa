@@ -45,11 +45,20 @@ $NPM_CMD = Resolve-Npm
 function Invoke-Npm {
     param([string[]]$Arguments)
     if (-not $NPM_CMD) { INFO "未找到 npm，跳过该命令"; return 1 }
-    if ($NPM_CMD.Contains("|")) {
-        $parts = $NPM_CMD -split '\|'
-        & $parts[0] $parts[1] @Arguments
-    } else {
-        & $NPM_CMD @Arguments
+    # $ErrorActionPreference=Stop 时，npm 写 stderr 会抛 NativeCommandError 终止脚本。
+    # 临时切到 Continue，让 npm 的退出码/输出正常返回，由调用方判断成败。
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        if ($NPM_CMD.Contains("|")) {
+            $parts = $NPM_CMD -split '\|'
+            & $parts[0] $parts[1] @Arguments 2>&1 | Out-String
+        } else {
+            & $NPM_CMD @Arguments 2>&1 | Out-String
+        }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEAP
     }
 }
 
@@ -153,6 +162,24 @@ if (Test-Path $agentDir) {
 } else {
     INFO "安装 Tiffa 内核（国内镜像，失败自动重试）..."
     $npmGlobalDir = Join-Path $ROOT "npm-global"
+    if (-not (Test-Path $npmGlobalDir)) {
+        New-Item -ItemType Directory -Path $npmGlobalDir -Force | Out-Null
+    }
+    # npm install 要求当前目录有 package.json，否则报 ENOENT（Cannot read package.json）
+    $globalPkg = Join-Path $npmGlobalDir "package.json"
+    if (-not (Test-Path $globalPkg)) {
+        '{}' | Set-Content -Path $globalPkg -Encoding UTF8
+    }
+    # 修复 Step 3 产生的残缺 bun 目录：npm install 扫描 node_modules 时若缺 package.json 会报 ENOENT
+    $bunDir = Join-Path $npmGlobalDir "node_modules\bun"
+    if (Test-Path (Join-Path $bunDir "bin\bun.exe")) {
+        $bunPkg = Join-Path $bunDir "package.json"
+        if (-not (Test-Path $bunPkg)) {
+            $bunMeta = @{ name = "bun"; version = "1.3.14"; bin = @{ bun = "bin/bun.exe" } } | ConvertTo-Json
+            Set-Content -Path $bunPkg -Value $bunMeta -Encoding UTF8
+            INFO "已补全 bun package.json（避免 npm ENOENT）"
+        }
+    }
     Push-Location $npmGlobalDir
     $installed = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -160,12 +187,12 @@ if (Test-Path $agentDir) {
             INFO "第 $attempt/3 次尝试 ..."
             Start-Sleep -Seconds 3
         }
-        $installOut = Invoke-Npm install @oh-my-pi/pi-coding-agent --save --loglevel=error 2>&1
-        if ($LASTEXITCODE -eq 0 -and (Test-Path $agentDir)) {
+        $npmCode = Invoke-Npm install @oh-my-pi/pi-coding-agent --save --loglevel=error
+        if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
         }
-        Write-Host "    [WARN] npm 安装失败（退出码 $LASTEXITCODE）：$installOut" -ForegroundColor Yellow
+        Write-Host "    [WARN] npm 安装失败（退出码 $npmCode）" -ForegroundColor Yellow
     }
     if ($installed) {
         $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
