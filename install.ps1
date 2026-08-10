@@ -67,7 +67,7 @@ function Invoke-Npm {
 }
 
 # Step 1: 设置 npm 国内源
-Step 1 5 "设置 npm 国内镜像源"
+Step 1 6 "设置 npm 国内镜像源"
 if (-not $NPM_CMD) {
     FAIL "未找到 npm，请先安装含 npm 的 Node.js：https://nodejs.org/  （便携版请解压到 $ROOT\node\）"
 }
@@ -86,7 +86,7 @@ OK "npm 镜像: $CHINA_NPM"
 OK "Electron 镜像: $CHINA_ELECTRON"
 
 # Step 2: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
-Step 2 5 "检查 Node.js"
+Step 2 6 "检查 Node.js"
 $nodeExe = Join-Path $ROOT "node\node.exe"
 if (Test-Path $nodeExe) {
     $v = & $nodeExe --version 2>$null
@@ -126,7 +126,7 @@ if (Test-Path $nodeExe) {
 }
 
 # Step 3: 安装 Bun
-Step 3 5 "检查 Bun 运行时"
+Step 3 6 "检查 Bun 运行时"
 $bunExe = Join-Path $ROOT "npm-global\node_modules\bun\bin\bun.exe"
 if (Test-Path $bunExe) {
     $bv = & $bunExe --version 2>$null
@@ -158,7 +158,7 @@ if (Test-Path $bunExe) {
 }
 
 # Step 4: 安装 Tiffa 内核
-Step 4 5 "检查 Tiffa 内核"
+Step 4 6 "检查 Tiffa 内核"
 $agentDir = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent"
 if (Test-Path $agentDir) {
     $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
@@ -226,8 +226,44 @@ if (Test-Path $agentDir) {
     Pop-Location
 }
 
-# Step 5: 初始化目录和配置
-Step 5 5 "初始化数据目录和配置文件"
+# Step 5: 安装 Electron 桌面端
+Step 5 6 "检查 Electron 桌面端"
+$electronDir = Join-Path $ROOT "electron"
+$electronExe = Join-Path $electronDir "node_modules\electron\dist\electron.exe"
+if (Test-Path $electronExe) {
+    OK "Electron 桌面端 (已安装)"
+} else {
+    INFO "安装 Electron 桌面端（国内镜像，失败自动重试）..."
+    if (-not (Test-Path (Join-Path $electronDir "package.json"))) {
+        FAIL "缺少 electron\package.json，请确认已 clone 完整仓库"
+    }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $elInstalled = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        if ($attempt -gt 1) {
+            INFO "第 $attempt/3 次尝试 ..."
+            Start-Sleep -Seconds 3
+        }
+        # 用 cmd /c 在 electron 目录执行 npm install（ELECTRON_MIRROR 已设为 npmmirror）
+        $elCmd = "cd /d `"$electronDir`" && npm install --no-save --loglevel=error"
+        cmd /c $elCmd 2>&1 | Out-String | Out-Null
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $electronExe)) {
+            $elInstalled = $true
+            break
+        }
+        Write-Host "    [WARN] Electron 安装失败（退出码 $LASTEXITCODE）" -ForegroundColor Yellow
+    }
+    $ErrorActionPreference = $prevEAP
+    if ($elInstalled) {
+        OK "Electron 桌面端安装成功"
+    } else {
+        FAIL "Electron 安装失败。请手动执行：cd $ROOT\electron && npm install（需联网，ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/）"
+    }
+}
+
+# Step 6: 初始化目录和配置
+Step 6 6 "初始化数据目录和配置文件"
 $dirs = @(
     "data\agent",
     "data\agent\sessions",
