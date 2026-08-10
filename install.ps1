@@ -119,21 +119,28 @@ if (Test-Path $bunExe) {
     $bv = & $bunExe --version 2>$null
     OK "Bun $bv (已安装)"
 } else {
-    INFO "安装 Bun 到项目本地 ..."
-    $npmGlobalDir = Join-Path $ROOT "npm-global"
-    if (-not (Test-Path $npmGlobalDir)) {
-        New-Item -ItemType Directory -Path $npmGlobalDir -Force | Out-Null
-    }
-    Push-Location $npmGlobalDir
+    INFO "安装 Bun 到项目本地（国内镜像直下，绕过 GitHub）..."
+    $bunVer = "1.3.14"
+    $bunZip = Join-Path $env:TEMP "tiffa-bun-$bunVer-win-x64.zip"
+    $bunUrl = "https://registry.npmmirror.com/-/binary/bun/bun-v$bunVer/bun-windows-x64.zip"
     try {
-        Invoke-Npm install bun --save --loglevel=error 2>&1 | Out-Null
-        if (-not (Test-Path $bunExe)) { throw "bun not found" }
+        Invoke-WebRequest -Uri $bunUrl -OutFile $bunZip -UseBasicParsing
+        $extractDir = Join-Path $env:TEMP "tiffa-bun-extract"
+        if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+        Expand-Archive -Path $bunZip -DestinationPath $extractDir -Force
+        # zip 内为 bun-windows-x64/bun.exe，放到 npm 包目录结构 node_modules/bun/bin/
+        $srcExe = Join-Path $extractDir "bun-windows-x64\bun.exe"
+        $dstBin = Join-Path $ROOT "npm-global\node_modules\bun\bin"
+        if (-not (Test-Path $dstBin)) { New-Item -ItemType Directory -Path $dstBin -Force | Out-Null }
+        Copy-Item $srcExe $dstBin -Force
+        if (-not (Test-Path $bunExe)) { throw "bun.exe 未复制到 $dstBin" }
         $bv = & $bunExe --version 2>$null
-        OK "Bun $bv 安装成功"
+        OK "Bun $bv 安装成功 (国内镜像)"
     } catch {
-        FAIL "Bun 安装失败，请检查网络后重试"
+        FAIL "Bun 安装失败：$_ ｜ 可手动下载 $bunUrl 并解压 bun-windows-x64\bun.exe 到 $ROOT\npm-global\node_modules\bun\bin\"
     } finally {
-        Pop-Location
+        if (Test-Path $bunZip) { Remove-Item $bunZip -Force }
+        if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
     }
 }
 
