@@ -58,7 +58,29 @@ Step 1 5 "设置 npm 国内镜像源"
 if (-not $NPM_CMD) {
     FAIL "未找到 npm，请先安装含 npm 的 Node.js：https://nodejs.org/  （便携版请解压到 $ROOT\node\）"
 }
-Invoke-Npm config set registry $CHINA_NPM --location project 2>$null | Out-Null
+# 兼容旧版 npm：--location 是 npm v9+ 参数，旧版（v6/v8）会报 EUSAGE。
+# 先探测 npm 版本，v9+ 用 --location project（只改本项目），旧版退回 --userconfig 本项目配置。
+$npmVer = (& $NPM_CMD --version 2>$null | Out-String).Trim()
+if ($npmVer -match '^v?(\d+)\.') {
+    $npmMajor = [int]$Matches[1]
+    if ($npmMajor -ge 9) {
+        Invoke-Npm config set registry $CHINA_NPM --location project 2>$null | Out-Null
+    } else {
+        $localRc = Join-Path $ROOT ".npmrc"
+        try {
+            "registry=$CHINA_NPM" | Out-File -FilePath $localRc -Encoding UTF8 -Force
+            INFO "npm $npmVer 不支持 --location，已直接写项目 .npmrc"
+        } catch {
+            INFO "写入 .npmrc 失败，稍后步骤会再尝试"
+        }
+    }
+} else {
+    # 无法探测版本（异常 npm），保守只写 .npmrc 不传 --location
+    $localRc = Join-Path $ROOT ".npmrc"
+    try {
+        "registry=$CHINA_NPM" | Out-File -FilePath $localRc -Encoding UTF8 -Force
+    } catch {}
+}
 Invoke-Npm config set registry $CHINA_NPM 2>$null | Out-Null
 $env:ELECTRON_MIRROR = $CHINA_ELECTRON
 # 同时写根 .npmrc（npm + bun 共用）：保证 fastembed-runtime 等原生依赖也从国内拉
