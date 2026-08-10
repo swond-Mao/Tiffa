@@ -43,7 +43,11 @@ function Resolve-Npm {
 $NPM_CMD = Resolve-Npm
 
 function Invoke-Npm {
-    param([string[]]$CmdArgs)
+    param(
+        [Parameter(Position=0)][string]$First,
+        [Parameter(ValueFromRemainingArguments=$true)][string[]]$Rest
+    )
+    $CmdArgs = @($First) + @($Rest)
     if (-not $NPM_CMD) { INFO "未找到 npm，跳过该命令"; return 1 }
     # $ErrorActionPreference=Stop 时，npm 写 stderr 会抛 NativeCommandError 终止脚本。
     # 临时切到 Continue，让 npm 的退出码/输出正常返回，由调用方判断成败。
