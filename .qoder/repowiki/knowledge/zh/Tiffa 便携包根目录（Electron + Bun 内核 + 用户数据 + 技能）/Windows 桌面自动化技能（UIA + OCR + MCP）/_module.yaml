@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: skills_computer_use
+title: Windows 桌面自动化技能（UIA + OCR + MCP）
+scope:
+    - skills/computer-use/SKILL.md
+    - skills/computer-use/computer_use.py
+    - skills/computer-use/computer_use_mcp.py
+    - skills/computer-use/requirements.txt
+    - skills/computer-use/uia_core.py
+source_files: []
+depends_on: []
+related_to:
+    - path: electron_app
+    - path: per_user_data
