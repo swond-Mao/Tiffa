@@ -1,10 +1,12 @@
-# Tiffa 模型配置文件
+# Tiffa 模型配置文件（示例模板）
 # =============================================
-# 本地模型（推荐，零成本，完全离线可用）
-# 启动本地 llama.cpp 服务器后填写 baseUrl
-# llama.cpp 启动: llama-server -m 模型路径.gguf --host 127.0.0.1 --port 11434
+# 安装后复制本文件为 models.yml 并填入你的 API Key。
+# 不填 Key 的供应商不会出现在可用模型里。
 # =============================================
 providers:
+  # ── 本地模型（零成本，完全离线）──
+  # 需先启动 llama.cpp 服务器:
+  #   llama-server -m 模型路径.gguf --host 127.0.0.1 --port 11434
   llama-local:
     type: openai
     baseUrl: "http://LOCALHOST:11434/v1"
@@ -15,71 +17,53 @@ providers:
         disabled: false
 
 # =============================================
-# 国内云 API（按需选择，优先推荐）
+# 国内云 API（按需填写 Key 后启用）
+# 以下是常见提供方的配置示例，填入真实 Key 即可用。
 # =============================================
-# --- 硅基流动（性价比高，支持模型多）---
-# 注册: https://www.siliconflow.cn/
-# 模型列表: https://docs.siliconflow.cn/model
-  siliconflow:
-    type: openai
-    baseUrl: "https://api.siliconflow.cn/v1"
-    apiKey: "YOUR_SILICONFLOW_API_KEY"
-    models:
-      - name: "deepseek-ai/DeepSeek-V3"
-        label: "DeepSeek V3（推荐）"
-        disabled: false
-      - name: "Qwen/Qwen2.5-72B-Instruct"
-        label: "Qwen2.5-72B"
-        disabled: false
-      - name: "THUDM/GLM-4-Plus"
-        label: "GLM-4-Plus"
-        disabled: false
 
 # --- Kimi（Moonshot）---
 # 注册: https://platform.moonshot.cn/
-  kimi:
-    type: openai
-    baseUrl: "https://api.moonshot.cn/v1"
-    apiKey: "YOUR_KIMI_API_KEY"
-    models:
-      - name: "moonshot-v1-8k"
-        label: "Kimi 8K（默认）"
-        disabled: false
-      - name: "moonshot-v1-32k"
-        label: "Kimi 32K（长上下文）"
-        disabled: false
+# kimi:
+#   type: openai
+#   baseUrl: "https://api.moonshot.cn/v1"
+#   apiKey: "YOUR_KIMI_API_KEY"
+#   models:
+#     - name: "kimi-k3"
+#       label: "Kimi K3"
+#       disabled: false
+
+# --- 火山方舟（豆包 / GLM 等，Coding Plan）---
+# 注册: https://console.volcengine.com/ark
+# volcengine:
+#   type: openai
+#   baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3"
+#   apiKey: "YOUR_ARK_API_KEY"
+#   models:
+#     - name: "doubao-seed-2-1-turbo-260628"
+#       label: "豆包 Seed 2.1 Turbo"
+#       disabled: false
+#     - name: "glm-5.2"
+#       label: "GLM-5.2 (Coding Plan)"
+#       disabled: false
+
+# --- 硅基流动（性价比高）---
+# 注册: https://www.siliconflow.cn/
+# siliconflow:
+#   type: openai
+#   baseUrl: "https://api.siliconflow.cn/v1"
+#   apiKey: "YOUR_SILICONFLOW_API_KEY"
+#   models:
+#     - name: "deepseek-ai/DeepSeek-V3"
+#       label: "DeepSeek V3"
+#       disabled: false
 
 # --- 阿里云百炼 ---
 # 注册: https://bailian.console.aliyun.com/
-  aliyun:
-    type: openai
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    apiKey: "YOUR_ALIYUN_API_KEY"
-    models:
-      - name: "qwen-plus"
-        label: "通义千问 Plus"
-        disabled: false
-
-# --- 阶跃星辰 ---
-# 注册: https://platform.stepfun.com/
-  stepfun:
-    type: openai
-    baseUrl: "https://api.stepfun.com/v1"
-    apiKey: "YOUR_STEPFUN_API_KEY"
-    models:
-      - name: "step-1v-8k"
-        label: "Step-1V 视觉"
-        disabled: false
-      - name: "step-2-16k"
-        label: "Step-2"
-        disabled: false
-
-# --- Google Gemini（需代理）---
-  google:
-    type: openai
-    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/"
-    apiKey: "YOUR_GOOGLE_API_KEY"
-    models:
-      - name: "gemini-1.5-flash"
-        label: "Gemini 1.5 Flash"
-        disabled: false
+# aliyun:
+#   type: openai
+#   baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#   apiKey: "YOUR_ALIYUN_API_KEY"
+#   models:
+#     - name: "qwen-plus"
+#       label: "通义千问 Plus"
+#       disabled: false

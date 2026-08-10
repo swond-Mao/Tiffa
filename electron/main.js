@@ -12,6 +12,7 @@ const { spawn, execSync: _execSync } = require('child_process');
 const cp = require('child_process');
 const yaml = require('js-yaml');
 const { parseDocument, Document } = require('yaml');
+const { StringDecoder } = require('string_decoder');
 
 // ── Configuration ──
 // PORTABLE_ROOT: 1) --portable-root CLI arg  2) PORTABLE_ROOT env  3) parent of __dirname
@@ -317,11 +318,27 @@ class TiffaInstance {
       }
     });
 
+    // stderr 用 StringDecoder 增量解码：多字节 UTF-8 字符跨 chunk 边界时不会产生乱码
+    // （吸收 dim omp-process issue 27）。
+    this.stderrDecoder = new StringDecoder('utf8');
     this.process.stderr.on('data', (chunk) => {
-      const text = chunk.toString('utf8').trim();
+      const text = this.stderrDecoder.write(chunk).trim();
       if (text) {
         console.log(`[tiffa:stderr:${this._shortCwd()}]`, text);
       }
+    });
+
+    // ── 流 error 监听（吸收 dim omp-process issue 25）──
+    // 内核被杀 / 管道断裂（EPIPE）时，若 stdin/stdout/stderr 的 'error' 事件无监听，
+    // 会以 unhandled 'error' 直接崩溃主进程。全部挂上监听，记录而非崩溃。
+    this.process.stdin.on('error', (err) => {
+      console.warn(`[TiffaInstance:${this._shortCwd()}] stdin 管道错误:`, err.message);
+    });
+    this.process.stdout.on('error', (err) => {
+      console.warn(`[TiffaInstance:${this._shortCwd()}] stdout 管道错误:`, err.message);
+    });
+    this.process.stderr.on('error', (err) => {
+      console.warn(`[TiffaInstance:${this._shortCwd()}] stderr 管道错误:`, err.message);
     });
 
     this.process.on('exit', (code, signal) => {
@@ -629,6 +646,12 @@ class TiffaInstance {
     if (this.rl) {
       this.rl.close();
       this.rl = null;
+    }
+    // flush stderr 解码器残留的未完整多字节序列，避免进程被杀时丢失最后几字节输出
+    if (this.stderrDecoder) {
+      const tail = this.stderrDecoder.write(Buffer.alloc(0)).trim();
+      if (tail) console.log(`[tiffa:stderr:${this._shortCwd()}]`, tail);
+      this.stderrDecoder = null;
     }
     this.process = null;
     this.ready = false;
@@ -1092,6 +1115,19 @@ function setupIpc() {
     return inst;
   }
 
+  // 按 sessionId 显式路由（吸收 dim 的"命令必须带 sessionPath"原则）：
+  // getModels/getState/compact/command 这类"看似全局"的操作，若走 _active() 会
+  // 误发到"最后被激活的对话进程"，导致压缩/状态查错会话。
+  // 先全池按 sessionId 扫描（跨项目也命中），再精确 key，最后回退当前活跃实例。
+  function _routeBySession(sessionId) {
+    if (sessionId) {
+      const inst = tiffaManager.getBySessionIdAnywhere(sessionId)
+        || tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+      if (inst) return inst;
+    }
+    return tiffaManager.getActive();
+  }
+
   // Tiffa commands
   ipcMain.handle('tiffa:send', async (event, message, images, sessionId) => {
     // /omfg（或 /吐槽）命令拦截：TTSR 规则生成/修复 prompt（OI3 标准格式）
@@ -1271,30 +1307,44 @@ function setupIpc() {
     return inst.sendCommand({ type: 'set_model', provider, modelId });
   });
 
-  ipcMain.handle('tiffa:getModels', async () => {
-    return _active().sendCommand({ type: 'get_available_models' });
+  ipcMain.handle('tiffa:getModels', async (event, sessionId) => {
+    const inst = _routeBySession(sessionId);
+    if (!inst) throw new Error('No active Tiffa instance');
+    return inst.sendCommand({ type: 'get_available_models' });
   });
 
-  ipcMain.handle('tiffa:isReady', async () => {
-    const inst = tiffaManager.getActive();
+  ipcMain.handle('tiffa:isReady', async (event, sessionId) => {
+    const inst = _routeBySession(sessionId);
     return inst ? inst.ready : false;
   });
 
+  // 诊断：上报全部实例状态（吸收 dim 的 per-session 可观测性），
+  // 解决"多个对话并行时无法判断某个后台内核是否还在跑"的问题。
   ipcMain.handle('tiffa:diagnostics', async () => {
-    const inst = _active();
-    if (!inst) return { error: 'no active instance' };
-    return {
-      ready: inst.ready,
-      agentRunning: inst.agentRunning,
-      cwd: inst.cwd,
-      pid: inst.process?.pid || null,
-      stdinWritable: inst.process?.stdin?.writable || false,
-      pendingCommands: inst.pendingCommands.size,
-    };
+    const instances = [];
+    for (const [key, inst] of tiffaManager.instances) {
+      instances.push({
+        key,
+        cwd: inst.cwd,
+        sessionId: inst.sessionId,
+        sessionFilePath: inst.sessionFilePath,
+        active: key === tiffaManager.activeKey,
+        ready: inst.ready,
+        agentRunning: inst.agentRunning,
+        lastActiveTime: inst.lastActiveTime,
+        pid: inst.process?.pid || null,
+        stdinWritable: inst.process?.stdin?.writable || false,
+        pendingCommands: inst.pendingCommands.size,
+        pendingAskIds: inst._pendingAskIds.size,
+      });
+    }
+    return { instances, activeKey: tiffaManager.activeKey };
   });
 
-  ipcMain.handle('tiffa:getState', async () => {
-    return _active().sendCommand({ type: 'get_state' });
+  ipcMain.handle('tiffa:getState', async (event, sessionId) => {
+    const inst = _routeBySession(sessionId);
+    if (!inst) throw new Error('No active Tiffa instance');
+    return inst.sendCommand({ type: 'get_state' });
   });
 
   ipcMain.handle('tiffa:steer', async (event, message, sessionId) => {
@@ -1346,13 +1396,17 @@ function setupIpc() {
     } catch {}
   });
 
-  ipcMain.handle('tiffa:compact', async () => {
-    return _active().sendCommand({ type: 'compact' });
+  ipcMain.handle('tiffa:compact', async (event, sessionId) => {
+    const inst = _routeBySession(sessionId);
+    if (!inst) throw new Error('No active Tiffa instance');
+    return inst.sendCommand({ type: 'compact' });
   });
 
-  ipcMain.handle('tiffa:command', async (event, type, payload) => {
+  ipcMain.handle('tiffa:command', async (event, type, payload, sessionId) => {
     const frame = { type, ...payload };
-    return _active().sendCommand(frame);
+    const inst = _routeBySession(sessionId);
+    if (!inst) throw new Error('No active Tiffa instance');
+    return inst.sendCommand(frame);
   });
 
   // ── 多实例管理 IPC ──
@@ -1514,7 +1568,11 @@ function setupIpc() {
     try {
       const p = COMPUTER_USE_MCP_JSON;
       if (!fs.existsSync(p)) return;
-      const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+      let raw = fs.readFileSync(p, 'utf8');
+      // 仓库里用 {{PORTABLE_ROOT}} 占位符（避免硬编码盘符泄露），运行时替换为真实便携根目录
+      const rootSlash = PORTABLE_ROOT.replace(/\\/g, '/');
+      raw = raw.split('{{PORTABLE_ROOT}}').join(rootSlash);
+      const cfg = JSON.parse(raw);
       if (cfg.mcpServers && cfg.mcpServers['computer-use']) {
         cfg.mcpServers['computer-use'].enabled = enabled;
         fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
@@ -3566,3 +3624,8 @@ app.on('before-quit', (e) => {
   }
   finish();
 });
+
+// ── 测试导出：Electron 运行时此对象未被使用，仅供 node 单测加载 ──
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { TiffaInstance, TiffaInstanceManager, tiffaManager };
+}

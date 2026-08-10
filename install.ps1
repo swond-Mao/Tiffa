@@ -409,6 +409,29 @@ if (-not $SkipDesktop) {
     }
 }
 
+# AI 昵称引导：默认模板名字是 Tiffa，询问用户是否改名为自己的名字
+$aiMd = Join-Path $ROOT "data\memory\AI.md"
+if (Test-Path $aiMd) {
+    $aiContent = Get-Content $aiMd -Raw -ErrorAction SilentlyContinue
+    if ($aiContent -match "名字：Tiffa") {
+        Write-Host ""
+        Write-Host "  ==============================================" -ForegroundColor White
+        Write-Host "   给你的 AI 助手起个名字" -ForegroundColor White
+        Write-Host "  ==============================================" -ForegroundColor White
+        Write-Host "   默认名字是 Tiffa，可以改成你喜欢的（如你的昵称、产品名等）" -ForegroundColor Gray
+        Write-Host "   直接回车保持 Tiffa。" -ForegroundColor Gray
+        $aiName = Read-Host "   AI 名字"
+        if (-not [string]::IsNullOrWhiteSpace($aiName)) {
+            $aiName = $aiName.Trim()
+            $newContent = $aiContent -replace "名字：Tiffa", "名字：$aiName"
+            [System.IO.File]::WriteAllText($aiMd, $newContent, [System.Text.UTF8Encoding]::new($false))
+            OK "AI 名字已设为：$aiName"
+        } else {
+            OK "保持默认名字：Tiffa"
+        }
+    }
+}
+
 # 完成
 Write-Host ""
 Write-Host "  ==============================================" -ForegroundColor White

@@ -13,8 +13,8 @@ interruptMode: "always"
 2. **最终产物** → 写到当前项目目录根（cwd 根），如 `workspace/ppt制作/report.docx`。
 3. **中间产物** → 写到 `cwd/.temp/` 子目录（不存在先 `mkdir -p`）。
 4. **严禁** 直接把文件写到 `workspace/` 根目录，例如：
-   - 错误：`write(path="E:/Tiffa/workspace/novel.txt")`
-   - 正确：`write(path="E:/Tiffa/workspace/项目名/novel.txt")` 或项目名下的 `.temp/`
+   - 错误：`write(path="$ROOT/workspace/novel.txt")`
+   - 正确：`write(path="$ROOT/workspace/项目名/novel.txt")` 或项目名下的 `.temp/`
    - 错误：`echo "hello" > workspace/ask-test.txt`
    - 正确：先确认目标项目目录再写入
 
