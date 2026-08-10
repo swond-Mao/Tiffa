@@ -75,7 +75,8 @@ AI 根据需求生成 JSON 方案 → 通过 `--plan-json` 或 `--plan-file` 传
 
 - **craftman.py**：与本 SKILL.md 同目录，绝对路径由系统注入提供
 - **临时文件**：写在当前工作目录（cwd）下的 `.craftman/` 子目录。**禁止写 workspace 根目录**
-- **输出**：自动输出到 craftman.py 同目录的 `output/`
+- **输出**：自动输出到 **plan 文件所在项目目录**的 `output/` 子目录（plan 位于 `<项目目录>/.craftman/plan.json` 时输出到 `<项目目录>/output`），可用 `--output` 显式覆盖。**禁止**输出到技能目录（`skills/` 下任何位置）
+- **产物校验（代码级强制）**：每个 HTML 产物自动做完整性校验——文件非空、`</html>` 闭合、`.deck` 结构、slide 数量 ≥ 预期页数，并用 html2png.js 截图做渲染级测试。校验失败会打印 ❌ 明细并以退出码 2 结束，提示「产物不完整，建议重新生成（或换更强模型）」
 
 ### canvas-design 特殊说明
 

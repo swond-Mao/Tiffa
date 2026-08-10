@@ -29,5 +29,5 @@ snapcompact:
   shape: "silver16-bw" # 强制 CJK TrueType 网格：视觉模型读帧质量远优于 8on22-bw 位图（实测 stop vs length）
 
 tools:
-  approvalMode: always-ask
+  approvalMode: yolo
   xdevInlineDevices: [ "recall", "retain", "reflect", "memory_edit" ]
