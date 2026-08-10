@@ -43,7 +43,7 @@ function Resolve-Npm {
 $NPM_CMD = Resolve-Npm
 
 function Invoke-Npm {
-    param([string[]]$Arguments)
+    param([string[]]$CmdArgs)
     if (-not $NPM_CMD) { INFO "未找到 npm，跳过该命令"; return 1 }
     # $ErrorActionPreference=Stop 时，npm 写 stderr 会抛 NativeCommandError 终止脚本。
     # 临时切到 Continue，让 npm 的退出码/输出正常返回，由调用方判断成败。
@@ -52,9 +52,9 @@ function Invoke-Npm {
     try {
         if ($NPM_CMD.Contains("|")) {
             $parts = $NPM_CMD -split '\|'
-            & $parts[0] $parts[1] @Arguments 2>&1 | Out-String
+            & $parts[0] $parts[1] @CmdArgs 2>&1 | Out-String
         } else {
-            & $NPM_CMD @Arguments 2>&1 | Out-String
+            & $NPM_CMD @CmdArgs 2>&1 | Out-String
         }
         return $LASTEXITCODE
     } finally {
@@ -199,8 +199,9 @@ if (Test-Path $agentDir) {
             INFO "第 $attempt/3 次尝试 ..."
             Start-Sleep -Seconds 3
         }
-        # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装
-        $npmCode = Invoke-Npm install @oh-my-pi/pi-coding-agent --save --force --loglevel=error
+        # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装。
+        # 包名必须用引号包裹：PowerShell 会把 @ 开头裸 token 当 splatting 展开而吞掉参数。
+        $npmCode = Invoke-Npm install '@oh-my-pi/pi-coding-agent' --save --force --loglevel=error
         if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
