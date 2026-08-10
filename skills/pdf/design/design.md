@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '66f590a7-211c-4ae8-a7e9-da1753c32918'
-  PropagateID: '66f590a7-211c-4ae8-a7e9-da1753c32918'
-  ReservedCode1: '1be5d208-88ff-4ec6-bf12-7f375bf0c85d'
-  ReservedCode2: '1be5d208-88ff-4ec6-bf12-7f375bf0c85d'
----
-
 # Design System
 
 The aesthetic layer. Read this before touching any script.

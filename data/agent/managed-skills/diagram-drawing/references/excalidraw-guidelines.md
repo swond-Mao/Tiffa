@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'ba844b76-c16b-4791-971c-07c5a3c4bf21'
-  PropagateID: 'ba844b76-c16b-4791-971c-07c5a3c4bf21'
-  ReservedCode1: '62c8919c-f7cc-46f0-bf5e-47cb72a7bbc1'
-  ReservedCode2: '62c8919c-f7cc-46f0-bf5e-47cb72a7bbc1'
----
-
 # Excalidraw Drawing Guidelines
 
 ## Table of Contents
