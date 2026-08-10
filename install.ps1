@@ -278,13 +278,20 @@ if (Test-Path $pyExe) {
     $pyUrl = "https://registry.npmmirror.com/-/binary/python/$pyVer/python-$pyVer-embed-amd64.zip"
     try {
         Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
-        Expand-Archive -Path $pyZip -DestinationPath $ROOT -Force
-        $extracted = Join-Path $ROOT "python-$pyVer-embed-amd64"
-        $pyDir     = Join-Path $ROOT "python"
-        if (Test-Path $extracted) {
-            if (Test-Path $pyDir) { Remove-Item $pyDir -Recurse -Force }
-            Move-Item $extracted $pyDir
-        }
+        # 解压到临时目录：embeddable zip 有两种结构（带顶层目录 / 直接散在根），统一归集到 python\
+        $pyExtract = Join-Path $env:TEMP "tiffa-python-extract"
+        if (Test-Path $pyExtract) { Remove-Item $pyExtract -Recurse -Force }
+        Expand-Archive -Path $pyZip -DestinationPath $pyExtract -Force
+        # 找到 python.exe 所在目录（可能是 $pyExtract 本身或子目录）
+        $pySrcRoot = $pyExtract
+        $pyExeInZip = Get-ChildItem $pyExtract -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pyExeInZip) { $pySrcRoot = $pyExeInZip.DirectoryName }
+        $pyDir = Join-Path $ROOT "python"
+        if (Test-Path $pyDir) { Remove-Item $pyDir -Recurse -Force }
+        # 复制整个源目录（通配符复制到新建目录会失败，必须整体复制）
+        Copy-Item -Path $pySrcRoot -Destination $pyDir -Recurse -Force
+        Remove-Item $pyExtract -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path $pyExe)) { throw "python.exe 未出现在 $pyDir" }
         # embeddable 需开启 import site 才能用 pip
         $pth = Join-Path $pyDir "python313._pth"
         if (Test-Path $pth) {
@@ -294,12 +301,19 @@ if (Test-Path $pyExe) {
                 Set-Content $pth $c -Encoding UTF8
             }
         }
-        # ensurepip（embeddable 可能不含）→ 回退 get-pip.py（清华镜像）
+        # ensurepip（embeddable 可能不含）→ 回退 get-pip.py（官方源；清华镜像已失效返回 404）
         & $pyExe -m ensurepip --upgrade 2>$null
         if (-not (Test-Path (Join-Path $pyDir "Scripts\pip.exe"))) {
             $gp = Join-Path $env:TEMP "tiffa-get-pip.py"
-            Invoke-WebRequest -Uri "https://mirrors.tuna.tsinghua.edu.cn/pypi/get-pip.py" -OutFile $gp -UseBasicParsing
-            & $pyExe $gp 2>$null
+            Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $gp -UseBasicParsing
+            # 安装 pip 时指定清华镜像（默认 pypi.org 国内不可达）
+            & $pyExe $gp -i "https://pypi.tuna.tsinghua.edu.cn/simple" 2>$null
+            # 为后续 pip 写国内源配置
+            try {
+                $pipConfDir = Join-Path $env:APPDATA "pip"
+                if (-not (Test-Path $pipConfDir)) { New-Item -ItemType Directory -Path $pipConfDir -Force | Out-Null }
+                "[global]`nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple`ntrusted-host = pypi.tuna.tsinghua.edu.cn" | Set-Content -Path (Join-Path $pipConfDir "pip.ini") -Encoding UTF8
+            } catch {}
         }
         & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input 2>&1 | Out-Null
         if (Test-Path $pyExe) { OK "Python $pyVer + 依赖安装成功 (国内镜像)" } else { throw "python.exe 未出现" }
