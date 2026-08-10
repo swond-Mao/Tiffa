@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: 'af3600ac-f0df-4ecf-bf30-1ab296329519'
-  PropagateID: 'af3600ac-f0df-4ecf-bf30-1ab296329519'
-  ReservedCode1: '592c1759-4dc1-4fc7-b207-49ab05197dee'
-  ReservedCode2: '592c1759-4dc1-4fc7-b207-49ab05197dee'
----
-
 # 行为约束（before_agent_start 注入，v6.1）
 
 > 本文件由扩展 `before_agent_start` hook 在每轮 agent 启动前注入。
@@ -19,9 +8,9 @@ AIGC:
 
 - **读文件**：修改文件前必须先读取确认当前内容，不盲写；不确定就读文件确认
 - **3 次失败换方法**：同一工具连续调用 3 次未成功时，必须停止并换方法
-- **bash 路径用正斜杠**：bash 命令中所有路径一律用 `/`，**禁止用反斜杠 `\`**（会被解析为转义序列报错）
-- **不猜测**：不确定的事情标注"据我所知"，不要把猜测说成事实
-- **先计划再执行**：中等任务（3 步以上）先列步骤计划逐步勾掉；复杂任务（多文件/跨模块/修 bug/意图歧义）先读 `data/memory/design-outline.md`，按其结构在**当前项目目录下的 `design/` 子目录**产出 `<工作方向>-design.md`，用户确认后执行，执行以该文档为准、恢复时重读
+- **bash 路径用正斜杠**：bash 命令中所有路径一律用 `/`（如 `G:/Tiffa/workspace/`），**禁止用反斜杠 `\`**（会被解析为转义序列报错）
+- **不猜测**：不确定的事情标注“据我所知”，不要把猜测说成事实
+- **先计划再执行**：中等任务（3 步以上）先列步骤计划逐步勾掉；复杂任务（多文件/跨模块/修 bug/意图歧义）先读 `data/memory/design-outline.md`，按其结构在**当前项目目录下的 `design/` 子目录**产出 `<工作方向>-design.md`（如 `session-robustness-design.md`），用户确认后执行，执行以该文档为准、恢复时重读。**当前项目指实际处理的项目目录（如 `workspace/Tiffa开发`），不要放在 Tiffa 应用根目录 `E:\Tiffa` 下**
 - **错误先分析**：遇到错误先读错误信息分析原因，不要盲目重试
 - **最小手术**：只改任务需要的，不附带"顺手重构"；改动前先 grep 确认是否已有实现
 
@@ -66,6 +55,10 @@ AIGC:
 
 ## 带登录浏览器
 
-- 用户要求"带登录/用我的账号"操作网站：`browser` 工具传 `app.path` 指向本地 Edge 可执行文件路径，且**不传 `--user-data-dir`**（用默认 profile，直接带 Windows 账户登录态），内核自动拉起可见 Edge 窗口并连接
-- **spawn 前先查 Edge 是否在跑**：在跑 = 用户日常 Edge 开着，必须先 ask 确认"允许关闭重启？"，不同意就停下说明
+- 用户要求"带登录/用我的账号"操作网站：`browser` 工具传
+  `app.path: "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`
+  且**不传 `--user-data-dir`**（用默认 profile，直接带 Windows 账户登录态），
+  内核自动拉起可见 Edge 窗口并连接
+- **spawn 前先查 msedge.exe 是否在跑**：在跑 = 用户日常 Edge 开着，
+  必须先 ask 确认"允许关闭重启？"，不同意就停下说明
 - 干完活 `browser close` 自动关浏览器；未传 `app.path` 时保持默认无头模式

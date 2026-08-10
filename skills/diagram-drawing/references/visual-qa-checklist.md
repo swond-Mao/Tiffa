@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '72a322aa-082b-4850-83b0-a7ca766126f3'
-  PropagateID: '72a322aa-082b-4850-83b0-a7ca766126f3'
-  ReservedCode1: '12a0e00c-1229-4c51-8825-c700c6af4e43'
-  ReservedCode2: '12a0e00c-1229-4c51-8825-c700c6af4e43'
----
-
 # Visual QA Checklist
 
 Used by Step 5 (Visual QA Gate) to build image_understanding prompts.
