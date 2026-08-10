@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '54fee5f0-23e7-458e-9179-bdafb2684d79'
-  PropagateID: '54fee5f0-23e7-458e-9179-bdafb2684d79'
-  ReservedCode1: '7383435a-0744-416e-81fd-37ea33e00928'
-  ReservedCode2: '7383435a-0744-416e-81fd-37ea33e00928'
----
-
 # 用户档案
 
 <!-- 此文件为模板，首次使用后由 AI 自动填充 -->

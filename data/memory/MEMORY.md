@@ -1,15 +1,17 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '1fb54f25-6e62-448f-8df7-8c5e5e2a14da'
-  PropagateID: '1fb54f25-6e62-448f-8df7-8c5e5e2a14da'
-  ReservedCode1: '390de974-7a9b-47b9-abf8-f282bce53a4f'
-  ReservedCode2: '390de974-7a9b-47b9-abf8-f282bce53a4f'
----
-
 # 全局长期记忆
 
-<!-- 此文件为模板，AI 在运行中会自动追加记忆条目 -->
-<!-- 每条记忆格式：## YYYY-MM-DD + 标题 + 内容 -->
+
+## 2026-07-25
+## 产物存放铁律（2026-07-25 用户明确要求，曾因此被批评）
+
+- 所有产物（文件、报告、生成物）只能放在**当前对话所在项目的文件夹（cwd）**内
+- **严禁**在 workspace 根目录 `G:\oh-my-pi\workspace\` 下直接写文件或新建文件夹
+- 临时/中间文件放 cwd 内 `.temp/` 子目录
+- 配套机制：TTSR 规则 `data/agent/rules/cwd-file-placement.md`（已补强，覆盖无扩展名路径）+ 扩展 tool_call hook 拦截 workspace 根目录新建一级子目录
+
+## 2026-07-25
+## 禁止无意义重复（2026-07-25 用户明确要求，曾因此被批评）
+
+- 思考、回复、工具调用中**严禁产生大量无意义的重复输出**（同一段内容反复说、反复调用相同工具无推进、循环表述）
+- 输出必须简洁推进，每句话都有实质内容
+- 检测到自身输出出现重复模式时立即停止并换一种表达
