@@ -181,18 +181,34 @@ if (Test-Path $agentDir) {
         }
     }
     Push-Location $npmGlobalDir
+    # 强制清理残留：之前失败的 npm install 可能留下残缺 @oh-my-pi 目录或 lock 文件，
+    # 导致 npm 误判“up to date”而跳过真正安装。删掉后重新全新安装。
+    $staleAgent = Join-Path $npmGlobalDir "node_modules\@oh-my-pi"
+    if (Test-Path $staleAgent) {
+        Remove-Item $staleAgent -Recurse -Force -ErrorAction SilentlyContinue
+        INFO "已清理残留 @oh-my-pi 目录"
+    }
+    $staleLock = Join-Path $npmGlobalDir "package-lock.json"
+    if (Test-Path $staleLock) {
+        Remove-Item $staleLock -Force -ErrorAction SilentlyContinue
+        INFO "已清理残留 package-lock.json"
+    }
     $installed = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         if ($attempt -gt 1) {
             INFO "第 $attempt/3 次尝试 ..."
             Start-Sleep -Seconds 3
         }
-        $npmCode = Invoke-Npm install @oh-my-pi/pi-coding-agent --save --loglevel=error
+        # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装
+        $npmCode = Invoke-Npm install @oh-my-pi/pi-coding-agent --save --force --loglevel=error
         if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
         }
+        # 诊断：显示 npm 实际输出（最后 800 字符）和目录状态
         Write-Host "    [WARN] npm 安装失败（退出码 $npmCode）" -ForegroundColor Yellow
+        Write-Host "    [DIAG] agentDir 是否存在: $(Test-Path $agentDir)" -ForegroundColor Yellow
+        Write-Host "    [DIAG] npm-global 内容: $(if (Test-Path $npmGlobalDir) { (Get-ChildItem $npmGlobalDir -Force | Select-Object -ExpandProperty Name) -join ', ' } else { '不存在' })" -ForegroundColor Yellow
     }
     if ($installed) {
         $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
