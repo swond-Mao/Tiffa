@@ -287,6 +287,23 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 
 ---
 
+## 三层自动测试（2026-08-11 建立，对标 dim 项目 oh-my-pi-UI/scripts）
+
+**遇到「内核异常/协议问题」先自检再排查**：ready 超时、事件缺失（agent_start/agent_end 不到）、模型不可达、重启后症状消失等问题，先跑 ① e2e-smoke 定位是内核坏了还是壳的问题，不要直接改 main.js。
+
+| 层 | 手段 | 命令/触发 | 测什么 |
+|---|------|----------|--------|
+| ① 协议 E2E | `electron/scripts/e2e-smoke.mjs` + `e2e-session.mjs`（spawn 真实内核，不启 Electron） | `cd electron && npm run test:e2e`（smoke+session 连跑） | ready → get_state → prompt → 流式 → agent_end 全协议链 + 会话命令 |
+| ② agent 自跑 | 对话中让 Tiffa 自己执行 ① | 说"跑一遍端到端自检" | agent 用 bash 跑脚本判 PASS/FAIL，相当于给 Tiffa 做体检 |
+| ③ 浏览器 UI 验证 | 内核内置 browser 工具（puppeteer-core 驱动，`browser.enabled: true` 已开） | 说"用浏览器打开 xx 验证渲染" | aria 快照 + 截图 + JS 断言验证前端 UI；浏览器优先系统 Chrome，无则自动下载到 `~/.omp/puppeteer` |
+
+**脚本要点**：
+- `electron/scripts/_kernel.mjs` 是共享启动模块，环境注入与 `main.js` 完全一致（`PI_CODING_AGENT_DIR`→data/agent、便携 HOME、`BUN_INSTALL`、UTF-8）——**新增 E2E 脚本必须复用 `spawnKernel()`，勿另写路径**
+- `e2e-smoke` 跑一次会真实调用默认模型（几 token 成本）；`--no-session` 不污染会话；90s 超时（首次 spawn 内核慢）
+- `capture-select.mjs` 抓 extension_ui_request 帧（审批/ask 排查），输出 `data/logs/e2e-capture-frames.jsonl`
+
+---
+
 ## Skills（19 个）
 
 Skills 目录：`$ROOT/skills/`
@@ -357,19 +374,15 @@ Skills 目录：`$ROOT/skills/`
 
 ---
 
-## Git 双端推送
+## Git 三远端推送（2026-08-11 实测更新）
 
 ```bat
 :: origin   -> https://gitee.com/mao-yihong/oh-my-tiffa.git
+:: github   -> https://github.com/swond-Mao/Tiffa.git
 :: gitcode  -> https://gitcode.com/weixin_42319734/Tiffa.git
 ```
 
-⚠️ 直接 `git push` 会失败（`could not read Username` + `/dev/tty: No such device`）——全局凭据链 `helper-selector → git-credential-manager.exe` 在无 tty/GUI 环境走交互分支挂死。凭据本来就在 Windows 凭据管理器里，**每命令覆盖 helper**即可：
-
-```bash
-git -c credential.helper= -c credential.helper=wincred push origin master
-git -c credential.helper= -c credential.helper=wincred push gitcode master
-```
+⚠️ 旧文档的「直接 push 会失败，必须每命令覆盖 `credential.helper=wincred`」**已过时**（2026-08-11 实测：默认凭据链直接 `git push origin master` / `github` / `gitcode` 均成功）。三远端用同一套 Windows 凭据管理器即可，无需 helper 覆盖。
 
 `models.yml`（含 API key）、`data/agent/memories/`、`data/cache/`、`data/agent/cache/`、`local_cache/` 均已 gitignore。
 

@@ -9,7 +9,9 @@ export default defineConfig({
   root: __dirname,
   plugins: [react()],
   test: {
-    environment: 'jsdom',
+    // node 环境：当前单测为纯 store 逻辑（zustand 不依赖 DOM）。
+    // 若未来需要 DOM 断言（组件测试），再装 jsdom 并改回 'jsdom'。
+    environment: 'node',
     include: ['src/**/*.test.{ts,tsx}'],
   },
 });

@@ -10,7 +10,14 @@
     "build:renderer": "vite build --config renderer/vite.config.ts",
     "dev:renderer": "vite build --watch --config renderer/vite.config.ts",
     "typecheck": "tsc --noEmit -p renderer/tsconfig.json",
-    "test:renderer": "vitest run --config renderer/vitest.config.ts"
+    "test:renderer": "vitest run --config renderer/vitest.config.ts",
+    "test:e2e": "node scripts/e2e-smoke.mjs && node scripts/e2e-session.mjs",
+    "test:e2e:smoke": "node scripts/e2e-smoke.mjs",
+    "test:e2e:session": "node scripts/e2e-session.mjs",
+    "test:capture": "node scripts/capture-select.mjs",
+    "test:unit": "node main.test.js && npm run test:renderer",
+    "test:all": "npm run typecheck && npm run test:unit && npm run build:renderer",
+    "release": "node scripts/release.mjs"
   },
   "author": "Tiffa",
   "license": "MIT",

@@ -3,6 +3,8 @@ Lib/
 include/
 install/
 scripts/
+# 但 electron/scripts/ 是 E2E 测试与发布脚本（e2e-smoke/release 等），必须入库
+!electron/scripts/
 
 # Dependencies & runtime
 npm-global/
@@ -69,10 +71,10 @@ electron/renderer/assets/tiffa-musebak.png
 electron/renderer/assets/bak/
 electron/renderer/assets/resources/
 
-# Computer Use 运行日志（本地调试产物，不推送）
+# Computer Use 杩愯�鏃ュ織锛堟湰鍦拌皟璇曚骇鐗╋紝涓嶆帹閫侊級
 computer-use-logs/
 
-# Computer Use 一次性调试脚本与截图（非 skill 代码，不推送）
+# Computer Use 涓€娆℃€ц皟璇曡剼鏈�笌鎴�浘锛堥潪 skill 浠ｇ爜锛屼笉鎺ㄩ€侊級
 skills/computer-use/click_search.py
 skills/computer-use/click_text_search.py
 skills/computer-use/find_text_query.py
@@ -103,19 +105,19 @@ skills/canvas-design/canvas-fonts/MiSans-*.ttf
 # OS files
 Thumbs.db
 
-# Electron 便携 userData（main.js setPath 重定向后的 %APPDATA%，纯运行时缓存/Local Storage，随包再生，绝不入库）
+# Electron 渚挎惡 userData锛坢ain.js setPath 閲嶅畾鍚戝悗鐨� %APPDATA%锛岀函杩愯�鏃剁紦瀛�/Local Storage锛岄殢鍖呭啀鐢燂紝缁濅笉鍏ュ簱锛�
 data/electron-userdata/
 
-# WorkBuddy（用户记忆与运行时数据，不入库）
+# WorkBuddy锛堢敤鎴疯�蹇嗕笌杩愯�鏃舵暟鎹�紝涓嶅叆搴擄級
 .workbuddy/
 
-# Qoder（AI 生成的知识库，不入库）
+# Qoder锛圓I 鐢熸垚鐨勭煡璇嗗簱锛屼笉鍏ュ簱锛�
 .qoder/
 
-# 生成产物目录
+# 鐢熸垚浜х墿鐩�綍
 output/
 
-# Agent 运行时状态（随运行再生，与已忽略的 projects.json/session-model-map.json 同类）
+# Agent 杩愯�鏃剁姸鎬侊紙闅忚繍琛屽啀鐢燂紝涓庡凡蹇界暐鐨� projects.json/session-model-map.json 鍚岀被锛�
 data/agent/bypass-model.json
 data/agent/vision-fallback.json
 data/agent/current-model.json
@@ -123,26 +125,26 @@ data/agent/last-compact-route.json
 data/agent/last-compact-summary.md
 data/agent/computer-use-enabled
 
-# Skill 渲染缓冲（临时产物）
+# Skill 娓叉煋缂撳啿锛堜复鏃朵骇鐗╋級
 skills/*/project/*_buffer.png
 skills/*/*_buffer.png
 skills/dashiai-ppt/project/*.png
 Desktop.ini
 
-# 个人配置（含模型偏好/角色映射），不入库；仓库提供 config.yml.example 模板
+# 涓�汉閰嶇疆锛堝惈妯″瀷鍋忓ソ/瑙掕壊鏄犲皠锛夛紝涓嶅叆搴擄紱浠撳簱鎻愪緵 config.yml.example 妯℃澘
 data/agent/config.yml
 
-# 运行时数据（agent 会话/日志，勿入库）
+# 杩愯�鏃舵暟鎹�紙agent 浼氳瘽/鏃ュ織锛屽嬁鍏ュ簱锛�
 data/sessions/
 data/logs/
 data/electron-userdata/
 
-# 旧构建备份目录（构建产物，勿入库）
+# 鏃ф瀯寤哄�浠界洰褰曪紙鏋勫缓浜х墿锛屽嬁鍏ュ簱锛�
 electron/renderer/dist_old_*/
 electron/renderer/assets_backup/
 
-# React �������vite build ���ɣ�����⣩
+# React 构建产物（vite build 生成，勿入库）
 electron/renderer/dist/
-# ����Ǩ�Ƶ�����ʱ����
+# 本次迁移调试临时产物
 main-diff.txt
 electron/_tail_check.js
