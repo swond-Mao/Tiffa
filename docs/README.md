@@ -4,6 +4,8 @@
 
 **与万物对弈，伴时间同行** — 一款**完全便携、绝对隐私**的本地 AI 助手。它会记住你，拔盘就走，连 3.5GB 的 Q1_0 量化小模型都能稳定干完智能体任务。
 
+[![GitHub stars](https://img.shields.io/github/stars/swond-Mao/Tiffa?style=flat-square)](https://github.com/swond-Mao/Tiffa) [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](https://github.com/swond-Mao/Tiffa/blob/master/LICENSE) [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square)](https://github.com/swond-Mao/Tiffa) [![Portable](https://img.shields.io/badge/portable-U%E7%9B%98%E5%8D%B3%E7%94%A8-orange?style=flat-square)](https://github.com/swond-Mao/Tiffa) [![Zero C drive writes](https://img.shields.io/badge/zero_C_drive_writes-brightgreen?style=flat-square)](https://github.com/swond-Mao/Tiffa)
+
 基于 [oh-my-pi v17.2.2](https://github.com/can1357/oh-my-pi) · MIT License · Windows
 
 > 🔗 **基于开源框架 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi) v17.2.2 深度定制**，非从零手搓。上游 ⭐：<https://github.com/can1357/oh-my-pi> · 官网 <https://omp.sh>
@@ -30,6 +32,15 @@
 | 一句话吐槽就改行为（免重启） | ❌ | ❌ | ✅ TTSR 即时生效 |
 | 直接操控 Windows 桌面 | ❌ | ❌ | ✅ Computer Use |
 | 整文件夹便携（U 盘即用） | ❌ | ❌ | ✅ |
+
+---
+
+## 适合谁
+
+- **隐私敏感的你** — 公司电脑 / 共享电脑，不登录、不注册、不留痕，拔盘就走
+- **多机党** — 家里一台、公司一台、U 盘随身，记忆跟着盘走
+- **弱硬件玩家** — 3.5GB 的 Q1_0 小模型也能稳定干完智能体任务，老机器照样跑
+- **AI 玩机党** — 7 套主题、自定义启动页动图、一句话吐槽改行为，可玩性拉满
 
 ---
 
@@ -179,6 +190,8 @@ Electron GUI（React + TypeScript 渲染层），不是终端里的一行行文�
    灯火已明，门扉待启       ← 准备就绪
 ```
 
+**启动页还能放你自己的图。** 把 `startup-image.png/.jpg/.webp/.gif` 丢进 `data/` 文件夹，重启即生效（≤20MB，GIF / WebP 动图照放不误）。白底黑字图在暗色主题下**自动反色**成黑底白字，亮色主题保持原样——一张图通吃两套主题，从星空到你的作品，换肤只在一瞬间。
+
 ---
 
 ## 便携：拷走就走，不留痕迹
@@ -240,7 +253,9 @@ start-tiffa.bat       # TUI/WebUI/RPC 终端模式
 
 ## 截图
 
-> 📷 **实机截图待补充。** 建议放置：① 启动仪式 ② 桌面 GUI 主界面 ③ 记忆召回示意。
+![启动仪式（默认星空图，可自定义）](screenshots/startup-default.webp)
+
+> 📷 **实机截图待补充。** 建议放置：① 桌面 GUI 主界面 ② 记忆召回示意。
 > 把图片存入 `docs/screenshots/`，然后取消下方注释即可显示：
 >
 > `<!-- ![桌面 GUI](docs/screenshots/desktop.png) -->`

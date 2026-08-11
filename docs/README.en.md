@@ -4,6 +4,8 @@
 
 **Play against all things; walk with time as your companion.** A **fully portable, absolutely private** local AI assistant. It remembers you, goes with you on a USB stick, and even a 3.5GB Q1_0 quantized model runs full agent tasks stably.
 
+[![GitHub stars](https://img.shields.io/github/stars/swond-Mao/Tiffa?style=flat-square)](https://github.com/swond-Mao/Tiffa) [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](https://github.com/swond-Mao/Tiffa/blob/master/LICENSE) [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square)](https://github.com/swond-Mao/Tiffa) [![Portable](https://img.shields.io/badge/portable-USB_plug--and--run-orange?style=flat-square)](https://github.com/swond-Mao/Tiffa) [![Zero C drive writes](https://img.shields.io/badge/zero_C_drive_writes-brightgreen?style=flat-square)](https://github.com/swond-Mao/Tiffa)
+
 Based on [oh-my-pi v17.2.2](https://github.com/can1357/oh-my-pi) · MIT License · Windows
 
 > 🔗 **Built on the open-source [oh my pi (OMP)](https://github.com/can1357/oh-my-pi) framework v17.2.2** — a deep customization, not built from scratch. Upstream ⭐: <https://github.com/can1357/oh-my-pi> · Site: <https://omp.sh>
@@ -30,6 +32,15 @@ Have you ever felt this way — you've been talking to an AI for three months an
 | Change behavior with one complaint (no restart) | ❌ | ❌ | ✅ TTSR takes effect instantly |
 | Operates the Windows desktop directly | ❌ | ❌ | ✅ Computer Use |
 | Whole-folder portable (USB plug-and-run) | ❌ | ❌ | ✅ |
+
+---
+
+## Who Is It For
+
+- **Privacy-sensitive users** — office / shared computers: no login, no registration, no trace; pull the drive and go
+- **Multi-machine users** — one at home, one at work, a USB stick in your pocket; memory travels with the drive
+- **Weak-hardware players** — a 3.5GB Q1_0 model still finishes agent tasks stably; old machines run it just fine
+- **AI tinkerers** — 7 themes, custom animated startup screen, one-line complaints that change behavior — plenty to play with
 
 ---
 
@@ -179,6 +190,8 @@ Startup isn't a dry spinning circle — it's an entrance ritual:
    灯火已明，门扉待启       ← Ready
 ```
 
+**You can put your own image on the startup screen.** Drop `startup-image.png/.jpg/.webp/.gif` into the `data/` folder and restart — done (≤20MB; animated GIF / WebP work fine). White-background black-text images are **auto-inverted** in dark theme to black-background white-text, while light theme keeps them as-is — one image covers both themes, and switching from a starfield to your own artwork takes one restart.
+
 ---
 
 ## Portable: Copy and Go, Leave No Trace
@@ -240,7 +253,9 @@ Or dev mode: `cd electron && npm start`
 
 ## Screenshots
 
-> 📷 **Real screenshots to be added.** Suggested: ① startup ritual ② desktop GUI main view ③ memory-recall illustration.
+![Startup ritual (default starfield, customizable)](screenshots/startup-default.webp)
+
+> 📷 **Real screenshots to be added.** Suggested: ① desktop GUI main view ② memory-recall illustration.
 > Drop images into `docs/screenshots/`, then uncomment the line below to display:
 >
 > `<!-- ![Desktop GUI](docs/screenshots/desktop.png) -->`
