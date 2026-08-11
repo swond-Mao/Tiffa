@@ -85,7 +85,8 @@ skills/computer-use/xhs_step1.png
 
 # Electron runtime
 electron/node_modules/
-electron/package-lock.json
+# package-lock.json 必须入库：CI（GitHub Actions）的 npm ci 要求 lock 与 package.json 同步，
+# 且 setup-node 的 cache-dependency-path 也指向它。锁定依赖版本保证可复现构建。
 
 # Skill output/artifacts (user-generated)
 skills/*/output/
