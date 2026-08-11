@@ -117,6 +117,7 @@ output/
 
 # Agent 运行时状态（随运行再生，与已忽略的 projects.json/session-model-map.json 同类）
 data/agent/bypass-model.json
+data/agent/vision-fallback.json
 data/agent/current-model.json
 data/agent/last-compact-route.json
 data/agent/last-compact-summary.md
@@ -127,3 +128,21 @@ skills/*/project/*_buffer.png
 skills/*/*_buffer.png
 skills/dashiai-ppt/project/*.png
 Desktop.ini
+
+# 个人配置（含模型偏好/角色映射），不入库；仓库提供 config.yml.example 模板
+data/agent/config.yml
+
+# 运行时数据（agent 会话/日志，勿入库）
+data/sessions/
+data/logs/
+data/electron-userdata/
+
+# 旧构建备份目录（构建产物，勿入库）
+electron/renderer/dist_old_*/
+electron/renderer/assets_backup/
+
+# React �������vite build ���ɣ�����⣩
+electron/renderer/dist/
+# ����Ǩ�Ƶ�����ʱ����
+main-diff.txt
+electron/_tail_check.js

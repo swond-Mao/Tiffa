@@ -209,6 +209,8 @@ function _utf8Env() {
 // ── Global State ──
 let mainWindow = null;
 const MAX_INSTANCES = 8; // 最多同时运行的 Tiffa 实例数（项目级 + 对话级共享）
+// LRU 保活窗口：最近活跃过的实例不淘汰（避免"刚看过又切回来"触发冷启动 spawn+模型加载）
+const LRU_KEEP_ALIVE_MS = 5 * 60 * 1000;
 
 // 主进程 ask/agent 诊断日志（ask 疑难排查用，落 data/logs/main-ask.log）
 // 简易日志轮转：超 1MB 改名 .old（覆盖旧滚存），防止无界增长
@@ -226,6 +228,157 @@ function _mainLog(line) {
     fs.appendFileSync(filePath,
       `[${new Date().toISOString()}] ${line}\n`);
   } catch {}
+}
+
+// ── 全局异常捕获：防止主进程未捕获异常弹"JavaScript 报错"对话框/崩溃 ──
+// 切换审批/会话重启等异步流程（exit handler、_cleanup、spawn、LRU）任何裸奔异常
+// 都会走这里：只记日志、不弹窗、不退出，问题可通过 data/logs/main-ask.log 定位。
+process.on('uncaughtException', (err) => {
+  try {
+    console.error('[main] uncaughtException:', err);
+    _mainLog(`[main] uncaughtException: ${(err && err.stack) || err}`);
+  } catch {}
+});
+process.on('unhandledRejection', (reason) => {
+  try {
+    console.error('[main] unhandledRejection:', reason);
+    _mainLog(`[main] unhandledRejection: ${(reason && reason.stack) || reason}`);
+  } catch {}
+});
+
+// ── 会话历史增量读取（吸收 dim session-store 的流式/头部读取思路）──
+// 从文件尾部反向读取 wantLines 条完整行（时间正序返回）。
+// 目的：避免大会话 JSONL 全量 JSON.parse 阻塞主进程事件循环（切换会话卡顿主因）。
+// 返回 { lines, reachedStart, droppedAny }：
+//   - lines：最新的 min(文件行数, wantLines) 条完整行（时间正序）
+//   - reachedStart：是否读到了文件头（= 文件里没有比返回窗口更早的行）
+//   - droppedAny：是否因超过 wantLines 而丢弃过更旧的行（= 一定存在更早的消息）
+async function readTailLines(filePath, wantLines) {
+  const CHUNK = 512 * 1024;
+  const st = await fs.promises.stat(filePath);
+  if (!st.size) return { lines: [], reachedStart: true, droppedAny: false };
+  const fh = await fs.promises.open(filePath, 'r');
+  try {
+    let pos = st.size;
+    let carry = '';      // 未完成的"最旧半行"（接到下一次读取块的末尾）
+    let collected = [];  // 已收集的完整行（时间正序）
+    let reachedStart = false;
+    let droppedAny = false;
+    while (pos > 0) {
+      const len = Math.min(CHUNK, pos);
+      pos -= len;
+      const buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, pos);
+      // 跳到 UTF-8 字符边界：跳过块开头的连续字节（最多 3 个），避免多字节字符截断乱码
+      let start = 0;
+      while (start < buf.length && start < 4 && (buf[start] & 0xC0) === 0x80) start++;
+      const text = buf.toString('utf8', start);
+      const combined = text + carry; // carry（更新）接到 text（更旧）之后，正好补全跨块行
+      const parts = combined.split('\n');
+      carry = parts.pop() || '';
+      // parts 是「当前块（更旧）」的完整行，collected 是「后续块（更新）」的行。
+      // 读取方向是从文件尾向前，所以更旧的行必须【前插】到 collected 之前，
+      // 保持时间正序；超限时从数组尾部截断（保留最新的 wantLines 条）。
+      // 旧实现 push 到末尾 + shift() 删头部，会把真实尾部新行丢掉且行序错乱，
+      // 导致重启后前端渲染到文件中间的旧消息（“对话尾部被切除”）。
+      if (parts.length) {
+        const older = [];
+        for (const ln of parts) {
+          if (!ln.trim()) continue;
+          older.push(ln);
+        }
+        if (older.length) {
+          collected = older.concat(collected);
+          if (collected.length > wantLines) {
+            collected = collected.slice(collected.length - wantLines); // 保留最新 wantLines 条
+            droppedAny = true;
+          }
+        }
+      }
+      // 提前退出：已收集够 wantLines 条，更旧的行反正会被丢弃（增量读取的关键）
+      if (collected.length >= wantLines) break;
+      if (pos === 0) reachedStart = true;
+    }
+    return { lines: collected, reachedStart, droppedAny };
+  } finally {
+    await fh.close();
+  }
+}
+
+// 把 JSONL 行解析为前端消息数组（单遍：tool_execution_start 参数补全 toolResult）
+function parseSessionLines(lines) {
+  const toolMeta = new Map();
+  const messages = [];
+  for (const line of lines) {
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (obj.type === 'custom' && obj.customType === 'tool_execution_start' && obj.data) {
+      const tcId = obj.data.toolCallId;
+      if (tcId) toolMeta.set(tcId, { toolName: obj.data.toolName, args: obj.data.args });
+      continue;
+    }
+    if (obj.type === 'message' && obj.message) {
+      const msg = obj.message;
+      let textContent = '';
+      let thinkingContent = '';
+      let toolCalls = [];
+      if (typeof msg.content === 'string') {
+        textContent = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === 'text' && part.text) {
+            textContent += part.text;
+          } else if (part.type === 'thinking' && part.thinking) {
+            thinkingContent += part.thinking;
+          } else if (part.type === 'tool_use' || part.type === 'tool_call') {
+            toolCalls.push({
+              id: part.id || '',
+              name: part.name || '',
+              input: part.input || part.arguments || {},
+            });
+          }
+        }
+      }
+      // toolResult 补全：从已收集的 toolMeta 中恢复参数
+      if (msg.role === 'toolResult' && msg.toolCallId) {
+        const meta = toolMeta.get(msg.toolCallId);
+        if (meta) {
+          const resultText = Array.isArray(msg.content)
+            ? msg.content.filter(c => c.type === 'text').map(c => c.text).join('')
+            : (typeof msg.content === 'string' ? msg.content : '');
+          messages.push({
+            role: 'assistant',
+            text: '',
+            thinking: '',
+            toolCalls: [{
+              id: msg.toolCallId,
+              name: meta.toolName || msg.toolName || 'tool',
+              input: meta.args || {},
+              result: resultText.substring(0, 10000),
+              isError: msg.isError || false,
+            }],
+            timestamp: obj.timestamp || msg.timestamp,
+            model: msg.model || '',
+            provider: msg.provider || '',
+          });
+          continue;
+        }
+      }
+      messages.push({
+        role: msg.role,
+        text: textContent,
+        thinking: thinkingContent,
+        toolCalls,
+        timestamp: obj.timestamp || msg.timestamp,
+        model: msg.model || '',
+        provider: msg.provider || '',
+        steering: msg.steering || false,
+        follow_up: msg.follow_up || false,
+      });
+    }
+  }
+  return messages;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -351,7 +504,11 @@ class TiffaInstance {
       }
       this.pendingCommands.clear();
 
-      this._cleanup();
+      try {
+        this._cleanup();
+      } catch (e) {
+        console.warn(`[TiffaInstance:${this._shortCwd()}] _cleanup 异常:`, e);
+      }
 
       // 崩溃自动重启：非用户主动 kill、未超出重启上限
       // 注：常驻 CLI 不应自行退出；切换会话/项目时若 CLI 异常 clean exit(code===0) 也应重启，
@@ -362,16 +519,20 @@ class TiffaInstance {
         console.log(`[TiffaInstance:${this._shortCwd()}] 3秒后自动重启 (第${this.crashCount}次)`);
         this._restartTimer = setTimeout(() => {
           this._restartTimer = null;
-          this.start();
+          try { this.start(); } catch (e) { console.warn(`[TiffaInstance:${this._shortCwd()}] 自动重启 start() 异常:`, e); }
         }, 3000);
       }
 
       // 通知渲染进程
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('tiffa:exited', {
-          code, signal, cwd: this.cwd, sessionId: this.sessionId,
-          autoRestarting: shouldRestart, crashCount: this.crashCount,
-        });
+        try {
+          mainWindow.webContents.send('tiffa:exited', {
+            code, signal, cwd: this.cwd, sessionId: this.sessionId,
+            autoRestarting: shouldRestart, crashCount: this.crashCount,
+          });
+        } catch (e) {
+          console.warn(`[TiffaInstance:${this._shortCwd()}] 通知渲染进程 exited 失败:`, e);
+        }
       }
     });
 
@@ -992,6 +1153,10 @@ class TiffaInstanceManager {
   _evictLRU() {
     let oldest = null;
     let oldestTime = Infinity;
+    // 回退候选：保活窗口内也不得不淘汰时的最旧实例（池满必须腾位，宁淘汰最旧也不拒绝新建）
+    let fallback = null;
+    let fallbackTime = Infinity;
+    const now = Date.now();
 
     for (const [key, inst] of this.instances) {
       if (key === this.activeKey) continue;
@@ -1000,18 +1165,28 @@ class TiffaInstanceManager {
       // 有未应答 ask（等用户审批）的实例跳过：这种进程不输出帧、lastActiveTime 陈旧，
       // 会被误判为最闲而强杀 → ask 弹窗失效（dim pin/unpin 思路）。
       if (inst._pendingAskIds && inst._pendingAskIds.size > 0) continue;
+      // 最近活跃过的实例优先跳过（保活窗口内）：刚看过/用过的会话切回时不应冷启动
+      if (now - inst.lastActiveTime < LRU_KEEP_ALIVE_MS) {
+        // 仍记录为回退候选（池满时不得已可淘汰）
+        if (inst.lastActiveTime < fallbackTime) {
+          fallbackTime = inst.lastActiveTime;
+          fallback = key;
+        }
+        continue;
+      }
       if (inst.lastActiveTime < oldestTime) {
         oldestTime = inst.lastActiveTime;
         oldest = key;
       }
     }
 
-    if (oldest) {
-      console.log(`[TiffaManager] LRU 淘汰: ${oldest}`);
-      this.closeByKey(oldest);
+    const victim = oldest || fallback;
+    if (victim) {
+      console.log(`[TiffaManager] LRU 淘汰: ${victim}`);
+      this.closeByKey(victim);
       return true;
     }
-    // 所有实例都在运行或为当前活跃，无法淘汰
+    // 所有实例都在运行/活跃/待审批，无法淘汰
     console.warn(`[TiffaManager] LRU 淘汰失败：所有 ${this.instances.size} 个实例均不可淘汰`);
     return false;
   }
@@ -1059,7 +1234,7 @@ function createWindow() {
       sandbox: false, // needed for fs access via preload
     },
   });
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
   // 隐藏原生菜单栏
   mainWindow.setMenu(null);
   // 等渲染进程首帧就绪再显示，避免黑屏/白屏闪烁。
@@ -1225,11 +1400,23 @@ function setupIpc() {
     let inst = tiffaManager.getBySessionIdAnywhere(sessionId)
       || tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
     if (!inst && sessionId) {
-      // 会话级实例不存在（启动恢复/竞态）→ 先激活再发送，不回退到项目级实例
+      // 会话级实例不存在（启动恢复/竞态/非阻塞切换期间）→ 先激活再发送，不回退到项目级实例
       // （项目级实例 _sessionId=null 的事件会被渲染层严格路由过滤，导致无输出）
       await tiffaManager.activateSession(tiffaManager.activeCwd, sessionId);
       inst = tiffaManager.getBySessionIdAnywhere(sessionId)
         || tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+    }
+    // 实例存在但尚未就绪（刚 spawn / 重启 / 后台激活中）→ 等就绪再发，
+    // 避免 prompt 落入未就绪进程被吞（非阻塞切换后立刻发消息的兜底）。
+    if (inst && !inst.ready && sessionId) {
+      await new Promise((resolve) => {
+        let checks = 0;
+        const check = setInterval(() => {
+          checks++;
+          if (inst.ready || checks > 150) { clearInterval(check); resolve(); } // 最多 15s
+        }, 100);
+        if (inst.process) inst.process.once('exit', () => { clearInterval(check); resolve(); });
+      });
     }
     if (!inst) inst = tiffaManager.getActive(); // 无 sessionId 时用项目级
     if (!inst) throw new Error('No active Tiffa instance');
@@ -2614,115 +2801,37 @@ function setupIpc() {
   })
 
   // ── Session History Loading ──
-  ipcMain.handle('sessions:loadHistory', async (event, sessionPath) => {
+  ipcMain.handle('sessions:loadHistory', async (event, sessionPath, opts) => {
     try {
       const resolvedPath = path.resolve(sessionPath);
       if (!resolvedPath.endsWith('.jsonl') || !fs.existsSync(resolvedPath)) {
         return { error: 'Session file not found' };
       }
+      // 增量读取：默认只返回尾部 tail 条；skip = 已从尾部加载的条数（"加载更早"用）。
+      // opts.tail = 0 表示全量（分支/导出等需要全部消息的场景）。
+      const rawTail = Number(opts && opts.tail);
+      const wantAll = rawTail === 0;
+      const tail = wantAll ? Infinity : Math.min(rawTail || 200, 500);
+      const skip = Math.max(Number(opts && opts.skip) || 0, 0);
 
-      const stat = await fs.promises.stat(resolvedPath);
-      let text;
-      if (stat.size > 20 * 1024 * 1024) {
-        // 超过 20MB 的文件只读最后 10MB
-        const fh = await fs.promises.open(resolvedPath, 'r');
-        try {
-          const buf = Buffer.alloc(10 * 1024 * 1024);
-          await fh.read(buf, 0, 10 * 1024 * 1024, stat.size - 10 * 1024 * 1024);
-          text = buf.toString('utf8');
-        } finally {
-          await fh.close();
-        }
-        // 跳过第一行（可能是不完整的 JSON）
-        const firstNewline = text.indexOf('\n');
-        if (firstNewline >= 0) text = text.substring(firstNewline + 1);
+      let lines, reachedStart, droppedAny = false;
+      if (wantAll) {
+        const text = await fs.promises.readFile(resolvedPath, 'utf8');
+        lines = text.split('\n');
+        reachedStart = true;
       } else {
-        text = await fs.promises.readFile(resolvedPath, 'utf8');
+        const r = await readTailLines(resolvedPath, skip + tail);
+        lines = r.lines;
+        reachedStart = r.reachedStart;
+        droppedAny = r.droppedAny;
       }
 
-      const lines = text.split('\n');
-
-      // 单遍解析：边收集 tool_execution_start 参数边处理消息（JSONL 按时间序写入，
-      // tool_execution_start 必在对应 toolResult 之前，与原双遍逻辑等价），省一半 JSON.parse
-      const toolMeta = new Map();
-      const messages = [];
-
-      for (const line of lines) {
-        if (!line) continue;
-        let obj;
-        try { obj = JSON.parse(line); } catch { continue; }
-
-        if (obj.type === 'custom' && obj.customType === 'tool_execution_start' && obj.data) {
-          const tcId = obj.data.toolCallId;
-          if (tcId) toolMeta.set(tcId, { toolName: obj.data.toolName, args: obj.data.args });
-          continue;
-        }
-
-        if (obj.type === 'message' && obj.message) {
-          const msg = obj.message;
-            let textContent = '';
-            let thinkingContent = '';
-            let toolCalls = [];
-
-            if (typeof msg.content === 'string') {
-              textContent = msg.content;
-            } else if (Array.isArray(msg.content)) {
-              for (const part of msg.content) {
-                if (part.type === 'text' && part.text) {
-                  textContent += part.text;
-                } else if (part.type === 'thinking' && part.thinking) {
-                  thinkingContent += part.thinking;
-                } else if (part.type === 'tool_use' || part.type === 'tool_call') {
-                  toolCalls.push({
-                    id: part.id || '',
-                    name: part.name || '',
-                    input: part.input || part.arguments || {},
-                  });
-                }
-              }
-            }
-
-            // toolResult 补全：从已收集的 toolMeta 中恢复参数
-            if (msg.role === 'toolResult' && msg.toolCallId) {
-              const meta = toolMeta.get(msg.toolCallId);
-              if (meta) {
-                const resultText = Array.isArray(msg.content)
-                  ? msg.content.filter(c => c.type === 'text').map(c => c.text).join('')
-                  : (typeof msg.content === 'string' ? msg.content : '');
-                messages.push({
-                  role: 'assistant',
-                  text: '',
-                  thinking: '',
-                  toolCalls: [{
-                    id: msg.toolCallId,
-                    name: meta.toolName || msg.toolName || 'tool',
-                    input: meta.args || {},
-                    result: resultText.substring(0, 10000),
-                    isError: msg.isError || false,
-                  }],
-                  timestamp: obj.timestamp || msg.timestamp,
-                  model: msg.model || '',
-                  provider: msg.provider || '',
-                });
-                continue;
-              }
-            }
-
-            messages.push({
-              role: msg.role,
-              text: textContent,
-              thinking: thinkingContent,
-              toolCalls,
-              timestamp: obj.timestamp || msg.timestamp,
-              model: msg.model || '',
-              provider: msg.provider || '',
-              steering: msg.steering || false,
-              follow_up: msg.follow_up || false,
-            });
-        }
-      }
-
-      return { messages, total: messages.length };
+      const all = parseSessionLines(lines);
+      const kept = wantAll ? all : all.slice(0, Math.max(0, all.length - skip));
+      const messages = wantAll ? kept : kept.slice(-tail);
+      // hasMore：丢弃过更旧的行 或 没读到文件头 → 一定还有更早的消息
+      const hasMore = wantAll ? false : (droppedAny || !reachedStart);
+      return { messages, hasMore };
     } catch (err) {
       return { error: err.message };
     }
@@ -3627,5 +3736,5 @@ app.on('before-quit', (e) => {
 
 // ── 测试导出：Electron 运行时此对象未被使用，仅供 node 单测加载 ──
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { TiffaInstance, TiffaInstanceManager, tiffaManager };
+  module.exports = { TiffaInstance, TiffaInstanceManager, tiffaManager, readTailLines, parseSessionLines };
 }

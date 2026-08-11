@@ -1,0 +1,43 @@
+# Tiffa 发布版 config.yml（示例模板）
+# 说明：
+#  - 本模板默认角色指向"无 Key 可用"的模型，避免发布后默认指向已清空 Key 的收费模型导致不可用。
+#  - 使用者可自由修改：设置面板填自己的 Key，或配置 bypass-model.json / vision-fallback.json / MCP。
+#  - 发布时请删除本文件里的敏感注释，保留结构和以下默认指向。
+
+modelRoles:
+  # 主模型：默认指向旁路（bypass-model.json 配置的服务，免费）。
+  # 若使用者本地装了 Ollama，可改 "llama.cpp/localmodel"（127.0.0.1:11434，零成本）；
+  # 或填入自己的收费模型（如 deepseek/deepseek-v4-flash）+ 在 models.yml 填 Key。
+  default: "bypass-dynamic/localmodel"
+  smol: "bypass-dynamic/localmodel"
+  slow: "llama.cpp/localmodel"
+  plan: "llama.cpp/localmodel"
+  # 看图模型：降级链 = bypass-model.json(第1层) → vision-fallback.json(第2层,可配豆包) → 放弃。
+  # 扩展在 session_start 时自动探测，选第一个可达的写入此角色（bypass-dynamic 指向它）。
+  vision: "bypass-dynamic/localmodel"
+  commit: "llama.cpp/localmodel"
+  tiny: "llama.cpp/localmodel"
+
+# Mnemopi 记忆系统 — 三重记忆 + RAG 方案
+memory:
+  backend: mnemopi
+mnemopi:
+  embeddingModel: "BAAI/bge-small-zh-v1.5"
+  scoping: "per-project-tagged"
+  autoRecall: true
+  autoRetain: true
+  retainEveryNTurns: 2
+  recallLimit: 10
+  injectionTokenLimit: 2000
+snapcompact:
+  shape: "silver16-bw"
+
+tools:
+  approvalMode: write
+  xdevInlineDevices: [ "recall", "retain", "reflect", "memory_edit" ]
+
+# 意外停止自动续跑
+features:
+  unexpectedStopDetection: true
+providers:
+  unexpectedStopModel: "online"

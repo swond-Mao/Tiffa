@@ -1,69 +1,214 @@
-# Tiffa 模型配置文件（示例模板）
+# Tiffa 模型配置文件（发布版示例模板）
 # =============================================
 # 安装后复制本文件为 models.yml 并填入你的 API Key。
 # 不填 Key 的供应商不会出现在可用模型里。
+# 看图/旁路：配置 bypass-model.json（第1层）+ vision-fallback.json（第2层），详见 skills/computer-use/GROUNDING.md。
+# 格式说明：本模板是内核实际解析的格式（api/baseUrl/apiKey/models[].id/input/supportsTools/contextWindow/maxTokens）。
 # =============================================
+
+# Tiffa models.yml
+
 providers:
-  # ── 本地模型（零成本，完全离线）──
-  # 需先启动 llama.cpp 服务器:
-  #   llama-server -m 模型路径.gguf --host 127.0.0.1 --port 11434
-  llama-local:
-    type: openai
-    baseUrl: "http://LOCALHOST:11434/v1"
-    apiKey: "not-needed"
+  kimi:
+    baseUrl: "https://api.moonshot.cn/v1"
+    api: "openai-completions"
+    apiKey: "none"  # 发布版已清空：使用者在此填自己的 Key（或改用旁路/MCP/auth）
     models:
-      - name: "llama-local"
-        label: "本地模型"
-        disabled: false
+      - id: "kimi-k3"
+        name: "Kimi K3 (最新旗舰)"
+        reasoning: true
+        input:
+          - "text"
+          - "image"
+        supportsTools: true
+        contextWindow: 262144
+        maxTokens: 32768
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
 
-# =============================================
-# 国内云 API（按需填写 Key 后启用）
-# 以下是常见提供方的配置示例，填入真实 Key 即可用。
-# =============================================
+  xiaomi:
+    baseUrl: "https://api.xiaomimimo.com/v1"
+    api: "openai-completions"
+    apiKey: "none"  # 发布版已清空：使用者在此填自己的 Key（或改用旁路/MCP/auth）
+    models:
+      - id: "mimo-v2.5"
+        name: "MiMo-V2.5 (轻量快速)"
+        reasoning: false
+        input:
+          - "text"
+        supportsTools: true
+        contextWindow: 128000
+        maxTokens: 8192
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
+      - id: "mimo-v2.5-pro"
+        name: "MiMo-V2.5-Pro (旗舰推理)"
+        reasoning: true
+        input:
+          - "text"
+        supportsTools: true
+        contextWindow: 128000
+        maxTokens: 8192
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
 
-# --- Kimi（Moonshot）---
-# 注册: https://platform.moonshot.cn/
-# kimi:
-#   type: openai
-#   baseUrl: "https://api.moonshot.cn/v1"
-#   apiKey: "YOUR_KIMI_API_KEY"
-#   models:
-#     - name: "kimi-k3"
-#       label: "Kimi K3"
-#       disabled: false
+  llama.cpp:
+    baseUrl: "http://LOCALHOST:11434/v1"
+    api: "openai-completions"
+    apiKey: "none"
+    models:
+      - id: "localmodel"
+        name: "家用模型（本地直连）"
+        reasoning: true
+        input:
+          - "text"
+          - "image"
+        supportsTools: true
+        contextWindow: 262144
+        maxTokens: 8192
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
 
-# --- 火山方舟（豆包 / GLM 等，Coding Plan）---
-# 注册: https://console.volcengine.com/ark
-# volcengine:
-#   type: openai
-#   baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3"
-#   apiKey: "YOUR_ARK_API_KEY"
-#   models:
-#     - name: "doubao-seed-2-1-turbo-260628"
-#       label: "豆包 Seed 2.1 Turbo"
-#       disabled: false
-#     - name: "glm-5.2"
-#       label: "GLM-5.2 (Coding Plan)"
-#       disabled: false
+  local-server:
+    baseUrl: "http://YOUR_SERVER_IP:9876/v1"
+    api: "openai-completions"
+    apiKey: "none"
+    models:
+      - id: "localmodel"
+        name: "家用模型（远程中继）"
+        reasoning: true
+        input:
+          - "text"
+          - "image"
+        supportsTools: true
+        contextWindow: 262144
+        maxTokens: 8192
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
 
-# --- 硅基流动（性价比高）---
-# 注册: https://www.siliconflow.cn/
-# siliconflow:
-#   type: openai
-#   baseUrl: "https://api.siliconflow.cn/v1"
-#   apiKey: "YOUR_SILICONFLOW_API_KEY"
-#   models:
-#     - name: "deepseek-ai/DeepSeek-V3"
-#       label: "DeepSeek V3"
-#       disabled: false
+  volcengine:
+    baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3"
+    api: "openai-completions"
+    apiKey: "none"  # 发布版已清空：使用者在此填自己的 Key（或改用旁路/MCP/auth）
+    models:
+      - id: "glm-5.2"
+        name: "GLM-5.2 (火山方舟 Coding Plan)"
+        reasoning: true
+        input:
+          - "text"
+        supportsTools: true
+        contextWindow: 1024000
+        maxTokens: 32768
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
 
-# --- 阿里云百炼 ---
-# 注册: https://bailian.console.aliyun.com/
-# aliyun:
-#   type: openai
-#   baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-#   apiKey: "YOUR_ALIYUN_API_KEY"
-#   models:
-#     - name: "qwen-plus"
-#       label: "通义千问 Plus"
-#       disabled: false
+  minimax:
+    baseUrl: "https://api.minimax.chat/v1"
+    api: "openai-completions"
+    apiKey: "none"  # 发布版已清空：使用者在此填自己的 Key（或改用旁路/MCP/auth）
+    models:
+      - id: "MiniMax-M3"
+        name: "MiniMax M3 (100万上下文)"
+        reasoning: false
+        input:
+          - "text"
+        supportsTools: true
+        contextWindow: 1000000
+        maxTokens: 131072
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
+      - id: "MiniMax-M2.7"
+        name: "MiniMax M2.7"
+        reasoning: false
+        input:
+          - "text"
+          - "image"
+        supportsTools: true
+        contextWindow: 204800
+        maxTokens: 131072
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
+
+  deepseek:
+    baseUrl: "https://api.deepseek.com"
+    api: "openai-completions"
+    apiKey: "none"  # 发布版已清空：使用者在此填自己的 Key（或改用旁路/MCP/auth）
+    # 关闭强制思考：内核内置 deepseek compat 带 extraBody.thinking.type=enabled（每回合强制思考），
+    # 实测 deepseek-v4-flash 在思考模式下 agent 任务不稳定（思考200字就提前 end_turn → "回复到一半停/反复停止"），
+    # 而 localmodel（本地模型无 reasoning）反而稳定。实测 API 接受 thinking.disabled（不再返回 reasoning_content）。
+    compat:
+      extraBody:
+        thinking:
+          type: "disabled"
+    models:
+      - id: "deepseek-v4-flash"
+        name: "deepseek-v4-flash"
+        reasoning: true
+        input:
+          - "text"
+        supportsTools: true
+        contextWindow: 1048576
+        maxTokens: 32768 # 实测 API 支持 32768+；原 8192 被 thinking 占满导致"回复到一半停"(finish_reason=length)
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
+      - id: "deepseek-v4-pro"
+        name: "deepseek-v4-pro"
+        reasoning: false
+        input:
+          - "text"
+        supportsTools: true
+        contextWindow: 128000
+        maxTokens: 32768 # 实测 API 支持 32768
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
+
+  bypass-dynamic:
+    # 动态旁路模型：claude-mode-extension.ts 在 session_start 时按 bypass-model.json 自动更新
+    baseUrl: "http://YOUR_SERVER_IP:11434/v1"
+    api: "openai-completions"
+    apiKey: "none"
+    models:
+      - id: "localmodel"
+        name: "旁路模型（动态视觉）"
+        reasoning: true
+        input:
+          - "text"
+          - "image"
+        supportsTools: true
+        contextWindow: 262144
+        maxTokens: 16384
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0

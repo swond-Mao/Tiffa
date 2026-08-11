@@ -225,9 +225,119 @@ export default async function (pi: any) {
   }
 
   // ── 0. session_start ── 移除无用工具 + 确保记忆工具可用 + 解除标题禁用
+  // ── 动态视觉模型同步：bypass-model.json → models.yml bypass-dynamic provider + config.yml modelRoles.vision ──
+  // 发布者/用户改 bypass-model.json（地址/模型），下次会话启动后 inspect_image 看图自动跟随。
+  // 只读 bypass-model.json（不 fallback 到 default 角色，避免把 vision 指向 text 模型）。
+  function readBypassConfig(): { baseUrl: string; apiKey: string; model: string } | null {
+    try {
+      const p = join(AGENT_DIR, "bypass-model.json")
+      if (!existsSync(p)) return null
+      const c = JSON.parse(readFileSync(p, "utf8")) as { baseUrl?: string; apiKey?: string; model?: string; enabled?: boolean }
+      if (c && c.enabled !== false && c.baseUrl && c.model) {
+        return { baseUrl: String(c.baseUrl).replace(/\/+$/, ""), apiKey: c.apiKey || "EMPTY", model: c.model }
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  function readVisionFallbackConfig(): { baseUrl: string; apiKey: string; model: string } | null {
+    try {
+      const p = join(AGENT_DIR, "vision-fallback.json")
+      if (!existsSync(p)) return null
+      const c = JSON.parse(readFileSync(p, "utf8")) as { baseUrl?: string; apiKey?: string; model?: string; enabled?: boolean }
+      if (c && c.enabled !== false && c.baseUrl && c.model) {
+        return { baseUrl: String(c.baseUrl).replace(/\/+$/, ""), apiKey: c.apiKey || "EMPTY", model: c.model }
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  // 看图模型降级链（session_start 时探测）：bypass(免费) → vision-fallback(如 doubao) → 放弃。
+  // 用户可手配 2 层：data/agent/bypass-model.json（第1层）+ data/agent/vision-fallback.json（第2层，可填豆包等付费可靠模型）。
+  // 类似压缩五级链：逐个 probeEndpoint 探活，第一个可达的作为 inspect_image 的视觉模型。
+  async function syncVisionWithFallback(): Promise<void> {
+    try {
+      const candidates = [readBypassConfig(), readVisionFallbackConfig()].filter(Boolean) as { baseUrl: string; apiKey: string; model: string }[]
+      if (candidates.length === 0) {
+        log("vision-bypass.skip", "无旁路/回退视觉配置，vision 保持现状")
+        return
+      }
+      let bypass: { baseUrl: string; apiKey: string; model: string } | null = null
+      for (const c of candidates) {
+        try {
+          const reachable = await probeEndpoint(c.baseUrl, c.apiKey)
+          if (reachable) {
+            bypass = c
+            log("vision-bypass.probe-ok", `${c.model} @ ${c.baseUrl} 可达，采用`)
+            break
+          }
+          log("vision-bypass.probe-fail", `${c.model} @ ${c.baseUrl} 不可达 -> next`)
+        } catch (e: any) {
+          log("vision-bypass.probe-error", `${c.model} @ ${c.baseUrl} 探测异常: ${e?.message || e}`)
+        }
+      }
+      if (!bypass) {
+        log("vision-bypass.skip", "所有视觉候选不可达，vision 保持现状")
+        return
+      }
+      const modelsPath = join(AGENT_DIR, "models.yml")
+      if (!existsSync(modelsPath)) return
+      let yml = readFileSync(modelsPath, "utf8")
+      const key = !bypass.apiKey || bypass.apiKey === "EMPTY" ? "none" : bypass.apiKey
+      const block =
+        `  bypass-dynamic:\n` +
+        `    # 动态旁路模型：claude-mode-extension.ts 在 session_start 时按降级链(bypass→fallback)自动更新\n` +
+        `    baseUrl: "${bypass.baseUrl}/v1"\n` +
+        `    api: "openai-completions"\n` +
+        `    apiKey: "${key}"\n` +
+        `    models:\n` +
+        `      - id: "${bypass.model}"\n` +
+        `        name: "旁路模型（动态视觉）"\n` +
+        `        reasoning: true\n` +
+        `        input:\n` +
+        `          - "text"\n` +
+        `          - "image"\n` +
+        `        supportsTools: true\n` +
+        `        contextWindow: 262144\n` +
+        `        maxTokens: 16384\n` +
+        `        cost:\n` +
+        `          input: 0\n` +
+        `          output: 0\n` +
+        `          cacheRead: 0\n` +
+        `          cacheWrite: 0`
+      if (yml.includes("bypass-dynamic:")) {
+        // 只匹配到下一个顶层 provider（2空格缩进的 `键:` 行）或文件尾；
+        // 不能用 `\n\s*\S` 做 lookahead——块内任意非空行都会命中，导致只替换块开头。
+        yml = yml.replace(/  bypass-dynamic:[\s\S]*?(?=\n  [\w.-]+:|$)/, block)
+      } else {
+        yml = yml.replace(/\s*$/, "\n\n" + block + "\n")
+      }
+      writeFileSync(modelsPath, yml, "utf8")
+      const cfgPath = join(AGENT_DIR, "config.yml")
+      if (existsSync(cfgPath)) {
+        let cfg = readFileSync(cfgPath, "utf8")
+        const visionLine = `  vision: "bypass-dynamic/${bypass.model}"`
+        if (/^\s*vision:/m.test(cfg)) {
+          cfg = cfg.replace(/^\s*vision:.*$/m, visionLine)
+        } else {
+          cfg = cfg.replace(/^modelRoles:/m, "modelRoles:\n" + visionLine)
+        }
+        writeFileSync(cfgPath, cfg, "utf8")
+      }
+      log("vision-bypass.sync", `vision → ${bypass.model} @ ${bypass.baseUrl}`)
+    } catch (e: any) {
+      log("vision-bypass.sync.error", e?.message || String(e))
+    }
+  }
+
   pi.on("session_start", async () => {
     resetSkillState()
     await sanitizeTools("session_start")
+    void syncVisionWithFallback()
     // 内核在 rpc-ui/rpc/acp 模式下设置 PI_NO_TITLE=1，完全禁用 AI 标题生成。
     // 桌面端用 rpc-ui 模式，需要标题生成功能，在此解除禁用。
     // 必须在 session_start（内核启动后、首次对话前）执行，早于内核的 title 生成检查。

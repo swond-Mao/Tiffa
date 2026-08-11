@@ -4,10 +4,7 @@
 
 **Play against all things; walk with time as your companion.** A **fully portable, absolutely private** local AI assistant. It remembers you, goes with you on a USB stick, and even a 3.5GB Q1_0 quantized model runs full agent tasks stably.
 
-[![based on oh-my-pi](https://img.shields.io/badge/based%20on-oh%20my%20pi%20v17.0.7-blue)](https://github.com/can1357/oh-my-pi)
-[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows-9cf)](https://github.com/swond-Mao/Tiffa)
-[![stars](https://img.shields.io/github/stars/swond-Mao/Tiffa?style=social)](https://github.com/swond-Mao/Tiffa/stargazers)
+Based on [oh-my-pi v17.0.7](https://github.com/can1357/oh-my-pi) · MIT License · Windows
 
 > 🔗 **Built on the open-source [oh my pi (OMP)](https://github.com/can1357/oh-my-pi) framework v17.0.7** — a deep customization, not built from scratch. Upstream ⭐: <https://github.com/can1357/oh-my-pi> · Site: <https://omp.sh>
 
@@ -42,7 +39,7 @@ Have you ever felt this way — you've been talking to an AI for three months an
 
 ## Architecture
 
-![Tiffa Architecture](architecture.svg)
+![Tiffa Architecture](architecture.png)
 
 ---
 

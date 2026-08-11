@@ -4,10 +4,7 @@
 
 **与万物对弈，伴时间同行** — 一款**完全便携、绝对隐私**的本地 AI 助手。它会记住你，拔盘就走，连 3.5GB 的 Q1_0 量化小模型都能稳定干完智能体任务。
 
-[![based on oh-my-pi](https://img.shields.io/badge/based%20on-oh%20my%20pi%20v17.0.7-blue)](https://github.com/can1357/oh-my-pi)
-[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows-9cf)](https://github.com/swond-Mao/Tiffa)
-[![stars](https://img.shields.io/github/stars/swond-Mao/Tiffa?style=social)](https://github.com/swond-Mao/Tiffa/stargazers)
+基于 [oh-my-pi v17.0.7](https://github.com/can1357/oh-my-pi) · MIT License · Windows
 
 > 🔗 **基于开源框架 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi) v17.0.7 深度定制**，非从零手搓。上游 ⭐：<https://github.com/can1357/oh-my-pi> · 官网 <https://omp.sh>
 
@@ -42,7 +39,7 @@
 
 ## 架构
 
-![Tiffa 架构](architecture.svg)
+![Tiffa 架构](architecture.png)
 
 ---
 

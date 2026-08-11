@@ -203,14 +203,27 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 
 ### 架构
 
-| 文件 | 行数 | 说明 |
-|------|-----|------|
-| `electron/main.js` | 2729 | 主进程：TiffaInstanceManager + 55 个 IPC handler + 窗口/图标管理 + /omfg 拦截 |
-| `electron/preload.js` | 133 | contextBridge + marked + hljs + IPC 桥接 |
-| `electron/renderer/app.js` | 5896 | 渲染进程主逻辑 |
-| `electron/renderer/styles.css` | 3933 | HSL Token 主题系统 + 全组件样式 |
-| `electron/renderer/themes.js` | 675 | 主题引擎：7 套预设 × light/dark/system |
-| `electron/renderer/index.html` | — | 主界面 HTML |
+**⚠️ 2026-08-10 前端已从 vanilla JS 迁移到 React + TypeScript（Vite 构建）。本小节为迁移后的权威描述。**
+
+**铁律 1：`electron/renderer/src/` 是唯一真源码。** 旧版 `electron/renderer/app.js`（5896 行 vanilla）**已于 2026-08-11 删除**（git 历史可恢复）。**任何旧文档/代码里出现 `app.js` 的函数名（`followScroll` / `cycleApprovalMode` / `handleExited` / `createAssistantMessageElement` 等），一律去 `src/` 找对应实现——不要重建它、不要按旧逻辑改**。
+
+**铁律 2：运行时加载的是 `dist/index.html`（构建产物），不是源码。** **禁止手改 `dist/assets/*.js` / `*.css`**（会被下次构建覆盖）。改 `src/*.ts(x)` 或 `styles.css` 后必须重新构建。
+
+| 文件 | 说明 |
+|------|------|
+| `electron/main.js` | 主进程：TiffaInstanceManager + 55+ IPC handler + 窗口/图标（迁移中未改动，仍是权威） |
+| `electron/preload.js` | contextBridge + marked + hljs + IPC 桥接（迁移中未改动） |
+| `electron/renderer/src/` | **React+TS 真源码**：`main.tsx` 入口 / `App.tsx` / `components/`（ChatView、MessageBubble、ApprovalModeButton、ModelPicker、StatusBar、SettingsPanel、AskModal…）/ `services/`（**eventRouter.ts**=事件路由、**sessionController.ts**=会话控制）/ `stores/`（useChatStore、useUiStore、useSessionsStore、useProcStore） |
+| `electron/renderer/styles.css` | **两套前端共用的样式源**（React 构建时打包进 dist）。改样式改这里，不是 dist 里的 CSS |
+| `electron/renderer/themes.js` + `public/themes.js` | 主题引擎：7 套预设 × light/dark/system（vite 原样复制到 dist，活的） |
+| `electron/renderer/index.html` | Vite dev 入口：引 `/src/main.tsx` + `styles.css` + `/themes.js` |
+| `electron/renderer/dist/` | **构建产物（勿手改）**，main.js 加载其中的 index.html |
+| `electron/renderer/vite.config.ts` / `tsconfig.json` | 构建/TS 配置 |
+
+**构建命令**：`cd electron && npm run build:renderer`（= `vite build --config renderer/vite.config.ts`，产物到 `renderer/dist/`，node_modules 在 `electron/` 下）。
+**生效规则**：改 `src/` 或 `styles.css` → **必须构建才生效**；改 `main.js` / `preload.js` → 直接生效，无需构建。
+
+**⚠️ 构建环境坑**：在 WorkBuddy Bash 里构建会被 safe-delete 垫片拦（vite 清空 dist 失败）→ 先 `mv dist dist_old_$(date +%H%M%S)` 改名再构建；普通 PowerShell/终端直接 `npm run build:renderer` 无此问题。
 
 ### 窗口
 
@@ -252,11 +265,25 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 
 ### 前端要点
 
-- **滚动跟随** = `app.js` 的 `followScroll` 三态机，是唯一权威。`scrollToBottom(force)` 只是薄壳。**新增滚动需求改控制器，别在调用点各自写 `scrollTop`**。程序滚动必须临时 `scrollBehavior='auto'`（CSS `scroll-behavior: smooth` 与流式写 `scrollTop` 互斥会「跟丢」）；会话恢复 `scrollTop` 后要补 `followScroll.sync()`
+- **滚动跟随** = 迁移前 `app.js` 的 `followScroll` 三态机，React 版在 `src/` 有对应实现（Grep 搜 `followScroll` 定位，别按旧文件找）。`scrollToBottom(force)` 只是薄壳。**新增滚动需求改控制器，别在调用点各自写 `scrollTop`**。程序滚动必须临时 `scrollBehavior='auto'`（CSS `scroll-behavior: smooth` 与流式写 `scrollTop` 互斥会「跟丢」）；会话恢复 `scrollTop` 后要补 `followScroll.sync()`
 - **模型白名单**（`enabled-models.json`）：`undefined` = 全部显示，**只在用户显式配置时才激活**。添加供应商向导不得在 `undefined` 时自动激活；删除供应商后白名单整体孤儿化 → 重置为 `undefined`
 - **输出后处理**：fixBareUrls、fixCodeBlockLanguages、applyOutputFixes
 - **ToolCard**：智能摘要 + Diff 视图（summarizeToolCall / extractDiff / renderDiffView）
 - **右侧栏**：文件树、Todo 面板、预览区（代码/图片/HTML/MD）
+
+### 迁移后已修问题速查（2026-08-10/11 实修，勿重复排查、勿回退）
+
+| 问题 | 修复位置 | 说明 |
+|------|---------|------|
+| 审批切换显示"实例断开" | `ApprovalModeButton.tsx` + `eventRouter.ts` | 重启前 `setApprovalModeRestarting(true)`，`handleExited` 见标志直接 return |
+| 流式"小框刷字" | `MessageBubble.tsx` + `styles.css` | 流式消息挂 `.streaming` class，CSS `.message.streaming{content-visibility:visible}`（`:last-child` 方案已弃，脆弱） |
+| 模型显示漂移 | `eventRouter.ts` + `sessionController.ts` | `config_update` 取 `m.name\|\|m.id`（勿用 `String(对象)`）；`model_changed` 事件已接 |
+| 模型不可达无提示 | `eventRouter.ts` | 内核发 `notice` 非 `error`；agent_end 检测空回复 → "模型未返回内容（可能服务器不可达…）" |
+| 手动压缩无反应 | `sessionController.ts` | 不再吞错，`压缩失败: <原因>` 透出（`Nothing to compact` = 会话太小，正常） |
+| 点模型名白屏 | `SettingsPanel.tsx` ModelEntryRow | React hooks 违规 #310 已修；**hooks 必须无条件调用** |
+| 切换审批 JS 报错弹窗 | `main.js` | 已加 `uncaughtException`/`unhandledRejection` 全局捕获（记日志不弹窗） |
+| 输出到一半停 | `data/agent/models.yml` | **真因**：`supportsTools: false`（工具协议退化 → Tool not found）+ `maxTokens` 8192 过小（finish_reason=length）。已修：supportsTools 恢复 true、maxTokens→32768。⚠️ 曾误加 compat `extraBody.thinking.type: disabled` 治"提前 end_turn"，2026-08-11 复盘确认为误修（与 thinking 无关），已移除恢复 thinking；再遇此问题勿再关 thinking |
+| 事件可见性丢失 | `eventRouter.ts` | 已接 `auto_compaction_start/end`、`retry_fallback_applied/succeeded`、`thinking_level_changed`、`extension_error` |
 
 ---
 

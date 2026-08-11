@@ -2,16 +2,16 @@
   "mcpServers": {
     "computer-use": {
       "type": "stdio",
-      "command": "{{PORTABLE_ROOT}}/python/python.exe",
+      "command": "E:/Tiffa/python/python.exe",
       "args": [
         "-u",
-        "{{PORTABLE_ROOT}}/skills/computer-use/computer_use_mcp.py"
+        "E:/Tiffa/skills/computer-use/computer_use_mcp.py"
       ],
       "env": {
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUNBUFFERED": "1"
       },
-      "enabled": false,
+      "enabled": true,
       "timeout": 300000
     }
   }
