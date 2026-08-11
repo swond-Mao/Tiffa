@@ -4,9 +4,9 @@
 
 **与万物对弈，伴时间同行** — 一款**完全便携、绝对隐私**的本地 AI 助手。它会记住你，拔盘就走，连 3.5GB 的 Q1_0 量化小模型都能稳定干完智能体任务。
 
-基于 [oh-my-pi v17.0.7](https://github.com/can1357/oh-my-pi) · MIT License · Windows
+基于 [oh-my-pi v17.2.2](https://github.com/can1357/oh-my-pi) · MIT License · Windows
 
-> 🔗 **基于开源框架 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi) v17.0.7 深度定制**，非从零手搓。上游 ⭐：<https://github.com/can1357/oh-my-pi> · 官网 <https://omp.sh>
+> 🔗 **基于开源框架 [oh my pi（OMP）](https://github.com/can1357/oh-my-pi) v17.2.2 深度定制**，非从零手搓。上游 ⭐：<https://github.com/can1357/oh-my-pi> · 官网 <https://omp.sh>
 
 ---
 
@@ -31,8 +31,8 @@
 - **绝对隐私** — 不登录、不注册、不在服务器留任何记录；数据全在 U 盘。
 - **弱模型可用** — 本地 / 云通吃，七层基础设施兜底，Q1_0 也能干活。
 - **约束系统** — 三层约束（TTSR 13 条 / 行为约束 / tool_call 熔断），用代码管住模型。
-- **操作电脑** — Computer Use v2：UIA 四级降级，直接操控 Windows 桌面。
-- **桌面前端** — Electron GUI，多工作区 / 多会话 / 模型选择器 / 双 Tab / Diff / 7 主题。
+- **操作电脑** — Computer Use v3：UIA 原子工具集 + 五级降级，直接操控 Windows 桌面。
+- **桌面前端** — Electron GUI（React + TypeScript），多工作区 / 多会话 / 模型选择器 / 双 Tab / Diff / 7 主题。
 - **完全便携** — 一个文件夹就是全部，拷到 U 盘插上即用。
 
 ---
@@ -139,7 +139,8 @@ Tiffa 不靠"说得好听"的提示词逼模型就范，而是**用代码一层�
 不止写代码——Tiffa 能直接操控你的 Windows 桌面：
 
 - **原子工具集**：`ui_inspect`（读控件树）/ `ui_act`（点击输入）/ `ui_screenshot`（截图）/ `desktop_input`（键鼠）/ `computer_use`（一体化）
-- **四级降级**：UIA Pattern 直调 → 精确坐标点击 → SoM 编号标注 → 归一化坐标兜底
+- **五级降级**：UIA Pattern 直调 → 精确坐标点击 → SoM 编号标注 → 归一化坐标兜底 → OCR 文本识别
+- **三阶段强制流程**：应用探测（不可跳过）→ 策略选择（有 CLI/API/COM 后台通道优先）→ 执行
 - **默认 VLM**：豆包 `doubao-seed` 视觉模型，可在后台「MCP 模型」栏手配
 
 > 老实说：它不算特别好用。复杂界面、动态弹窗、自绘控件仍有失手，现阶段更适合"点固定按钮、填固定表单"这类确定性任务。但它确实存在——本地助手里能直接操作桌面的，不多。
@@ -148,7 +149,7 @@ Tiffa 不靠"说得好听"的提示词逼模型就范，而是**用代码一层�
 
 ## 桌面前端
 
-Electron GUI，不是终端里的一行行文字：
+Electron GUI（React + TypeScript 渲染层），不是终端里的一行行文字：
 
 - 项目侧栏 — 多工作区切换，归档不丢
 - 会话标签 — 每个对话独立模型、独立记忆
@@ -187,11 +188,32 @@ Tiffa/           ← 这一个文件夹就是全部
 
 - 不写注册表
 - 不装全局包
-- 不在 `%APPDATA%` / `%LOCALAPPDATA%` 留任何文件
+- 不在 `%APPDATA%` / `%LOCALAPPDATA%` 留任何文件（userData 锁定到包内 `data/electron-userdata`，HOME / USERPROFILE 重定向到包内 `home/`）
+- **npm / pip 缓存也指向包内** `.cache/`，安装与运行全程零 C 盘写入
 - 工作区（workspace/）也在 U 盘里，不碰目标电脑的硬盘
 - 不登录、不注册、不在服务器留任何记录
 
 你在公司电脑用完，拔盘带走。回家插上，所有记忆、项目、配置原封不动。没有账号，没有云端，没有任何地方留存你的使用痕迹。
+
+---
+
+## 安装
+
+```bat
+install.bat        :: 一键安装（国内镜像，自动下载 Node / Bun / 内核 / Electron / Python / 离线 embedding 模型）
+```
+
+- 断点可重入：中断后重跑自动跳过已完成的步骤
+- 安装过程中所有下载缓存都落在包内 `.cache/`，装完即可整包拷走
+- 首次启动会引导你给 AI 起名字（默认 Tiffa）
+
+---
+
+## 工程化：CI / 测试 / 发布
+
+- **CI 质量门禁**（GitHub Actions）：typecheck → 单测（main.test.js 21 项 + vitest 4 项）→ 渲染层构建 → 产物校验，红叉不收工
+- **三层自动测试**：① 协议 E2E（真实内核 spawn 全链路）→ ② agent 自跑（让 Tiffa 给自己体检）→ ③ 浏览器 UI 验证
+- **一键发布**：`cd electron && npm run release`——全检通过后自动打 tag、推三远端（gitee / github / gitcode）
 
 ---
 

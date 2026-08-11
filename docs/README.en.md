@@ -4,9 +4,9 @@
 
 **Play against all things; walk with time as your companion.** A **fully portable, absolutely private** local AI assistant. It remembers you, goes with you on a USB stick, and even a 3.5GB Q1_0 quantized model runs full agent tasks stably.
 
-Based on [oh-my-pi v17.0.7](https://github.com/can1357/oh-my-pi) · MIT License · Windows
+Based on [oh-my-pi v17.2.2](https://github.com/can1357/oh-my-pi) · MIT License · Windows
 
-> 🔗 **Built on the open-source [oh my pi (OMP)](https://github.com/can1357/oh-my-pi) framework v17.0.7** — a deep customization, not built from scratch. Upstream ⭐: <https://github.com/can1357/oh-my-pi> · Site: <https://omp.sh>
+> 🔗 **Built on the open-source [oh my pi (OMP)](https://github.com/can1357/oh-my-pi) framework v17.2.2** — a deep customization, not built from scratch. Upstream ⭐: <https://github.com/can1357/oh-my-pi> · Site: <https://omp.sh>
 
 ---
 
@@ -31,8 +31,8 @@ Have you ever felt this way — you've been talking to an AI for three months an
 - **Absolute privacy** — no login, no registration, no trace on any server; all data stays on a USB stick.
 - **Works with weak models** — local and cloud both welcome; seven-layer infrastructure backstops even a Q1_0.
 - **Constraint system** — three layers (TTSR 13 rules / behavioral constraints / tool_call circuit-breaker), model behavior governed by code.
-- **Operates the computer** — Computer Use v2 with UIA four-tier degradation, drives your Windows desktop directly.
-- **Desktop frontend** — Electron GUI: multi-workspace / multi-session / model selector / dual tabs / Diff / 7 themes.
+- **Operates the computer** — Computer Use v3 with UIA atomic toolset and five-tier degradation, drives your Windows desktop directly.
+- **Desktop frontend** — Electron GUI (React + TypeScript): multi-workspace / multi-session / model selector / dual tabs / Diff / 7 themes.
 - **Fully portable** — one folder is everything; copy to a USB drive and run.
 
 ---
@@ -139,7 +139,8 @@ Tiffa doesn't rely on "nicely-worded" prompts to force the model into line — i
 Not just writing code — Tiffa can directly operate your Windows desktop:
 
 - **Atomic toolset**: `ui_inspect` (read control tree) / `ui_act` (click & type) / `ui_screenshot` (screenshot) / `desktop_input` (mouse & keyboard) / `computer_use` (all-in-one)
-- **Four-tier degradation**: UIA Pattern direct call → precise coordinate click → SoM numbered labeling → normalized coordinates fallback
+- **Five-tier degradation**: UIA Pattern direct call → precise coordinate click → SoM numbered labeling → normalized coordinates fallback → OCR text recognition
+- **Mandatory three-phase flow**: app probe (cannot skip) → strategy selection (prefer CLI/API/COM back-channel) → execution
 - **Default VLM**: Doubao `doubao-seed` vision model, configurable in the background "MCP Models" field
 
 > Honestly: it's not especially great. Complex interfaces, dynamic popups, and owner-drawn controls still miss. At this stage it's better suited for deterministic tasks like "click a fixed button, fill a fixed form." But it does exist — among local assistants, few can directly operate the desktop.
@@ -148,7 +149,7 @@ Not just writing code — Tiffa can directly operate your Windows desktop:
 
 ## Desktop Frontend
 
-Electron GUI, not lines of text in a terminal:
+Electron GUI (React + TypeScript renderer), not lines of text in a terminal:
 
 - Project sidebar — multi-workspace switching, archiving without loss
 - Conversation tabs — each dialogue independent model, independent memory
@@ -187,11 +188,32 @@ Tiffa/           ← This one folder is everything
 
 - Writes no registry
 - Installs no global packages
-- Leaves no files in `%APPDATA%` / `%LOCALAPPDATA%`
+- Leaves no files in `%APPDATA%` / `%LOCALAPPDATA%` (userData locked to `data/electron-userdata`, HOME / USERPROFILE redirected to `home/`)
+- **npm / pip caches also point into the package** `.cache/` — zero C-drive writes during both install and runtime
 - The workspace (workspace/) is also on the USB drive, touching none of the target computer's hard disk
 - No login, no registration, no records left on any server
 
 You finish on the office computer, pull the drive and take it. Plug in at home — all memory, projects, and config intact. No account, no cloud, nowhere that retains your usage traces.
+
+---
+
+## Install
+
+```bat
+install.bat        :: One-click install (China mirrors; auto-downloads Node / Bun / core / Electron / Python / offline embedding models)
+```
+
+- Resumable: re-run after an interruption auto-skips completed steps
+- All download caches land in the package's `.cache/` — copy the whole folder away once done
+- First launch walks you through naming your AI (default: Tiffa)
+
+---
+
+## Engineering: CI / Tests / Release
+
+- **CI quality gate** (GitHub Actions): typecheck → unit tests (main.test.js 21 + vitest 4) → renderer build → artifact verification — no merge while red
+- **Three-layer automated testing**: ① protocol E2E (full chain spawning the real core) → ② agent self-run (let Tiffa examine itself) → ③ browser UI verification
+- **One-command release**: `cd electron && npm run release` — auto-tags and pushes to three remotes (gitee / github / gitcode) after all checks pass
 
 ---
 

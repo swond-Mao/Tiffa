@@ -1,11 +1,11 @@
-# AGENTS.md — Tiffa 项目规范（v7 · 2026-08-05）
+# AGENTS.md — Tiffa 项目规范（v8 · 2026-08-11）
 
-> 本文所有数字均在 2026-08-05 现场核实。
+> 本文所有数字均在 2026-08-11 现场核实。
 > 详细设计与踩坑记录见 `开发文档.md`；本文只保留每会话必须常驻的规范。
 
 ## 项目概述
 
-Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Electron 桌面壳 + Bun 内核子进程（JSONL over stdin/stdout）。
+Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.2.2 的便携 AI 工作台，Electron 桌面壳 + Bun 内核子进程（JSONL over stdin/stdout）。
 
 **核心理念**：搭内核的车。扩展只保留内核原生不覆盖的功能，其余全部交给内核。
 
@@ -14,17 +14,19 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 | 路径 | 说明 |
 |------|------|
 || `$ROOT` | 便携包根目录（`PORTABLE_ROOT`） |
-| `npm-global\node_modules\@oh-my-pi\pi-coding-agent\` | Tiffa 内核 (v17.0.7) |
+| `npm-global\node_modules\@oh-my-pi\pi-coding-agent\` | Tiffa 内核 (v17.2.2) |
 | `npm-global\node_modules\bun\bin\bun.exe` | Bun 运行时 (v1.3.14) |
 | `python\python.exe` / `node\node.exe` | Python / Node.js 运行时 |
 | `data\agent\` | 配置目录 (config.yml, models.yml, agent.db, models.db) |
 | `data\agent\rules\` | TTSR 规则目录（**13 条**，零 context 成本约束） |
 | `data\agent\memories\mnemopi\` | Mnemopi 记忆数据库 |
 | `data\memory\` | USER.md / constraints-inject.md / inbox/ |
-| `plugins\claude-mode-extension.ts` | Claude 化扩展 v6.2（779 行） |
+| `plugins\claude-mode-extension.ts` | Claude 化扩展 v6.2（1477 行） |
 | `plugins\computer-use-extension.ts` | 桌面自动化扩展（128 行） |
 | `electron\assets\` | 品牌图标 `tiffa-icon.ico`（7 尺寸）/ `.png` |
-| `skills\` | 专业技能目录（**19 个**） |
+| `skills\` | 专业技能目录（**22 个**） |
+| `data\agent\managed-skills\` | 内核托管技能（22 个，随内核同步） |
+| `.cache\` | npm / pip 缓存（install 注入，全程不写 C 盘） |
 | `workspace\` | 工作区根目录 |
 | `tiffa-desktop.exe` | 桌面启动器（C# winexe，已嵌入图标） |
 
@@ -96,6 +98,8 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.0.7 的便携 AI 工作台，Elec
 | L4 | 项目 bank | 项目近期进度 | 语义召回（优先） |
 
 > **压缩时对话连续性**：不再依赖独立的 gap-fill 层（2026-08-05 已废弃，每会话独立 dump + 60 分钟清理维护成本过高且与 Mnemopi 重叠）。会话压缩由扩展 `session.compacting` hook 走 ③ 旁路结构化总结（详见下文），生成的 9 段摘要即对话连续性载体；工具调用/结果细节经 `messageToParts` 提取后进入摘要（语义级），无需每会话额外 dump。
+
+> **隐私设计**：`data/memory/USER.md` / `MEMORY.md` 是运行时个人数据（AI 自动填充/覆写，内核记忆整理时直接 `Bun.write` 覆写 MEMORY.md），**已 gitignore 不入库**；模板由 install.ps1 第 6 步 Ensure-MemoryTemplate 生成（已存在则跳过）。`AI.md` / `constraints-inject.md` / `design-outline.md` 为项目级模板，正常入库。**绝对不要手动 `git add -f` 这两个运行时文件。**
 
 ### 写入路由
 
@@ -211,7 +215,7 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 
 | 文件 | 说明 |
 |------|------|
-| `electron/main.js` | 主进程：TiffaInstanceManager + 55+ IPC handler + 窗口/图标（迁移中未改动，仍是权威） |
+| `electron/main.js` | 主进程：TiffaInstanceManager + **65 个** IPC handler + 窗口/图标（迁移中未改动，仍是权威） |
 | `electron/preload.js` | contextBridge + marked + hljs + IPC 桥接（迁移中未改动） |
 | `electron/renderer/src/` | **React+TS 真源码**：`main.tsx` 入口 / `App.tsx` / `components/`（ChatView、MessageBubble、ApprovalModeButton、ModelPicker、StatusBar、SettingsPanel、AskModal…）/ `services/`（**eventRouter.ts**=事件路由、**sessionController.ts**=会话控制）/ `stores/`（useChatStore、useUiStore、useSessionsStore、useProcStore） |
 | `electron/renderer/styles.css` | **两套前端共用的样式源**（React 构建时打包进 dist）。改样式改这里，不是 dist 里的 CSS |
@@ -252,7 +256,7 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 3. **删除/归档会话必须先关实例**：`_closeInstancesForSessionFile()` 按 sessionFilePath / sessionId 匹配 → `inst.kill(true)`。只删文件不关实例，内核后续写盘会把 jsonl「复活」
 4. `forceKill` 是**死代码**（全仓库无调用）。旧文档的「stall → forceKill 升级」不存在，stall 检测只在 renderer 侧 abort
 
-### IPC Handler（55 个）
+### IPC Handler（65 个）
 
 | 分组 | 数量 | 代表 |
 |------|-----|------|
@@ -304,7 +308,7 @@ Electron 主进程拦截 `/omfg <complaint>`，替换为 TTSR 规则生成/修�
 
 ---
 
-## Skills（19 个）
+## Skills（22 个）
 
 Skills 目录：`$ROOT/skills/`
 
@@ -327,7 +331,10 @@ Skills 目录：`$ROOT/skills/`
 | onboarding | 新用户引导 |
 | pdf | PDF 助手（生成/读取/合并/拆分/表单/水印） |
 | pptgen | HTML 网页演示生成器 |
+| ponytail | 极简方案强制（最懒但能用的实现，质疑过度设计） |
 | pptx-from-layouts | 模板排版 PPT 生成 |
+| shared-visual-components | 共享视觉组件库（12 套主题 + 18 组件 + 5 布局模板，视觉产出统一底座） |
+| video-prompt-gen | 视频生成提示词（MiniMax H3 方法论，三类模式） |
 | xlsx | Excel 助手 |
 
 **注意**：用户明确说"用 XX skill"才加载对应 skill（用 `read skill://<name>` 读取 SKILL.md）。不要主动建议或预判用户要哪个 skill。
@@ -401,6 +408,6 @@ Skills 目录：`$ROOT/skills/`
 
 ```bat
 node\node.exe -c electron\main.js
-node\node.exe -c electron\renderer\app.js
+cd electron && npm run typecheck   :: 渲染层 TS 检查（app.js 已删除，勿重建）
 bun build plugins\claude-mode-extension.ts --no-bundle --target=bun
 ```
