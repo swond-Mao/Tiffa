@@ -198,7 +198,9 @@ Electron GUI（React + TypeScript 渲染层），不是终端里的一行行文�
 
 ```
 Tiffa/           ← 这一个文件夹就是全部
-├── electron/    ← 桌面前端
+├── electron/    ← 桌面前端（主进程 TS 模块化 + React 渲染层）
+│   ├── main.ts  ← 入口：配置 + IPC 路由 + 生命周期
+│   └── modules/ ← 拆分模块（实例池 / 会话 / 项目 / 配置 / 窗口 / 工具）
 ├── npm-global/   ← Bun + 内核
 ├── plugins/     ← 扩展 + 技能
 ├── data/        ← 配置 + 记忆 + 会话 + 规则
@@ -232,7 +234,7 @@ install.bat        :: 一键安装（国内镜像，自动下载 Node / Bun / �
 
 ## 工程化：CI / 测试 / 发布
 
-- **CI 质量门禁**（GitHub Actions）：typecheck → 单测（main.test.js 21 项 + vitest 4 项）→ 渲染层构建 → 产物校验，红叉不收工
+- **CI 质量门禁**（GitHub Actions）：typecheck（主进程 TS + 渲染层 TS）→ 单测（main.test.js 21 项 + 主进程模块 vitest 74 项 + 渲染层 4 项 = 99 项）→ 构建（主进程 TS 编译 + 渲染层 Vite）→ 产物校验，红叉不收工
 - **三层自动测试**：① 协议 E2E（真实内核 spawn 全链路）→ ② agent 自跑（让 Tiffa 给自己体检）→ ③ 浏览器 UI 验证
 - **一键发布**：`cd electron && npm run release`——全检通过后自动打 tag、推三远端（gitee / github / gitcode）
 

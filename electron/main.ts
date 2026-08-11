@@ -1,3 +1,46 @@
+// @ts-nocheck — 本文件为 main.js 搬移的 IPC 路由代码，暂缓强类型化（渐进治理：
+// 核心类/工具函数已在 modules/ 强类型，本入口后续逐步收紧）。
+/**
+ * Tiffa Desktop - Electron Main Process (TS)
+ *
+ * 模块化治理后入口：核心类/工具函数拆到 modules/，本文件保留
+ * 配置、setupIpc（IPC 路由）、App Lifecycle。
+ */
+import { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } from 'electron';
+import path from 'path';
+import fs from 'fs';
+import { spawn, execSync as _execSync } from 'child_process';
+import cp from 'child_process';
+import yaml from 'js-yaml';
+import { parseDocument, Document } from 'yaml';
+import { StringDecoder } from 'string_decoder';
+import { TiffaInstance } from './modules/tiffa-instance';
+import { TiffaInstanceManager } from './modules/tiffa-manager';
+import { setMainWindow } from './modules/tiffa-instance';
+import { createWindow, syncCustomStartupImage } from './modules/window-setup';
+import {
+  PORTABLE_ROOT, BUN_EXE, TIFFA_CLI, EXTENSION_PATH, COMPUTER_USE_EXTENSION_PATH,
+  DEFAULT_WORKSPACE_DIR, SESSIONS_DIR, ARCHIVE_DIR, PROJECTS_JSON, REMOVED_CWDS_FILE,
+  COMPUTER_USE_ENABLED_FILE, COMPUTER_USE_MCP_JSON, AGENT_DIR, MAX_INSTANCES, LRU_KEEP_ALIVE_MS,
+  currentWorkspaceDir, setCurrentWorkspaceDir,
+} from './modules/constants';
+import {
+  extractSessionIdFromPath, _encodeSessionDirName, extractWorkspaceSuffix, stableSessionDirName,
+  findSessionFile, mainLog, readTailLines, parseSessionLines, decodeSessionDirName,
+  extractCwdFromSessionDir, isEmptySessionDir, cwdDisplayName, parseSessionHeader,
+  parseMdField, encodeSessionDirName, rotateLogIfNeeded as _rotateLogIfNeeded,
+} from './modules/session-utils';
+import { killTree, utf8Env } from './modules/process-utils';
+import { resolveDefaultModelFromConfig, findProviderConfig, callCompletion } from './modules/config-utils';
+import {
+  readRemovedCwds, writeRemovedCwds, isRemovedCwd, unremoveCwd, rimraf, rimrafWithRetry,
+  readProjectsJson, writeProjectsJson, ensureProjectInJson, cleanupProjectsJson,
+  findProjectByDirName, sessionFileBelongsToCwd, deleteSessionFilesForCwd,
+  moveSessionFilesForCwd, discoverWorkspaceProjects,
+} from './modules/project-utils';
+import { isComputerUseEnabled, syncComputerUseMcp } from './modules/computer-use-utils';
+import { tryGenerateSessionTitle } from './modules/session-utils';
+
 /**
  * Tiffa Desktop - Electron Main Process
  *
@@ -5,16 +48,8 @@
  * Protocol: JSONL over stdin/stdout (one JSON object per line)
  */
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const { spawn, execSync: _execSync } = require('child_process');
-const cp = require('child_process');
-const yaml = require('js-yaml');
-const { parseDocument, Document } = require('yaml');
-const { StringDecoder } = require('string_decoder');
 
-// ── Configuration ──
+// ── Configuration（常量从 constants 导入；仅设置 global.PORTABLE_ROOT 供旧代码兼容） ──
 // PORTABLE_ROOT: 1) --portable-root CLI arg  2) PORTABLE_ROOT env  3) parent of __dirname
 const argRootIdx = process.argv.indexOf('--portable-root');
 if (argRootIdx >= 0 && process.argv[argRootIdx + 1]) {
@@ -24,13 +59,8 @@ if (argRootIdx >= 0 && process.argv[argRootIdx + 1]) {
 } else {
   global.PORTABLE_ROOT = path.resolve(__dirname, '..');
 }
-const PORTABLE_ROOT = global.PORTABLE_ROOT;
-const BUN_EXE = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin', 'bun.exe');
-const TIFFA_CLI = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
-const EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'claude-mode-extension.ts');
-const COMPUTER_USE_EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'computer-use-extension.ts');
-const DEFAULT_WORKSPACE_DIR = path.join(PORTABLE_ROOT, 'workspace');
-let currentWorkspaceDir = DEFAULT_WORKSPACE_DIR;
+
+// 自包含便携
 
 // ── 自包含便携：把 Electron userData 锁到便携目录，localStorage/openTabs 等随 U 盘走 ──
 // 必须在 app.ready 之前调用（此处模块顶层、BrowserWindow 创建前，时机正确）。
@@ -43,29 +73,10 @@ try {
   console.warn('[portable] setPath(userData) 失败，回退系统默认:', e.message);
 }
 
-// ── Windows 进程树杀杀（SIGTERM/SIGKILL 在 Windows 上不可靠） ──
-function _killTree(pid, sync = false) {
-  if (!pid) return;
-  if (process.platform !== 'win32') {
-    try { process.kill(pid, 'SIGKILL'); } catch (e) { /* ignore */ }
-    return;
-  }
-  try {
-    const args = ['/PID', String(pid), '/T', '/F'];
-    if (sync) {
-      cp.spawnSync('taskkill', args, { windowsHide: true, stdio: 'ignore' });
-    } else {
-      cp.spawn('taskkill', args, { windowsHide: true, stdio: 'ignore' });
-    }
-  } catch (e) { /* ignore */ }
-}
+// ── Global State（模块化：实例管理器从 tiffa-manager 导入） ──
+let mainWindow = null;
+const tiffaManager = new TiffaInstanceManager();
 
-// ── 会话 ID 工具：从 sessionPath 提取 UUID（与 renderer extractSessionId 一致） ──
-function _extractSessionIdFromPath(sessionPath) {
-  if (!sessionPath) return null;
-  const match = String(sessionPath).match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
-  return match ? match[1] : null;
-}
 // 删除/归档会话前关闭持有该会话文件的实例。
 // 根因：实例内存持有 session 状态，只删 jsonl 不关实例时，内核后续任何写盘
 // （agent_end flush / switch_session / 消息追加）都会把文件"复活"，历史面板残留记录；
@@ -73,7 +84,7 @@ function _extractSessionIdFromPath(sessionPath) {
 function _closeInstancesForSessionFile(sessionPath) {
   const resolved = path.resolve(sessionPath);
   const norm = resolved.toLowerCase();
-  const targetSessionId = _extractSessionIdFromPath(resolved);
+  const targetSessionId = extractSessionIdFromPath(resolved);
   const keysToClose = [];
   for (const [key, inst] of tiffaManager.instances) {
     const sf = inst.sessionFilePath;
@@ -84,7 +95,7 @@ function _closeInstancesForSessionFile(sessionPath) {
   for (const key of keysToClose) {
     const inst = tiffaManager.instances.get(key);
     console.log(`[sessions] 关闭会话实例: ${key}`);
-    if (inst) inst.kill(true); // userKilled=true 防自动重启 + 同步树杀
+    if (inst) inst.kill(true);
     tiffaManager.instances.delete(key);
     if (tiffaManager.activeKey === key) {
       tiffaManager.activeKey = null;
@@ -93,1226 +104,22 @@ function _closeInstancesForSessionFile(sessionPath) {
   }
 }
 
-// ── 会话目录名编码：cwd -> session 目录名（与内核 cli.js WR5/d46 编码一致） ──
-// G:\Tiffa\workspace\Tiffa开发 -> --G--Tiffa-workspace-Tiffa开发--
-function _encodeSessionDirName(cwdPath) {
-  const resolved = path.resolve(cwdPath);
-  const stripped = resolved.replace(/^[/\\]/, '');
-  const encoded = stripped.replace(/[/\\:]/g, '-');
-  return '--' + encoded + '--';
-}
-
-// ── 提取 workspace/ 之后的相对路径后缀（模块顶层，供 stableSessionDirName 与 setupIpc 内各调用点共用）──
-// 原为 setupIpc 内部的嵌套函数声明；但 stableSessionDirName 被加在模块顶层后会跨作用域拿不到它，
-// 导致启动时 ReferenceError 崩溃。提升到模块顶层后，模块顶层与 setupIpc 内部都可经作用域链解析。
-// 品牌无关：优先按当前 PORTABLE_ROOT 下的 workspace 匹配（根目录改名也兼容），
-// 并兼容旧包曾放到其他盘符的迁移场景（任意 .../workspace/ 都提取后缀）。
-// 例如: E:\Tiffa\workspace\omp调试 → omp调试
-//       E:\OldPackage\workspace\ppt制作\sub → ppt制作\sub
-//       G:\some\other\path → null（不在任何 workspace 下）
-function extractWorkspaceSuffix(absPath) {
-  const normalized = absPath.replace(/\\/g, '/');
-  // 1) 当前 PORTABLE_ROOT 下的 workspace（推荐，根目录叫什么都行）
-  const workspaceRoot = path.join(PORTABLE_ROOT, 'workspace').replace(/\\/g, '/');
-  if (normalized.toLowerCase().startsWith(workspaceRoot.toLowerCase() + '/')) {
-    return normalized.slice(workspaceRoot.length + 1).replace(/\//g, path.sep);
-  }
-  // 2) 兼容迁移：旧包挪到别的盘符，按 .../workspace/ 提取相对后缀
-  const match = normalized.match(/\/workspace\/(.+)$/i);
-  if (match) return match[1].replace(/\//g, path.sep);
-  return null;
-}
-
-// ── 稳定会话目录名（与盘符/路径解耦）──
-// 内核默认按 cwd 编码目录名（含盘符），换机器盘符一变，会话就落到不同目录，
-// 导致 A/B 进度互不连续（"前端停在昨天A状态"真凶）。
-// 对 workspace 项目改用「workspace 相对后缀」做稳定名（盘符无关），main.js 与
-// 内核（通过 --session-dir 传同一目录）共用，A/B 天然映射同一目录，进度连续。
-// 外部文件夹（extractWorkspaceSuffix 为 null）保持原 cwd 编码，行为不变。
-function stableSessionDirName(cwdPath) {
-  const normalized = path.resolve(cwdPath);
-  const suffix = extractWorkspaceSuffix(normalized);
-  if (suffix) {
-    const safe = suffix.replace(/[/\\:]/g, '-');
-    return '--wks-' + safe + '--';
-  }
-  return _encodeSessionDirName(cwdPath);
-}
-
-// ── 查找会话 JSONL 文件：给定 cwd + sessionId，在 SESSIONS_DIR 下定位匹配的 .jsonl ──
-// 会话文件有两种存放模式：
-//   1. 直接在项目目录下：*_<uuid>.jsonl
-//   2. 在子目录中：*_<uuid>/<name>.jsonl
-// sessionId 是 UUID，用它做唯一匹配键
-const _SESSIONS_DIR = path.join(PORTABLE_ROOT, 'data', 'agent', 'sessions');
-function _findSessionFile(cwd, sessionId) {
-  if (!cwd || !sessionId) return null;
-  const dirName = stableSessionDirName(cwd);
-  const projectDir = path.join(_SESSIONS_DIR, dirName);
-  if (!fs.existsSync(projectDir)) return null;
-  const uuidLower = sessionId.toLowerCase();
-  try {
-    // 模式 1：直接在项目目录下的 *_<uuid>.jsonl
-    const directFiles = fs.readdirSync(projectDir)
-      .filter(f => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
-    if (directFiles.length > 0) return path.join(projectDir, directFiles[0]);
-
-    // 模式 2：子目录 *_<uuid>/ 中的 .jsonl
-    const subDirs = fs.readdirSync(projectDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
-    for (const sd of subDirs) {
-      const sdPath = path.join(projectDir, sd.name);
-      const jsonlFiles = fs.readdirSync(sdPath).filter(f => f.endsWith('.jsonl'));
-      if (jsonlFiles.length > 0) return path.join(sdPath, jsonlFiles[0]);
-    }
-  } catch {}
-
-  // 兜底：稳定目录未命中（极少见，如历史遗留盘符目录、或 extractWorkspaceSuffix 边界），
-  // 扫描所有会话目录按 sessionId(UUID) 匹配，确保不丢失任一可定位的会话。
-  try {
-    const allDirs = fs.readdirSync(_SESSIONS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory() && d.name !== dirName);
-    for (const ad of allDirs) {
-      const haystack = path.join(_SESSIONS_DIR, ad.name);
-      const direct = fs.readdirSync(haystack)
-        .filter(f => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
-      if (direct.length > 0) return path.join(haystack, direct[0]);
-      const sub = fs.readdirSync(haystack, { withFileTypes: true })
-        .filter(d => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
-      for (const sd of sub) {
-        const js = fs.readdirSync(path.join(haystack, sd.name)).filter(f => f.endsWith('.jsonl'));
-        if (js.length > 0) return path.join(haystack, sd.name, js[0]);
-      }
-    }
-  } catch {}
-  return null;
-}
-
-// ── UTF-8 环境变量注入（治理中文乱码） ──
-// 乱码根因：Tiffa 内核 spawn bash/powershell 执行命令时，Windows 控制台默认
-// codepage 为 CP936（GBK），编码不一致 → 中文文件名/输出变成乱码。
-// 策略：尽可能把所有涉及 I/O 编码的运行时环境变量都切到 UTF-8。
-function _utf8Env() {
-  return {
-    // --- POSIX shell (Git Bash / MSYS2 / WSL) ---
-    LANG: 'C.UTF-8',
-    LC_ALL: 'C.UTF-8',
-    // --- Python ---
-    PYTHONIOENCODING: 'utf-8:replace',   // stdin/stdout/stderr 强制 UTF-8
-    PYTHONUTF8: '1',                       // Python 3.7+ 全局 UTF-8 模式
-    PYTHONLEGACYWINDOWSSTDIO: 'utf-8',     // Windows 上 Python 控制台 UTF-8 兜底
-    // --- General ---
-    NO_COLOR: '1',                         // 子进程输出不需要 ANSI 颜色码
-  };
-}
-
-// ── Global State ──
-let mainWindow = null;
-const MAX_INSTANCES = 8; // 最多同时运行的 Tiffa 实例数（项目级 + 对话级共享）
-// LRU 保活窗口：最近活跃过的实例不淘汰（避免"刚看过又切回来"触发冷启动 spawn+模型加载）
-const LRU_KEEP_ALIVE_MS = 5 * 60 * 1000;
-
-// 主进程 ask/agent 诊断日志（ask 疑难排查用，落 data/logs/main-ask.log）
-// 简易日志轮转：超 1MB 改名 .old（覆盖旧滚存），防止无界增长
-function _rotateLogIfNeeded(filePath) {
-  try {
-    const st = fs.statSync(filePath);
-    if (st.size > 1024 * 1024) fs.renameSync(filePath, filePath + '.old');
-  } catch { /* 不存在或轮转失败都不影响追加 */ }
-}
-
-function _mainLog(line) {
-  try {
-    const filePath = path.join(global.PORTABLE_ROOT, 'data', 'logs', 'main-ask.log');
-    _rotateLogIfNeeded(filePath);
-    fs.appendFileSync(filePath,
-      `[${new Date().toISOString()}] ${line}\n`);
-  } catch {}
-}
-
 // ── 全局异常捕获：防止主进程未捕获异常弹"JavaScript 报错"对话框/崩溃 ──
 // 切换审批/会话重启等异步流程（exit handler、_cleanup、spawn、LRU）任何裸奔异常
 // 都会走这里：只记日志、不弹窗、不退出，问题可通过 data/logs/main-ask.log 定位。
 process.on('uncaughtException', (err) => {
   try {
     console.error('[main] uncaughtException:', err);
-    _mainLog(`[main] uncaughtException: ${(err && err.stack) || err}`);
+    mainLog(`[main] uncaughtException: ${(err && err.stack) || err}`);
   } catch {}
 });
 process.on('unhandledRejection', (reason) => {
   try {
     console.error('[main] unhandledRejection:', reason);
-    _mainLog(`[main] unhandledRejection: ${(reason && reason.stack) || reason}`);
+    mainLog(`[main] unhandledRejection: ${(reason && reason.stack) || reason}`);
   } catch {}
 });
 
-// ── 会话历史增量读取（吸收 dim session-store 的流式/头部读取思路）──
-// 从文件尾部反向读取 wantLines 条完整行（时间正序返回）。
-// 目的：避免大会话 JSONL 全量 JSON.parse 阻塞主进程事件循环（切换会话卡顿主因）。
-// 返回 { lines, reachedStart, droppedAny }：
-//   - lines：最新的 min(文件行数, wantLines) 条完整行（时间正序）
-//   - reachedStart：是否读到了文件头（= 文件里没有比返回窗口更早的行）
-//   - droppedAny：是否因超过 wantLines 而丢弃过更旧的行（= 一定存在更早的消息）
-async function readTailLines(filePath, wantLines) {
-  const CHUNK = 512 * 1024;
-  const st = await fs.promises.stat(filePath);
-  if (!st.size) return { lines: [], reachedStart: true, droppedAny: false };
-  const fh = await fs.promises.open(filePath, 'r');
-  try {
-    let pos = st.size;
-    let carry = '';      // 未完成的"最旧半行"（接到下一次读取块的末尾）
-    let collected = [];  // 已收集的完整行（时间正序）
-    let reachedStart = false;
-    let droppedAny = false;
-    while (pos > 0) {
-      const len = Math.min(CHUNK, pos);
-      pos -= len;
-      const buf = Buffer.alloc(len);
-      await fh.read(buf, 0, len, pos);
-      // 跳到 UTF-8 字符边界：跳过块开头的连续字节（最多 3 个），避免多字节字符截断乱码
-      let start = 0;
-      while (start < buf.length && start < 4 && (buf[start] & 0xC0) === 0x80) start++;
-      const text = buf.toString('utf8', start);
-      const combined = text + carry; // carry（更新）接到 text（更旧）之后，正好补全跨块行
-      const parts = combined.split('\n');
-      carry = parts.pop() || '';
-      // parts 是「当前块（更旧）」的完整行，collected 是「后续块（更新）」的行。
-      // 读取方向是从文件尾向前，所以更旧的行必须【前插】到 collected 之前，
-      // 保持时间正序；超限时从数组尾部截断（保留最新的 wantLines 条）。
-      // 旧实现 push 到末尾 + shift() 删头部，会把真实尾部新行丢掉且行序错乱，
-      // 导致重启后前端渲染到文件中间的旧消息（“对话尾部被切除”）。
-      if (parts.length) {
-        const older = [];
-        for (const ln of parts) {
-          if (!ln.trim()) continue;
-          older.push(ln);
-        }
-        if (older.length) {
-          collected = older.concat(collected);
-          if (collected.length > wantLines) {
-            collected = collected.slice(collected.length - wantLines); // 保留最新 wantLines 条
-            droppedAny = true;
-          }
-        }
-      }
-      // 提前退出：已收集够 wantLines 条，更旧的行反正会被丢弃（增量读取的关键）
-      if (collected.length >= wantLines) break;
-      if (pos === 0) reachedStart = true;
-    }
-    return { lines: collected, reachedStart, droppedAny };
-  } finally {
-    await fh.close();
-  }
-}
-
-// 把 JSONL 行解析为前端消息数组（单遍：tool_execution_start 参数补全 toolResult）
-function parseSessionLines(lines) {
-  const toolMeta = new Map();
-  const messages = [];
-  for (const line of lines) {
-    if (!line) continue;
-    let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
-    if (obj.type === 'custom' && obj.customType === 'tool_execution_start' && obj.data) {
-      const tcId = obj.data.toolCallId;
-      if (tcId) toolMeta.set(tcId, { toolName: obj.data.toolName, args: obj.data.args });
-      continue;
-    }
-    if (obj.type === 'message' && obj.message) {
-      const msg = obj.message;
-      let textContent = '';
-      let thinkingContent = '';
-      let toolCalls = [];
-      if (typeof msg.content === 'string') {
-        textContent = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        for (const part of msg.content) {
-          if (part.type === 'text' && part.text) {
-            textContent += part.text;
-          } else if (part.type === 'thinking' && part.thinking) {
-            thinkingContent += part.thinking;
-          } else if (part.type === 'tool_use' || part.type === 'tool_call') {
-            toolCalls.push({
-              id: part.id || '',
-              name: part.name || '',
-              input: part.input || part.arguments || {},
-            });
-          }
-        }
-      }
-      // toolResult 补全：从已收集的 toolMeta 中恢复参数
-      if (msg.role === 'toolResult' && msg.toolCallId) {
-        const meta = toolMeta.get(msg.toolCallId);
-        if (meta) {
-          const resultText = Array.isArray(msg.content)
-            ? msg.content.filter(c => c.type === 'text').map(c => c.text).join('')
-            : (typeof msg.content === 'string' ? msg.content : '');
-          messages.push({
-            role: 'assistant',
-            text: '',
-            thinking: '',
-            toolCalls: [{
-              id: msg.toolCallId,
-              name: meta.toolName || msg.toolName || 'tool',
-              input: meta.args || {},
-              result: resultText.substring(0, 10000),
-              isError: msg.isError || false,
-            }],
-            timestamp: obj.timestamp || msg.timestamp,
-            model: msg.model || '',
-            provider: msg.provider || '',
-          });
-          continue;
-        }
-      }
-      messages.push({
-        role: msg.role,
-        text: textContent,
-        thinking: thinkingContent,
-        toolCalls,
-        timestamp: obj.timestamp || msg.timestamp,
-        model: msg.model || '',
-        provider: msg.provider || '',
-        steering: msg.steering || false,
-        follow_up: msg.follow_up || false,
-      });
-    }
-  }
-  return messages;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TiffaInstance: 单个 Tiffa 子进程的完整生命周期管理
-// ═══════════════════════════════════════════════════════════════
-
-class TiffaInstance {
-  constructor(cwd, sessionId = null) {
-    this.cwd = cwd;
-    this.sessionId = sessionId;  // null = 项目级实例；UUID = 对话级实例
-    this.process = null;
-    this.rl = null;          // readline.Interface（stdout 逐行解析）
-    this.ready = false;
-    this.agentRunning = false;
-    this.pendingCommands = new Map();
-    this.commandId = 0;
-    this.lastActiveTime = Date.now();
-    this.userKilled = false;    // 用户主动 kill，不自动重启
-    this.crashCount = 0;        // 连续崩溃次数
-    this.maxCrashRestart = 3;   // 最多自动重启 3 次
-    this._restartTimer = null;
-    this.isPrewarming = false;  // embedding 预热中，过滤噪音事件
-    this.sessionFilePath = null; // session_switch 事件中保存的 JSONL 文件路径
-    this._titleGenerated = false; // 本会话是否已生成过标题（避免重复）
-    this._restoringContext = false; // 正在通过 switch_session 恢复历史上下文，过滤重复事件
-    this._pendingAskIds = new Set(); // 待应答 extension_ui_request 请求 id（dim pin 思路：LRU 保护等审批的会话）
-  }
-
-  start() {
-    if (this.process) return;
-    this.userKilled = false;
-
-    const env = {
-      ...process.env,
-      ..._utf8Env(),
-      PI_CODING_AGENT_DIR: path.join(PORTABLE_ROOT, 'data', 'agent'),
-      HOME: path.join(PORTABLE_ROOT, 'home'),
-      USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
-      BUN_INSTALL: PORTABLE_ROOT,
-      // Mnemopi embedding：必须用中文模型，否则回退到默认英文模型
-      // 启用三级优雅降级压缩链：视觉模型走 snapcompact，非视觉走旁路 Claude 路线，失败回退内核 LLM + gap-fill
-      TIFFA_COMPACT: 'auto',
-      MNEMOPI_EMBEDDING_MODEL: 'BAAI/bge-small-zh-v1.5',
-      // 将便携 python/node 前置到 PATH，确保子进程能直接用 python/node 命令
-      // 否则 Windows 系统 PATH 中的 Store 占位符 python.exe 会被命中（exit 49 弹窗）
-      PATH: [
-        path.join(PORTABLE_ROOT, 'python'),
-        path.join(PORTABLE_ROOT, 'python', 'Scripts'),
-        path.join(PORTABLE_ROOT, 'node'),
-        path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin'),
-        process.env.PATH || '',
-      ].join(path.delimiter),
-    };
-
-    delete env.NODE_OPTIONS;
-    delete env.ELECTRON_RUN_AS_NODE;
-
-    const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH, '-e', COMPUTER_USE_EXTENSION_PATH];
-
-    // ── 稳定会话目录：与盘符/路径解耦，跨机器（移动硬盘盘符变化）自动连续 ──
-    // 内核接受 --session-dir 后，会把该目录下所有会话（新建 / 续接）写到这里，
-    // 不再用 cwd 编码的 --E--…-- 目录。main.js 读侧用同一 stableSessionDirName
-    // 定位（_findSessionFile / encodeSessionDirName 已委托），二者同源。
-    // A/B 机器盘符不同但 workspace 后缀相同 → 映射到同一 --wks-…-- 目录 → 进度连续。
-    const stableSessionDir = path.join(_SESSIONS_DIR, stableSessionDirName(this.cwd));
-    args.push('--session-dir', stableSessionDir);
-
-    console.log(`[TiffaInstance] Starting Tiffa cwd=${this.cwd}`, BUN_EXE, args.join(' '));
-
-    this.process = spawn(BUN_EXE, args, {
-      cwd: this.cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: false,
-    });
-
-    // 用 readline 逐行解析 stdout（比手动 buffer + split 更健壮）
-    this.rl = require('readline').createInterface({
-      input: this.process.stdout,
-      crlfDelay: Infinity,  // 自动处理 \r\n 和 \n
-    });
-    this.rl.on('line', (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      try {
-        const event = JSON.parse(trimmed);
-        this._handleEvent(event);
-      } catch (e) {
-        console.warn(`[TiffaInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
-      }
-    });
-
-    // stderr 用 StringDecoder 增量解码：多字节 UTF-8 字符跨 chunk 边界时不会产生乱码
-    // （吸收 dim omp-process issue 27）。
-    this.stderrDecoder = new StringDecoder('utf8');
-    this.process.stderr.on('data', (chunk) => {
-      const text = this.stderrDecoder.write(chunk).trim();
-      if (text) {
-        console.log(`[tiffa:stderr:${this._shortCwd()}]`, text);
-      }
-    });
-
-    // ── 流 error 监听（吸收 dim omp-process issue 25）──
-    // 内核被杀 / 管道断裂（EPIPE）时，若 stdin/stdout/stderr 的 'error' 事件无监听，
-    // 会以 unhandled 'error' 直接崩溃主进程。全部挂上监听，记录而非崩溃。
-    this.process.stdin.on('error', (err) => {
-      console.warn(`[TiffaInstance:${this._shortCwd()}] stdin 管道错误:`, err.message);
-    });
-    this.process.stdout.on('error', (err) => {
-      console.warn(`[TiffaInstance:${this._shortCwd()}] stdout 管道错误:`, err.message);
-    });
-    this.process.stderr.on('error', (err) => {
-      console.warn(`[TiffaInstance:${this._shortCwd()}] stderr 管道错误:`, err.message);
-    });
-
-    this.process.on('exit', (code, signal) => {
-      _mainLog(`[${this._shortCwd()}#${this.sessionId}] EXIT code=${code} signal=${signal} userKilled=${this.userKilled} crashCount=${this.crashCount}`);
-      console.log(`[TiffaInstance:${this._shortCwd()}] 已退出:`, { code, signal, userKilled: this.userKilled, crashCount: this.crashCount });
-
-      // 拒绝所有待定命令（避免 Promise 永久挂起）
-      for (const [id, { reject }] of this.pendingCommands) {
-        reject(new Error(`Tiffa process exited (code=${code}, signal=${signal})`));
-      }
-      this.pendingCommands.clear();
-
-      try {
-        this._cleanup();
-      } catch (e) {
-        console.warn(`[TiffaInstance:${this._shortCwd()}] _cleanup 异常:`, e);
-      }
-
-      // 崩溃自动重启：非用户主动 kill、未超出重启上限
-      // 注：常驻 CLI 不应自行退出；切换会话/项目时若 CLI 异常 clean exit(code===0) 也应重启，
-      // 否则实例被 ready 轮询 delete 后静默消失（用户感知为"静默崩溃不重启"）
-      const shouldRestart = !this.userKilled && this.crashCount < this.maxCrashRestart;
-      if (shouldRestart) {
-        this.crashCount++;
-        console.log(`[TiffaInstance:${this._shortCwd()}] 3秒后自动重启 (第${this.crashCount}次)`);
-        this._restartTimer = setTimeout(() => {
-          this._restartTimer = null;
-          try { this.start(); } catch (e) { console.warn(`[TiffaInstance:${this._shortCwd()}] 自动重启 start() 异常:`, e); }
-        }, 3000);
-      }
-
-      // 通知渲染进程
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        try {
-          mainWindow.webContents.send('tiffa:exited', {
-            code, signal, cwd: this.cwd, sessionId: this.sessionId,
-            autoRestarting: shouldRestart, crashCount: this.crashCount,
-          });
-        } catch (e) {
-          console.warn(`[TiffaInstance:${this._shortCwd()}] 通知渲染进程 exited 失败:`, e);
-        }
-      }
-    });
-
-    this.process.on('error', (err) => {
-      console.error(`[TiffaInstance:${this._shortCwd()}] 启动失败:`, err);
-      this.process = null;
-    });
-  }
-
-  kill(sync = false) {
-    if (!this.process) return;
-    this.userKilled = true;
-    if (this._restartTimer) {
-      clearTimeout(this._restartTimer);
-      this._restartTimer = null;
-    }
-    _killTree(this.process.pid, sync);
-    this._cleanup();
-  }
-
-  sendCommand(frame) {
-    return new Promise((resolve, reject) => {
-      if (!this.process || !this.process.stdin.writable) {
-        reject(new Error('Tiffa process not running'));
-        return;
-      }
-
-      // 用户交互立即取消预热过滤：避免用户消息的响应事件被预热过滤器吞掉
-      // （预热仅服务于 /memory rebuild 的 embedding 冷加载，用户交互优先级更高）
-      if (this.isPrewarming) {
-        this.isPrewarming = false;
-        console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消预热过滤`);
-      }
-      // 用户交互立即取消上下文恢复过滤：switch_session 恢复历史上下文可能因
-      // 大 JSONL 加载/embedding 计算而卡住（sendCommand 超时长达 5 分钟），
-      // 期间 _restoringContext 保持 true 会吞掉用户消息的 thinking/text 事件，
-      // 表现为"模型在推理但 UI 无任何输出，以为卡死而中断"。
-      // 用户发消息说明已经要交互了，恢复可以放弃，立即放行响应事件。
-      if (this._restoringContext && (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up')) {
-        this._restoringContext = false;
-        console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消上下文恢复过滤`);
-      }
-
-      const id = `cmd_${++this.commandId}`;
-      frame.id = id;
-
-      // id 冲突防御（学 dim FrameRouter issue 4）：重复 id 先 reject 旧的，
-      // 避免静默覆盖丢旧 promise（当前自增 id 不会撞，防御性保留，防未来改 id 生成方式）
-      const existingCmd = this.pendingCommands.get(id);
-      if (existingCmd) {
-        clearTimeout(existingCmd.timer);
-        existingCmd.reject(new Error(`command id collision, superseded: ${id}`));
-      }
-
-      const timer = setTimeout(() => {
-        if (this.pendingCommands.has(id)) {
-          this.pendingCommands.delete(id);
-          // 超时报错带命令类型，便于定位是哪个请求卡住（学 dim：rpc timeout 带 cmd type）
-          console.warn(`[TiffaInstance:${this._shortCwd()}] command timeout: ${frame.type} (${id})`);
-          reject(new Error(`Command timeout: ${frame.type}`));
-        }
-      }, 5 * 60 * 1000);
-
-      this.pendingCommands.set(id, { resolve, reject, timer });
-
-      const line = JSON.stringify(frame) + '\n';
-      try {
-        this.process.stdin.write(line, 'utf8');
-      } catch (err) {
-        clearTimeout(timer);
-        this.pendingCommands.delete(id);
-        reject(err);
-      }
-    });
-  }
-
-  sendRaw(frame) {
-    if (!this.process || !this.process.stdin.writable) {
-      console.error(`[TiffaInstance:${this._shortCwd()}] Tiffa 未运行，无法发送`);
-      return;
-    }
-    // 用户交互（steer/follow_up/prompt）立即取消预热过滤
-    if (this.isPrewarming && (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up')) {
-      this.isPrewarming = false;
-      console.log(`[TiffaInstance:${this._shortCwd()}] 用户 raw 命令(${frame.type})到达，取消预热过滤`);
-    }
-    const line = JSON.stringify(frame) + '\n';
-    try {
-      this.process.stdin.write(line, 'utf8');
-    } catch (err) {
-      console.error(`[TiffaInstance:${this._shortCwd()}] stdin.write 失败:`, err.message);
-    }
-  }
-
-  // ── 事件处理 ──
-
-  _handleEvent(event) {
-    this.lastActiveTime = Date.now();
-
-    if (event.type === 'ready') {
-      this.ready = true;
-      this.agentRunning = false;
-      this.crashCount = 0; // 成功启动后重置崩溃计数
-      console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
-      // 延迟 3 秒后预热 embedding（fastembed onnx 模型 ~93MB），
-      // 避免首次发送消息时 embedding 冷加载导致超时/失败。
-      // 用 /memory rebuild 触发 mnemopi retain->embed 路径加载模型。
-      setTimeout(() => {
-        // 如果用户已在交互（agent 正在运行），跳过预热避免阻塞用户事件
-        if (this.agentRunning) return;
-        this.isPrewarming = true;
-        this.sendRaw({ type: 'prompt', message: '/memory rebuild' });
-        // 30 秒兜底：若 agent_end 未正常到达（进程异常），强制解除过滤
-        setTimeout(() => { this.isPrewarming = false; }, 30000);
-      }, 3000);
-      // 崩溃重启后上下文恢复：crashCount 在 ready 时已重置，用 sessionFilePath 判断是否为重启。
-      // 首次启动时 sessionFilePath 为 null（activateSession 负责恢复）；
-      // 崩溃重启时 sessionFilePath 保留着之前会话的路径，需重新发 switch_session 恢复上下文。
-      if (this.sessionFilePath && this.sessionId) {
-        const sf = this.sessionFilePath;
-        if (fs.existsSync(sf)) {
-          this._restoringContext = true;
-          // 绝对兜底：switch_session 长时间不返回时 15 秒后强制解除过滤（见 activateSession 注释）
-          const restoreDeadline = setTimeout(() => {
-            if (this._restoringContext) {
-              this._restoringContext = false;
-              console.warn(`[TiffaInstance:${this._shortCwd()}] 崩溃重启上下文恢复超时，强制解除过滤`);
-            }
-          }, 15000);
-          this.sendCommand({ type: 'switch_session', sessionPath: sf })
-            .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文已恢复`); })
-            .catch((e) => { console.warn(`[TiffaInstance:${this._shortCwd()}] 崩溃重启后上下文恢复失败: ${e.message}`); })
-            .finally(() => { clearTimeout(restoreDeadline); setTimeout(() => { this._restoringContext = false; }, 800); });
-        }
-      }
-    }
-
-    if (event.type === 'prompt_result' && event.agentInvoked) {
-      this.agentRunning = true;
-      _mainLog(`[${this._shortCwd()}#${this.sessionId}] prompt_result agentInvoked`);
-    } else if (event.type === 'agent_start') {
-      this.agentRunning = true;
-      _mainLog(`[${this._shortCwd()}#${this.sessionId}] agent_start`);
-    } else if (event.type === 'agent_end') {
-      _mainLog(`[${this._shortCwd()}#${this.sessionId}] agent_end code=${event._wasPrewarming ? 'prewarm' : 'normal'}`);
-      // 记录 prewarm 状态供过滤器使用：isPrewarming 不能在过滤器之前清除，
-      // 否则 prewarm 的 agent_end 会泄漏到前端，触发 loadSessions/autoRename 等副作用。
-      // 用 event 上的 _wasPrewarming 标记传递到下方过滤器，isPrewarming 延迟到过滤器之后清除。
-      event._wasPrewarming = this.isPrewarming;
-      this.agentRunning = false;
-      // 非预热 agent_end 后，尝试生成会话标题
-      // RPC-UI 模式下内核不自动调用 generateTitle，需 main.js 主动补标题
-      // 延迟 6s：给前端旁路 AI 重命名让路（_tryGenerateSessionTitle 见标题已存在会跳过，
-      // 旁路失败时本兜底仍能保证树里有可读标题）
-      if (!event._wasPrewarming && !this._titleGenerated) {
-        this._titleGenerated = true;
-        setTimeout(() => { if (TiffaInstance._titleGenerateCallback) TiffaInstance._titleGenerateCallback(this); }, 6000);
-      }
-    }
-
-    // Handle RPC chunked responses (large responses >256KB are split into rpc_chunk frames)
-    // 内核分块协议：{ type:'rpc_chunk', chunkId, index, count, byteLength, data(base64) }
-    // 收齐所有 chunk 后组装为完整 JSON，解析为 response 事件交给下方常规处理
-    if (event.type === 'rpc_chunk' && event.chunkId) {
-      if (!this._rpcChunkBuffer) this._rpcChunkBuffer = new Map();
-      const cid = event.chunkId;
-      if (!this._rpcChunkBuffer.has(cid)) {
-        this._rpcChunkBuffer.set(cid, { count: event.count, chunks: new Array(event.count), received: 0, byteLength: event.byteLength });
-      }
-      const buf = this._rpcChunkBuffer.get(cid);
-      if (buf.chunks[event.index]) return; // 重复 chunk，忽略
-      buf.chunks[event.index] = Buffer.from(event.data, 'base64');
-      buf.received++;
-      if (buf.received < buf.count) return; // 未收齐
-      // 所有 chunk 收齐，组装完整响应
-      const fullBuf = Buffer.concat(buf.chunks);
-      this._rpcChunkBuffer.delete(cid);
-      let parsed;
-      try {
-        parsed = JSON.parse(fullBuf.toString('utf8'));
-      } catch (e) {
-        console.warn(`[TiffaInstance:${this._shortCwd()}] rpc_chunk reassembly JSON parse failed: ${e.message}`);
-        return;
-      }
-      // 交给下方常规 response 处理（不再 forward rpc_chunk 到前端）
-      event = parsed;
-    }
-
-    // Handle command responses
-    if (event.type === 'response' && event.id && this.pendingCommands.has(event.id)) {
-      const { resolve, reject, timer } = this.pendingCommands.get(event.id);
-      clearTimeout(timer);
-      this.pendingCommands.delete(event.id);
-      if (event.success) {
-        resolve(event.data);
-      } else {
-        reject(new Error(event.error || 'Command failed'));
-      }
-      return;
-    }
-
-    // 拦截 session_switch：CLI 分配真实 sessionId 后，同步更新实例的 sessionId 与 map key。
-    // 否则 renderer 用 realSessionId 切回时 _key(cwd, realSessionId) 查不到 -> spawn 新进程 ->
-    // CLI 进程内存里的对话上下文随旧进程死亡丢失（用户感知为"找不到上下文"）。
-    // 注意：预热期间的 session_switch 来自 /memory rebuild，不应迁移实例 key，
-    // 否则后续用户消息的 session_switch 无法正确匹配。
-    // 上下文恢复期间的 session_switch 是我们主动触发的，不需要迁移 key（key 已是正确的 realSessionId）。
-    // 但 prewarm 期间用户也可能发消息触发新建对话的 session_switch，
-    // 所以只跳过 realSessionId === this.sessionId 的情况（/memory rebuild 的 session_switch
-    // sessionPath 就是当前会话自己的路径，realSessionId 相同），不同则正常迁移。
-    if (event.type === 'session_switch' && event.sessionPath && !this._restoringContext) {
-      this.sessionFilePath = event.sessionPath; // 保存当前会话的 JSONL 文件路径
-      const realSessionId = _extractSessionIdFromPath(event.sessionPath);
-      if (realSessionId && realSessionId !== this.sessionId) {
-        // prewarm 期间不迁移：/memory rebuild 的 session_switch 不应改变实例 key。
-        // 只有非 prewarm 时才迁移（用户消息触发的新建对话 session_switch）。
-        if (!this.isPrewarming) {
-          tiffaManager.migrateSessionId(this.cwd, this.sessionId, realSessionId);
-          this.sessionId = realSessionId; // 更新实例自身 sessionId，后续事件标记用新值
-        }
-      }
-    }
-    // ── 待应答 ask 记账（dim pin 思路）──
-    // 交互型（editor/select/confirm/input）未应答时记 id；用户应答（extensionResponse）
-    // 或内核 cancel 时移除。_evictLRU 跳过 _pendingAskIds 非空的实例，防止"等审批的会话
-    // 不输出帧、lastActiveTime 陈旧"被误判为最闲而强杀，导致 ask 弹窗失效。
-    if (event.type === 'extension_ui_request') {
-      const m = event.method;
-      if (m === 'cancel') {
-        this._pendingAskIds.delete(event.targetId || event.id);
-        this._pendingAskIds.delete(event.id);
-        _mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req cancel target=${event.targetId || event.id}`);
-      } else if (['editor', 'select', 'confirm', 'input'].includes(m)) {
-        this._pendingAskIds.add(event.id);
-        _mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req ${m} id=${event.id} pending=${this._pendingAskIds.size}`);
-      }
-    }
-
-    // Forward all events to renderer (带 cwd + sessionId + sessionPath 标记)
-    event._cwd = this.cwd;
-    event._sessionId = this.sessionId;
-    // 稳定会话文件路径（session_switch 后才有值）：渲染层归属 ask/事件的可靠键，
-    // 避免只用 sessionId（temp/real 可能不一致）导致 pending 队列查不到。
-    event._sessionPath = this.sessionFilePath || null;
-
-    // embedding 预热期间过滤掉 /memory rebuild 产生的噪音事件。
-    // agent_end 携带 _wasPrewarming 标记（在上方 agent_end 处理中设置），
-    // 用它判断而非 isPrewarming（此时还未清除），确保 prewarm 的 agent_end 也被过滤。
-    // 过滤完成后才清除 isPrewarming，避免提前清除导致后续事件泄漏。
-    const eventWasPrewarm = event._wasPrewarming || this.isPrewarming;
-    if (eventWasPrewarm) {
-      if (event.type === 'agent_end') this.isPrewarming = false;
-      // extension_ui_request 是阻塞型审批请求，内核会无限等待回应。
-      // 绝不能被 prewarm 过滤吞掉，否则后台会话死等卡死（表现为 Tiffa 假死）。
-      if (event.type !== 'extension_ui_request') return;
-    }
-
-    // 上下文恢复期间（switch_session 重放历史），过滤掉重放的消息事件避免前端重复渲染。
-    // 允许 session_switch（已完成恢复操作本身）、response（命令响应）以及
-    // extension_ui_request（阻塞型审批，内核无限等待，绝不可丢）通过。
-    if (this._restoringContext && event.type !== 'session_switch' && event.type !== 'response'
-        && event.type !== 'extension_ui_request') {
-      return;
-    }
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('tiffa:event', event);
-    }
-  }
-
-  _cleanup() {
-    if (this.rl) {
-      this.rl.close();
-      this.rl = null;
-    }
-    // flush stderr 解码器残留的未完整多字节序列，避免进程被杀时丢失最后几字节输出
-    if (this.stderrDecoder) {
-      const tail = this.stderrDecoder.write(Buffer.alloc(0)).trim();
-      if (tail) console.log(`[tiffa:stderr:${this._shortCwd()}]`, tail);
-      this.stderrDecoder = null;
-    }
-    this.process = null;
-    this.ready = false;
-    this.agentRunning = false;
-  }
-
-  _shortCwd() {
-    const parts = this.cwd.replace(/\\/g, '/').split('/');
-    return parts[parts.length - 1] || this.cwd;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TiffaInstanceManager: 多实例管理器（懒启动 + LRU 淘汰）
-// ═══════════════════════════════════════════════════════════════
-
-class TiffaInstanceManager {
-  constructor() {
-    this.instances = new Map(); // key: cwd#sessionId -> TiffaInstance
-    this.spawning = new Map(); // key: cwd#sessionId -> Promise<TiffaInstance>
-    this.activeKey = null;     // 当前活跃实例的 key
-    this.activeCwd = null;     // 当前活跃实例的 cwd（向后兼容）
-  }
-
-  _key(cwd, sessionId) {
-    return path.resolve(cwd) + '#' + (sessionId || 'project');
-  }
-
-  // 激活项目级实例（用于文件操作、项目切换等）
-  async activate(cwd) {
-    const normalized = path.resolve(cwd);
-    const key = this._key(cwd, null);
-    this.activeKey = key;
-    this.activeCwd = normalized;
-    currentWorkspaceDir = normalized;
-
-    // 已存在实例 -> 复用；若正处崩溃重启中则等待 ready
-    if (this.instances.has(key)) {
-      const inst = this.instances.get(key);
-      inst.lastActiveTime = Date.now();
-      // 实例可能在崩溃重启中（process 已退出、_restartTimer 排队）：
-      // 不等待会让调用方拿到 process=null 的实例，sendCommand 立即失败
-      if (!inst.ready && (!inst.process || inst.process.exitCode !== null)) {
-        await new Promise((resolve) => {
-          let checks = 0;
-          const check = setInterval(() => {
-            checks++;
-            // ready 成功 / 等待超 10s / 重启计时器已清且仍无 process(重启放弃) -> 结束等待
-            if (inst.ready || checks > 100 || (!inst._restartTimer && !inst.process)) {
-              clearInterval(check); resolve();
-            }
-          }, 100);
-        });
-      }
-      return { inst, ready: inst.ready };
-    }
-
-    // 正在 spawn 中 -> 复用同一个 Promise
-    if (this.spawning.has(key)) {
-      return this.spawning.get(key);
-    }
-
-    // 超过上限 -> LRU 淘汰
-    if (this.instances.size >= MAX_INSTANCES) {
-      if (!this._evictLRU()) {
-        throw new Error(`实例数已达上限(${MAX_INSTANCES})，且所有实例均在运行中无法淘汰。请关闭部分对话后重试。`);
-      }
-    }
-
-    // 创建新实例
-    const spawnPromise = (async () => {
-      const inst = new TiffaInstance(normalized, null);
-      // 立即注册到 instances map，防止竞态条件：
-      // activate() 等待 ready 期间，getActive() 能返回该实例
-      this.instances.set(key, inst);
-      inst.start();
-
-      await new Promise((resolve) => {
-        let checks = 0;
-        const check = setInterval(() => {
-          checks++;
-          if (inst.ready || checks > 300) { clearInterval(check); resolve(); }
-        }, 100);
-        // 进程提前退出 -> 立即结束轮询
-        if (inst.process) {
-          inst.process.once('exit', () => { clearInterval(check); resolve(); });
-        }
-      });
-
-      // 进程已退出：若 exit handler 已安排重启则保留实例占位，避免重启进程脱离 map 变孤儿
-      if (!inst.process || inst.process.exitCode !== null) {
-        const willRestart = !inst.userKilled && inst.crashCount < inst.maxCrashRestart;
-        if (!willRestart) this.instances.delete(key);
-      }
-      return { inst, ready: inst.ready };
-    })();
-
-    this.spawning.set(key, spawnPromise);
-    try {
-      return await spawnPromise;
-    } finally {
-      this.spawning.delete(key);
-    }
-  }
-
-  // 激活对话级实例（每个对话独立 Tiffa 进程）
-  // 注意：不再修改 activeKey/activeCwd，避免 fire-and-forget 调用竞态覆盖活跃实例
-  async activateSession(cwd, sessionId) {
-    const normalized = path.resolve(cwd);
-    const key = this._key(cwd, sessionId);
-
-    // 已存在实例 -> 复用；若正处崩溃重启中则等待 ready
-    if (this.instances.has(key)) {
-      const inst = this.instances.get(key);
-      inst.lastActiveTime = Date.now();
-      // 实例可能在崩溃重启中（process 已退出、_restartTimer 排队）：
-      // 不等待会让调用方拿到 process=null 的实例，sendCommand 立即失败
-      if (!inst.ready && (!inst.process || inst.process.exitCode !== null)) {
-        await new Promise((resolve) => {
-          let checks = 0;
-          const check = setInterval(() => {
-            checks++;
-            // ready 成功 / 等待超 10s / 重启计时器已清且仍无 process(重启放弃) -> 结束等待
-            if (inst.ready || checks > 100 || (!inst._restartTimer && !inst.process)) {
-              clearInterval(check); resolve();
-            }
-          }, 100);
-        });
-      }
-      return { inst, ready: inst.ready };
-    }
-
-    // 正在 spawn 中 -> 复用同一个 Promise
-    if (this.spawning.has(key)) {
-      return this.spawning.get(key);
-    }
-
-    // 超过上限 -> LRU 淘汰
-    if (this.instances.size >= MAX_INSTANCES) {
-      if (!this._evictLRU()) {
-        throw new Error(`实例数已达上限(${MAX_INSTANCES})，且所有实例均在运行中无法淘汰。请关闭部分对话后重试。`);
-      }
-    }
-
-    // 创建新实例（对话级：带 sessionId）
-    const spawnPromise = (async () => {
-      const inst = new TiffaInstance(normalized, sessionId);
-      // 立即注册到 instances map，防止竞态条件
-      this.instances.set(key, inst);
-      inst.start();
-
-      await new Promise((resolve) => {
-        let checks = 0;
-        const check = setInterval(() => {
-          checks++;
-          if (inst.ready || checks > 300) { clearInterval(check); resolve(); }
-        }, 100);
-        if (inst.process) {
-          inst.process.once('exit', () => { clearInterval(check); resolve(); });
-        }
-      });
-
-      // 进程已退出：若 exit handler 已安排重启则保留实例占位，避免重启进程脱离 map 变孤儿
-      if (!inst.process || inst.process.exitCode !== null) {
-        const willRestart = !inst.userKilled && inst.crashCount < inst.maxCrashRestart;
-        if (!willRestart) this.instances.delete(key);
-        return { inst, ready: inst.ready };
-      }
-
-      // ── 会话上下文恢复 ──
-      // 新进程是空白会话，需通过 switch_session 从 JSONL 加载历史上下文到内存。
-      // 否则用户发消息时 AI 看到的是全新对话，之前的上下文全丢。
-      // 仅对话级实例（sessionId != null）需要恢复；项目级实例不绑定特定会话。
-      if (inst.ready && inst.sessionId) {
-        const sessionFile = _findSessionFile(normalized, inst.sessionId);
-        if (sessionFile) {
-          inst._restoringContext = true;
-          // 绝对兜底：switch_session 可能因大 JSONL 加载/embedding 计算长时间不返回
-          // （sendCommand 超时长达 5 分钟），期间 _restoringContext=true 会吞掉用户
-          // 消息的 thinking/text 事件，表现为"发消息无输出，以为卡死"。
-          // 15 秒后强制解除，事件恢复流动（重放事件泄漏的代价远小于用户以为卡死）。
-          const restoreDeadline = setTimeout(() => {
-            if (inst._restoringContext) {
-              inst._restoringContext = false;
-              console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复超时，强制解除过滤`);
-            }
-          }, 15000);
-          try {
-            await inst.sendCommand({ type: 'switch_session', sessionPath: sessionFile });
-            inst.sessionFilePath = sessionFile;
-            console.log(`[TiffaInstance:${inst._shortCwd()}] 会话上下文已恢复: ${sessionFile}`);
-          } catch (err) {
-            console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复失败: ${err.message}`);
-          } finally {
-            clearTimeout(restoreDeadline);
-            // 延迟清除：内核可能在 sendCommand response 之后仍有残留的重放事件在管道中。
-            // 立即清除会导致这些事件泄漏到前端，触发重复渲染。
-            // 800ms 足以覆盖事件管道的尾部延迟（内核 JSON 序列化 + stdout 缓冲 + readline 解析）。
-            setTimeout(() => { inst._restoringContext = false; }, 800);
-          }
-        }
-      }
-
-      return { inst, ready: inst.ready };
-    })();
-
-    this.spawning.set(key, spawnPromise);
-    try {
-      return await spawnPromise;
-    } finally {
-      this.spawning.delete(key);
-    }
-  }
-
-  // 获取当前活跃实例
-  getActive() {
-    if (!this.activeKey) return null;
-    return this.instances.get(this.activeKey) || null;
-  }
-
-  // 按 sessionId 精确查找实例（不依赖 activeKey）
-  getBySessionId(cwd, sessionId) {
-    if (!cwd || !sessionId) return null;
-    const key = this._key(cwd, sessionId);
-    return this.instances.get(key) || null;
-  }
-
-  // 按 sessionId 全池扫描（不依赖 activeCwd！）
-  // 跨项目切换后 activeCwd 变成当前项目的 cwd，用 getBySessionId(activeCwd, sessionId)
-  // 拼 key 会查不到后台会话的实例（它的 key 是"自己的 cwd#sessionId"）→ 回退 getActive()
-  // 会把应答发给当前活跃实例 → 原会话的 ask 永远等不到应答 → 卡死（"模型必死"真凶）。
-  // 实例数 ≤ MAX_INSTANCES，全池扫描开销可忽略。
-  getBySessionIdAnywhere(sessionId) {
-    if (!sessionId) return null;
-    for (const inst of this.instances.values()) {
-      if (inst.sessionId === sessionId) return inst;
-    }
-    return null;
-  }
-
-  // 迁移实例的 sessionId：CLI 分配真实 sessionId 后，把实例从旧 key(tempSessionId)
-  // 迁到新 key(realSessionId)，避免切回时查不到 → spawn 新进程 → 丢上下文。
-  migrateSessionId(cwd, oldSessionId, newSessionId) {
-    if (!cwd || !oldSessionId || !newSessionId || oldSessionId === newSessionId) return false;
-    const oldKey = this._key(cwd, oldSessionId);
-    const newKey = this._key(cwd, newSessionId);
-    const inst = this.instances.get(oldKey);
-    if (!inst) return false; // 实例不存在（可能已被 LRU 淘汰或 closeByKey）
-    if (this.instances.has(newKey)) {
-      // 目标 key 已有实例（异常情况）：保留已有实例，不覆盖，仅删旧 key
-      console.log(`[TiffaManager] migrateSessionId: 目标 key 已存在，仅删旧 key ${oldKey}`);
-      this.instances.delete(oldKey);
-      return false;
-    }
-    this.instances.delete(oldKey);
-    this.instances.set(newKey, inst);
-    // activeKey 也要同步（如果当前活跃实例正是被迁移的）
-    if (this.activeKey === oldKey) this.activeKey = newKey;
-    // spawning Map 同步（极端情况：迁移时还在 spawn 轮询 ready）
-    if (this.spawning.has(oldKey)) {
-      this.spawning.set(newKey, this.spawning.get(oldKey));
-      this.spawning.delete(oldKey);
-    }
-    console.log(`[TiffaManager] sessionId 迁移: ${oldSessionId} -> ${newSessionId} (key: ${oldKey} -> ${newKey})`);
-    return true;
-  }
-
-  // 按 sessionId 查找，回退到 activeKey
-  resolve(cwd, sessionId) {
-    return this.getBySessionId(cwd, sessionId) || this.getActive();
-  }
-
-  // 关闭某个 key 的实例
-  closeByKey(key) {
-    const inst = this.instances.get(key);
-    if (inst) {
-      inst.kill();
-      this.instances.delete(key);
-    }
-    if (this.activeKey === key) {
-      this.activeKey = null;
-      this.activeCwd = null;
-    }
-  }
-
-  // 关闭某个 cwd 的所有实例（项目级 + 对话级）
-  close(cwd) {
-    const normalized = path.resolve(cwd);
-    const keysToDelete = [];
-    for (const [key, inst] of this.instances) {
-      if (inst.cwd === normalized) {
-        inst.kill();
-        keysToDelete.push(key);
-      }
-    }
-    for (const key of keysToDelete) {
-      this.instances.delete(key);
-    }
-    if (this.activeCwd === normalized) {
-      this.activeKey = null;
-      this.activeCwd = null;
-    }
-  }
-
-  // 关闭所有实例
-  closeAll() {
-    for (const inst of this.instances.values()) {
-      inst.kill();
-    }
-    this.instances.clear();
-    this.activeKey = null;
-    this.activeCwd = null;
-  }
-
-  // 关闭所有实例（退出时用，同步暴力清理）
-  killAll() {
-    for (const inst of this.instances.values()) {
-      inst.userKilled = true;
-      if (inst._restartTimer) {
-        clearTimeout(inst._restartTimer);
-        inst._restartTimer = null;
-      }
-      if (inst.process) {
-        _killTree(inst.process.pid, true);
-      }
-      for (const [id, { reject }] of inst.pendingCommands) {
-        reject(new Error('app quitting'));
-      }
-      inst.pendingCommands.clear();
-    }
-    this.instances.clear();
-    this.spawning.clear();
-    this.activeKey = null;
-    this.activeCwd = null;
-  }
-
-  // LRU 淘汰：淘汰最久未活跃的非当前实例
-  _evictLRU() {
-    let oldest = null;
-    let oldestTime = Infinity;
-    // 回退候选：保活窗口内也不得不淘汰时的最旧实例（池满必须腾位，宁淘汰最旧也不拒绝新建）
-    let fallback = null;
-    let fallbackTime = Infinity;
-    const now = Date.now();
-
-    for (const [key, inst] of this.instances) {
-      if (key === this.activeKey) continue;
-      // 运行中的实例跳过：强杀会丢失未写盘的对话片段（taskkill /F /T 不等 flush）
-      if (inst.agentRunning) continue;
-      // 有未应答 ask（等用户审批）的实例跳过：这种进程不输出帧、lastActiveTime 陈旧，
-      // 会被误判为最闲而强杀 → ask 弹窗失效（dim pin/unpin 思路）。
-      if (inst._pendingAskIds && inst._pendingAskIds.size > 0) continue;
-      // 最近活跃过的实例优先跳过（保活窗口内）：刚看过/用过的会话切回时不应冷启动
-      if (now - inst.lastActiveTime < LRU_KEEP_ALIVE_MS) {
-        // 仍记录为回退候选（池满时不得已可淘汰）
-        if (inst.lastActiveTime < fallbackTime) {
-          fallbackTime = inst.lastActiveTime;
-          fallback = key;
-        }
-        continue;
-      }
-      if (inst.lastActiveTime < oldestTime) {
-        oldestTime = inst.lastActiveTime;
-        oldest = key;
-      }
-    }
-
-    const victim = oldest || fallback;
-    if (victim) {
-      console.log(`[TiffaManager] LRU 淘汰: ${victim}`);
-      this.closeByKey(victim);
-      return true;
-    }
-    // 所有实例都在运行/活跃/待审批，无法淘汰
-    console.warn(`[TiffaManager] LRU 淘汰失败：所有 ${this.instances.size} 个实例均不可淘汰`);
-    return false;
-  }
-
-  // 获取所有实例状态（供前端显示）
-  getStatus() {
-    const result = [];
-    for (const [key, inst] of this.instances) {
-      result.push({
-        key,
-        cwd: inst.cwd,
-        sessionId: inst.sessionId,
-        sessionFilePath: inst.sessionFilePath,
-        active: key === this.activeKey,
-        ready: inst.ready,
-        agentRunning: inst.agentRunning,
-        lastActiveTime: inst.lastActiveTime,
-      });
-    }
-    return result;
-  }
-}
-
-// 全局实例管理器
-const tiffaManager = new TiffaInstanceManager();
-
-// ── Window Creation ──
-
-/**
- * 自定义启动页图片：用户把 startup-image.png/.jpg/.jpeg/.webp/.gif 放入
- * <PORTABLE_ROOT>/data/，启动时复制到 dist/assets/startup-custom.<ext>，
- * 渲染层用相对路径引用（模块顶层定义，createWindow 与 IPC 共用）。
- * 为什么不 base64：13MB+ 动图转 data URL 后约 17MB，塞进 CSS 变量易被
- * Chromium 静默丢弃；静态文件由 Chromium 原生解码，GIF/WebP 动画照常播放。
- */
-const STARTUP_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
-const CUSTOM_STARTUP_DIST_DIR = path.join(__dirname, 'renderer', 'dist', 'assets');
-const MAX_STARTUP_IMAGE = 20 * 1024 * 1024; // 上限 20MB，防启动卡顿
-
-function syncCustomStartupImage() {
-  try {
-    // 先清旧残留：用户删除图后必须回退默认图，不能残留旧自定义图
-    for (const ext of STARTUP_IMAGE_EXTS) {
-      const stale = path.join(CUSTOM_STARTUP_DIST_DIR, `startup-custom.${ext}`);
-      if (fs.existsSync(stale)) fs.rmSync(stale);
-    }
-    const source = STARTUP_IMAGE_EXTS
-      .map((ext) => path.join(PORTABLE_ROOT, 'data', `startup-image.${ext}`))
-      .find((p) => fs.existsSync(p));
-    if (!source) return null;
-    if (fs.statSync(source).size > MAX_STARTUP_IMAGE) return null;
-    const ext = path.extname(source).toLowerCase();
-    fs.mkdirSync(CUSTOM_STARTUP_DIST_DIR, { recursive: true });
-    fs.copyFileSync(source, path.join(CUSTOM_STARTUP_DIST_DIR, `startup-custom${ext}`));
-    return { url: `assets/startup-custom${ext}` };
-  } catch {
-    return null;
-  }
-}
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 1000,
-    // 最小尺寸足够大：左侧项目栏 180px 固定 + 右侧 minimap + 聊天区，
-    // 缩小到最小也不挤压内容、不露出背景边框
-    minWidth: 1100,
-    minHeight: 720,
-    title: 'Tiffa',
-    icon: path.join(__dirname, 'assets', 'tiffa-icon.ico'),
-    backgroundColor: '#1a1a2e',
-    show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false, // needed for fs access via preload
-    },
-  });
-  // 启动前同步自定义启动页图片（复制到 dist/assets，供渲染层相对路径引用）
-  syncCustomStartupImage();
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
-  // 隐藏原生菜单栏
-  mainWindow.setMenu(null);
-  // 等渲染进程首帧就绪再显示，避免黑屏/白屏闪烁。
-  // 注：renderer 的 yieldFrame 已有 setTimeout 兜底，窗口未显示期间 rAF 被暂停
-  // 也不会导致 init() 挂死（2026-08-06 已修复），故可安全延迟显示。
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-
-  // Open dev tools in dev mode
-  if (process.argv.includes('--dev') || process.argv.includes('--verbose')) {
-    mainWindow.webContents.openDevTools();
-  }
-
-  // F12 切换 DevTools（生产环境排障用）
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && input.key === 'F12') {
-      mainWindow.webContents.toggleDevTools();
-      event.preventDefault();
-    }
-  });
-
-  // ── 兜底：防止外部链接在 app 窗口内导航导致页面卡死 ──
-  // 即使前端漏拦截，这里也会把 http/https 导航重定向到系统浏览器
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) {
-      shell.openExternal(url);
-      return { action: 'deny' };
-    }
-    return { action: 'deny' };
-  });
-  mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (/^https?:\/\//.test(url)) {
-      e.preventDefault();
-      shell.openExternal(url);
-    }
-  });
-}
-
-// ── IPC Handlers ──
 
 function setupIpc() {
   // ── 多实例感知的辅助函数 ──
@@ -1477,7 +284,7 @@ function setupIpc() {
       // 显式激活：设置 activeKey（用户主动切换对话时才调用）
       tiffaManager.activeKey = tiffaManager._key(normalized, sessionId);
       tiffaManager.activeCwd = normalized;
-      currentWorkspaceDir = normalized;
+      setCurrentWorkspaceDir(normalized);
       const result = await tiffaManager.activateSession(normalized, sessionId);
       return { success: true, cwd: normalized, sessionId, ready: result.ready };
     } catch (err) {
@@ -1600,10 +407,10 @@ function setupIpc() {
     if (inst) {
       // 用户应答 → 移除待应答记账（非交互型确认无对应 id，delete 为 no-op，不会误减）
       inst._pendingAskIds.delete(id);
-      _mainLog(`[${inst._shortCwd()}#${inst.sessionId}] ui-resp id=${id} activeKey=${tiffaManager.activeKey}`);
+      mainLog(`[${inst._shortCwd()}#${inst.sessionId}] ui-resp id=${id} activeKey=${tiffaManager.activeKey}`);
       inst.sendRaw(frame);
     } else {
-      _mainLog(`[ui-resp] id=${id} sessionId=${sessionId} INST NOT FOUND (routed to getActive)`);
+      mainLog(`[ui-resp] id=${id} sessionId=${sessionId} INST NOT FOUND (routed to getActive)`);
     }
   });
 
@@ -3714,6 +2521,8 @@ print(json.dumps({'results': results[:30]}, ensure_ascii=False))
     }
   });
 }
+
+
 
 // ── App Lifecycle ──
 

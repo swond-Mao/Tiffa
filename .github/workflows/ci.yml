@@ -27,21 +27,25 @@ jobs:
         working-directory: electron
         run: npm ci
 
+      - name: Typecheck (main process TS)
+        working-directory: electron
+        run: npm run typecheck:main
+
       - name: Typecheck (renderer TS)
         working-directory: electron
-        run: npm run typecheck
+        run: tsc --noEmit -p renderer/tsconfig.json
 
-      - name: Unit tests — main process
+      - name: Unit tests - main process
         working-directory: electron
         run: node main.test.js
 
-      - name: Unit tests — renderer stores
+      - name: Unit tests - renderer stores
         working-directory: electron
         run: npm run test:renderer
 
-      - name: Build renderer (production)
+      - name: Build (main TS compile + renderer Vite)
         working-directory: electron
-        run: npm run build:renderer
+        run: npm run build
 
       - name: Verify dist artifacts
         working-directory: electron

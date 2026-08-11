@@ -158,6 +158,13 @@ electron/renderer/assets_backup/
 
 # React 构建产物（vite build 生成，勿入库）
 electron/renderer/dist/
+
+# 主进程 TS 编译产物（tsc 生成，勿入库；clone 后 npm install 自动编译）
+electron/main.js
+electron/main.js.map
+electron/modules/*.js
+electron/modules/*.js.map
+
 # 本次迁移调试临时产物
 main-diff.txt
 electron/_tail_check.js
