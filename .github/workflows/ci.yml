@@ -16,10 +16,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          # 不用 cache: npm —— setup-node 会先跑 `npm config get cache` 拿目录
-          # （C:\npm\cache），若该目录尚不存在（npm 还没跑过），actions/cache
-          # 报 "Some specified paths were not resolved, unable to cache dependencies."
-          # 直接全量安装：多 ~1-2 分钟，但 CI 稳定不玄学。
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+          # 前提：electron/package-lock.json 必须入库（.gitignore 不得忽略）。
+          # 曾因 lock 缺失同时挂两处：npm ci 无 lock 可装 + cache-dependency-path
+          # 解析失败（"Some specified paths were not resolved"）。lock 入库后
+          # 缓存恢复/保存均正常（run 31452061756 全绿验证）。
 
       - name: Install dependencies
         working-directory: electron
