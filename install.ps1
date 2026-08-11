@@ -285,6 +285,49 @@ foreach ($d in $dirs) {
 }
 OK "目录结构已就绪"
 
+# ---- 记忆模板（USER.md/MEMORY.md 为个人档案与运行时数据，gitignore 不入库，install 负责生成）----
+function Ensure-MemoryTemplate {
+    param([string]$Path, [string]$Template)
+    if (-not (Test-Path $Path)) {
+        [System.IO.File]::WriteAllText($Path, $Template, [System.Text.UTF8Encoding]::new($false))
+        OK "已生成: $Path"
+    }
+}
+$userTemplate = @"
+# 用户档案
+
+<!-- 此文件为模板，首次使用后由 AI 自动填充 -->
+<!-- 个人档案（运行时数据），已 gitignore 不入库 -->
+
+- 称呼：
+- 语言：中文（简体）
+- 角色：
+- 工作环境：
+
+## 沟通偏好
+
+- 直接给结论和方案，不要铺垫废话
+- 说"彻底解决"就必须端到端验证，不接受"看起来应该行"
+- 对反复修不好的问题会明确表达不满，此时应承认问题而非辩解
+- 不需要过度解释已知背景
+
+## 工作习惯
+
+- 倾向一次性把架构想清楚再动手，不喜欢补丁式修复
+- 重视防呆和鲁棒性：宁可多一层保护也不要"正常情况下没问题"
+- 会实际测试验证，不信任纯代码审查的结论
+"@
+$memoryTemplate = @"
+# 全局长期记忆
+
+<!-- 此文件为模板，AI 在运行中会自动追加记忆条目 -->
+<!-- 每条记忆格式：## YYYY-MM-DD + 标题 + 内容 -->
+<!-- 运行时数据（内核记忆整理时自动覆写），已 gitignore 不入库 -->
+"@
+Ensure-MemoryTemplate (Join-Path $ROOT "data\memory\USER.md") $userTemplate
+Ensure-MemoryTemplate (Join-Path $ROOT "data\memory\MEMORY.md") $memoryTemplate
+OK "记忆模板已就绪"
+
 # ---- embedding 模型（必须随包，国内无法从 HuggingFace 下载）----
 $embSrc  = Join-Path $ROOT "embedding-assets\fast-bge-small-zh-v1.5"
 $embOnnx = Join-Path $embSrc "model_optimized.onnx"

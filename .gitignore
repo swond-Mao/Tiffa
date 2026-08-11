@@ -54,6 +54,10 @@ data/agent/mnemopi/
 !data/agent/mnemopi/vocab.txt
 data/agent/removed-cwds.json
 
+# 个人档案与运行时记忆（AI 运行时会自动填充/覆写，install.ps1 负责生成模板，绝不入库）
+data/memory/USER.md
+data/memory/MEMORY.md
+
 # Log files
 data/log/
 plugins/*.log
