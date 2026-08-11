@@ -111,6 +111,20 @@ export async function restoreModelIfAvailable(
     return false;
   }
   try {
+    // 防御：实例当前已是目标模型时跳过 set_model。避免"切换会话时重复下发模型命令"
+    // 触发内核重复切换模型（旧模型连接未释放 + 新模型进程 → 双模型同跑卡死）
+    if (sessionId) {
+      try {
+        const st = (await window.tiffaDesktop.getState(sessionId)) as { model?: { id?: string; name?: string; provider?: string } } | null | undefined;
+        const cur = st && st.model;
+        if (cur && (cur.id === modelId || cur.name === modelId) && (cur.provider || '') === provider) {
+          dbgLog('model', `实例已运行 ${provider}/${modelId}，跳过重复设置`);
+          return true;
+        }
+      } catch {
+        /* 拿不到当前模型状态则继续下发 */
+      }
+    }
     await window.tiffaDesktop.setModel(provider, modelId, sessionId);
     if (useSessionsStore.getState().activeSessionPath !== expectedSessionPath) return true;
     useUiStore.getState().setCurrentModel(modelId, provider);
@@ -454,11 +468,10 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
   }
   if (!disk) return map;
   for (const nt of newTabsToMigrate) {
-    const inst =
-      instances.find((i) => i.sessionId === nt.sessionId) ||
-      instances.find(
-        (i) => i.cwd === projects.workspacePath && i.sessionFilePath && !sessions.activeTabMeta[i.sessionFilePath],
-      );
+    // 仅按 sessionId 精确匹配实例。曾有的兜底 find（cwd 匹配 + 有 sessionFilePath +
+    // tab 未打开）会错配到任意后台实例（如 tab 被上限关闭但仍存活的旧会话），
+    // 把 __new__ 会话迁移到别人的真实路径，模型记忆 sessionModelMap 随之串味。
+    const inst = instances.find((i) => i.sessionId === nt.sessionId);
     if (inst && inst.sessionFilePath) {
       const realSession = disk.find((rs) => {
         const norm = (s: unknown) => (s ? String(s).replace(/\//g, '\\').toLowerCase() : '');

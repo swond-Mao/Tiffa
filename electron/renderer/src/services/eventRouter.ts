@@ -110,6 +110,9 @@ function handleEvent(event: TiffaEventFrame): void {
 
   switch (event.type) {
     case 'ready': {
+      // 后台实例（非当前活跃会话）的 ready 不处理 UI 状态：避免用活跃会话的模型记录
+      // 错误恢复后台实例、或把就绪/模型显示错置（启动阶段 activeSessionId 为空时放行）
+      if (event._sessionId && sessions.activeSessionId && event._sessionId !== sessions.activeSessionId) break;
       proc.setReady(true);
       ui.setStatusText('就绪');
       // 模型恢复优先于 fetchCurrentModel
@@ -477,7 +480,9 @@ function handleEvent(event: TiffaEventFrame): void {
     }
     case 'model_changed':
       // 内核模型已改变（set_model/cycle_model/自动降级后），重新拉取当前模型同步 UI，
-      // 避免"切换了模型但按钮/高亮仍是旧模型"的显示漂移
+      // 避免"切换了模型但按钮/高亮仍是旧模型"的显示漂移。
+      // 仅当前活跃会话的 model_changed 才同步（后台实例的模型变化不污染当前显示）
+      if (event._sessionId && sessions.activeSessionId && event._sessionId !== sessions.activeSessionId) break;
       import('./sessionController')
         .then((sc) => sc.fetchCurrentModel())
         .catch(() => {});
@@ -564,6 +569,14 @@ function handleEvent(event: TiffaEventFrame): void {
         sessions.activeSessionPath.startsWith('__new__') &&
         (!event._cwd || !projects.workspacePath || event._cwd === projects.workspacePath)
       ) {
+        // 归属校验（关键防串味）：迁移事件必须来自当前活跃 __new__ 会话自己的实例。
+        // 否则后台实例（崩溃重启/上下文恢复/会话加载中的旧对话）的 session_switch
+        // 会把当前 __new__ tab 错迁到别的会话路径——sessionModelMap 随之迁移覆盖，
+        // 后续在错迁 tab 里切模型会写进别人的路径，切回原对话时模型被"继承"污染
+        // （表现为：切回原对话模型跟着变，旧模型连接未释放 + 新模型进程 → 双模型卡死）
+        const activeNewObj = useSessionsStore.getState().sessions.find((s) => s.path === sessions.activeSessionPath);
+        const expectedTempId = (activeNewObj && activeNewObj.sessionId) || sessions.activeSessionId;
+        if (event._sessionId && expectedTempId && event._sessionId !== expectedTempId) break;
         const newPath = String(event.sessionPath);
         const oldPath = sessions.activeSessionPath;
         if (oldPath.startsWith('__new__')) {
