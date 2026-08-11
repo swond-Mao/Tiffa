@@ -153,6 +153,8 @@ export interface TiffaDesktopApi {
   readFile: (filePath: string) => Promise<{ content?: string; error?: string } | undefined>;
   writeFile: (filePath: string, content: string) => Promise<unknown>;
   readImage: (filePath: string) => Promise<unknown>;
+  // 自定义启动页图片（<PORTABLE_ROOT>/data/startup-image.*，主进程已复制到 dist/assets），无则 null
+  getStartupImage: () => Promise<{ url: string } | null>;
   fetchProviderModels: (baseUrl: string, apiKey: string) => Promise<{ models?: Array<{ id: string; name?: string; reasoning?: boolean }>; error?: string } | undefined>;
 
   // ── 外部调用 ──

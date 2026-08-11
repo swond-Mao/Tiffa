@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   readImage: (filePath) => ipcRenderer.invoke('fs:readImage', filePath),
+  // 自定义启动页图片（<PORTABLE_ROOT>/data/startup-image.*），无则返回 null
+  getStartupImage: () => ipcRenderer.invoke('custom:getStartupImage'),
   fetchProviderModels: (baseUrl, apiKey) => ipcRenderer.invoke('fetch:providerModels', baseUrl, apiKey),
 
   // ── 外部调用 ──

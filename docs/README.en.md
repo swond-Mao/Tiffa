@@ -10,6 +10,14 @@ Based on [oh-my-pi v17.2.2](https://github.com/can1357/oh-my-pi) · MIT License 
 
 ---
 
+## Demo
+
+<video src="demo/tiffa-demo.mp4" controls width="720"></video>
+
+> A 22-second live demo: startup ritual → multi-session chat → computer operation → memory recall. The raw video is at `docs/demo/`, downloadable for playback.
+
+---
+
 ## Why Tiffa
 
 Have you ever felt this way — you've been talking to an AI for three months and it keeps getting to know you; then you switch computers, the system crashes, you reinstall, and that "it" is gone, leaving you with a stranger. **Tiffa exists to solve this — and leaves no trace anywhere.**

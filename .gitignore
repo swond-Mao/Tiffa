@@ -58,6 +58,11 @@ data/agent/removed-cwds.json
 data/memory/USER.md
 data/memory/MEMORY.md
 
+# 自定义启动页图片（用户个人素材，不入库）
+data/startup-image.*
+# 个人视频素材（如待机视频等，不入库）
+data/*.mp4
+
 # Log files
 data/log/
 plugins/*.log

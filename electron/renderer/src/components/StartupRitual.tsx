@@ -35,6 +35,21 @@ export default function StartupRitual() {
     let scriptIdx = 0;
     let disposed = false;
 
+    // 自定义启动页图片：<PORTABLE_ROOT>/data/startup-image.* 存在则替换默认星空侧脸图
+    void (async () => {
+      try {
+        const img = await window.tiffaDesktop.getStartupImage();
+        if (!img || disposed) return;
+        // 用内联样式而非 CSS 变量注入 url()：内联 URL 相对文档（dist/index.html）解析，
+        // 而变量值不经过 Vite 重写，替换进打包后 CSS 会相对 dist/assets/ 解析错位（404）。
+        const l0 = overlay.querySelector<HTMLElement>('.muse-layer.l0');
+        if (l0) l0.style.backgroundImage = `url('${img.url}')`;
+        overlay.classList.add('has-custom-muse');
+      } catch {
+        /* 读取失败忽略：继续用默认图 */
+      }
+    })();
+
     // 剧本播放器：每 100ms 按固定时间轴推进字幕与进度条（封顶 95%）
     const ticker = setInterval(() => {
       if (!overlay.isConnected || disposed) {

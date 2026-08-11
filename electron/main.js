@@ -1215,6 +1215,38 @@ const tiffaManager = new TiffaInstanceManager();
 
 // ── Window Creation ──
 
+/**
+ * 自定义启动页图片：用户把 startup-image.png/.jpg/.jpeg/.webp/.gif 放入
+ * <PORTABLE_ROOT>/data/，启动时复制到 dist/assets/startup-custom.<ext>，
+ * 渲染层用相对路径引用（模块顶层定义，createWindow 与 IPC 共用）。
+ * 为什么不 base64：13MB+ 动图转 data URL 后约 17MB，塞进 CSS 变量易被
+ * Chromium 静默丢弃；静态文件由 Chromium 原生解码，GIF/WebP 动画照常播放。
+ */
+const STARTUP_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
+const CUSTOM_STARTUP_DIST_DIR = path.join(__dirname, 'renderer', 'dist', 'assets');
+const MAX_STARTUP_IMAGE = 20 * 1024 * 1024; // 上限 20MB，防启动卡顿
+
+function syncCustomStartupImage() {
+  try {
+    // 先清旧残留：用户删除图后必须回退默认图，不能残留旧自定义图
+    for (const ext of STARTUP_IMAGE_EXTS) {
+      const stale = path.join(CUSTOM_STARTUP_DIST_DIR, `startup-custom.${ext}`);
+      if (fs.existsSync(stale)) fs.rmSync(stale);
+    }
+    const source = STARTUP_IMAGE_EXTS
+      .map((ext) => path.join(PORTABLE_ROOT, 'data', `startup-image.${ext}`))
+      .find((p) => fs.existsSync(p));
+    if (!source) return null;
+    if (fs.statSync(source).size > MAX_STARTUP_IMAGE) return null;
+    const ext = path.extname(source).toLowerCase();
+    fs.mkdirSync(CUSTOM_STARTUP_DIST_DIR, { recursive: true });
+    fs.copyFileSync(source, path.join(CUSTOM_STARTUP_DIST_DIR, `startup-custom${ext}`));
+    return { url: `assets/startup-custom${ext}` };
+  } catch {
+    return null;
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -1234,6 +1266,8 @@ function createWindow() {
       sandbox: false, // needed for fs access via preload
     },
   });
+  // 启动前同步自定义启动页图片（复制到 dist/assets，供渲染层相对路径引用）
+  syncCustomStartupImage();
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
   // 隐藏原生菜单栏
   mainWindow.setMenu(null);
@@ -1701,6 +1735,13 @@ function setupIpc() {
       return { error: err.message };
     }
   });
+
+  // ── 自定义启动页图片 ──────────────────────────────────────────
+  // 用户把图片命名为 startup-image.png/.jpg/.jpeg/.webp/.gif 放入 <PORTABLE_ROOT>/data/。
+  // 实现：启动时同步复制到 dist/assets/startup-custom.<ext>，渲染层用相对路径引用。
+  // 为什么不 base64：13MB+ 动图转 data URL 后约 17MB，塞进 CSS 变量易被 Chromium
+  // 静默丢弃；静态文件由 Chromium 原生解码，GIF/WebP 动画照常播放且无大小瓶颈。
+  ipcMain.handle('custom:getStartupImage', () => syncCustomStartupImage());
 
   // Shell operations
   ipcMain.handle('shell:openExternal', async (event, url) => {

@@ -2299,6 +2299,37 @@ body {
   pointer-events: none;
 }
 
+/* ── 自定义启动页图片 ──────────────────────────────────────
+   用户放 <PORTABLE_ROOT>/data/startup-image.*（png/jpg/webp/gif），
+   渲染层 StartupRitual 检测后把内联 backgroundImage 设在 .muse-layer.l0
+   （内联 url 相对文档解析，不受打包后 CSS 相对路径影响），并加
+   has-custom-muse class。
+   照片类图片：不做 4 层同图叠加（突兀）与 brightness 过曝，只保留
+   单层柔和呼吸；外层缩放漂移（museDrift）与径向遮罩不变；
+   染色罩关闭，保留图片原始色彩。 */
+.startup-overlay.has-custom-muse .muse-layer.l0 {
+  animation: museCustomBreath 3.2s ease-in-out 0s infinite;
+}
+.startup-overlay.has-custom-muse .muse-layer.l1,
+.startup-overlay.has-custom-muse .muse-layer.l2,
+.startup-overlay.has-custom-muse .muse-layer.l3 {
+  animation: none;
+  opacity: 0;
+}
+.startup-overlay.has-custom-muse .muse-tint {
+  display: none;
+}
+/* 暗色主题自动反色：自定义图多为白底黑字，暗色下反转成黑底白字；
+   亮色主题（data-mode=light）保持原样。invert 只反明暗不转色相，
+   对黑白图无副作用；自定义模式呼吸动画只动 opacity，不与 filter 冲突。 */
+html:not([data-mode="light"]) .startup-overlay.has-custom-muse .muse-layer {
+  filter: invert(1);
+}
+@keyframes museCustomBreath {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+
 /* ── 浅色主题适配 ─────────────────────────────────────────────
    浅色下使用「浅底暗星」素材（暗星在浅底上才清晰），与暗色共用
    同一套 color 染色罩：暗星被染成强调色暗星。浓度比暗色稍低，保持克制。 */
