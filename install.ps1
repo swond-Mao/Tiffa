@@ -82,6 +82,8 @@ try {
     INFO "写入 .npmrc 失败，可手动在 $ROOT\.npmrc 写入 registry=$CHINA_NPM"
 }
 $env:ELECTRON_MIRROR = $CHINA_ELECTRON
+# 完全便携：npm 缓存也指到包内（默认 %LOCALAPPDATA%\npm-cache 会写 C 盘，可达数百 MB）
+$env:npm_config_cache = Join-Path $ROOT ".cache\npm"
 OK "npm 镜像: $CHINA_NPM"
 OK "Electron 镜像: $CHINA_ELECTRON"
 
@@ -350,7 +352,8 @@ if (Test-Path $pyExe) {
             try {
                 $pipConfDir = Join-Path $env:APPDATA "pip"
                 if (-not (Test-Path $pipConfDir)) { New-Item -ItemType Directory -Path $pipConfDir -Force | Out-Null }
-                "[global]`nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple`ntrusted-host = pypi.tuna.tsinghua.edu.cn" | Set-Content -Path (Join-Path $pipConfDir "pip.ini") -Encoding UTF8
+                $pipCache = Join-Path $ROOT ".cache\pip"
+                "[global]`nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple`ntrusted-host = pypi.tuna.tsinghua.edu.cn`ncache-dir = $pipCache" | Set-Content -Path (Join-Path $pipConfDir "pip.ini") -Encoding UTF8
             } catch {}
         }
         & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input 2>&1 | Out-Null
