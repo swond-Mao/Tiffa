@@ -33,7 +33,7 @@ jobs:
 
       - name: Typecheck (renderer TS)
         working-directory: electron
-        run: tsc --noEmit -p renderer/tsconfig.json
+        run: npm run typecheck:renderer
 
       - name: Unit tests - main process
         working-directory: electron
