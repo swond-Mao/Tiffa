@@ -1,3 +1,6 @@
+# npm 镜像配置：install.ps1 第 1 步自动写入（registry=国内源），本地配置不入库
+.npmrc
+
 # Python runtime (site-packages, Playwright, etc.)
 Lib/
 include/
@@ -34,8 +37,8 @@ data/agent/projects.json
 data/agent/xml-translation-enabled
 data/agent/blobs/
 data/agent/models.yml
+# 模板必须可恢复（install.ps1 依赖它生成 models.yml），不得 ignore
 data/agent/models.yml.bak*
-data/agent/models.yml.example
 data/cache/
 data/agent/cache/
 data/memory/daily-log/
