@@ -60,6 +60,31 @@ function ensureDir(dir: string) {
   try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }) } catch {}
 }
 
+// ── 踩坑记录文档层（L-踩坑）：项目 docs/ 下自动创建精选踩坑档案模板（幂等）──
+function ensurePitfallDoc(projectDir: string): void {
+  try {
+    const docsDir = join(projectDir, "docs")
+    ensureDir(docsDir)
+    const pitfallPath = join(docsDir, "踩坑记录.md")
+    if (existsSync(pitfallPath)) return
+    const dirName = projectDir.split(/[\\/]/).pop() || "project"
+    const template = [
+      `# ${dirName} 踩坑记录`,
+      "",
+      "> 精选踩坑档案：仅记录**确定踩坑**（根因明确 + 修复已验证生效）。由 AI 在修复后主动写入；",
+      "> 提及以前实现时优先读取，不够再语义召回（recall）。近期决策/踩坑由 mnemopi 自动记录，",
+      "> 本文件只存值得长期保留的经验。",
+      "",
+      "（新踩坑按此格式追加：`### 问题（YYYY-MM-DD 修复）` + 根因/修复/关键文件/教训）",
+      "",
+    ].join("\n")
+    writeFileSync(pitfallPath, template, "utf8")
+    log("before_agent_start.pitfall_doc", `created ${pitfallPath}`)
+  } catch (e: unknown) {
+    log("before_agent_start.pitfall_doc.error", e instanceof Error ? e.message : String(e))
+  }
+}
+
 // ── 审计日志 ──
 function auditLog(entry: Record<string, unknown>) {
   try {
@@ -447,6 +472,8 @@ export default async function (pi: any) {
           "",
           "（如 ComfyUI: http://host:port 等，写入真实地址可避免弱模型幻觉成错误端口）",
           "",
+          "> 踩坑记录见 `docs/踩坑记录.md`（仅记确定踩坑；提及以前实现先读它，不够再 recall）",
+          "",
         ].join("\n")
 
         if (!existsSync(projectMd)) {
@@ -489,6 +516,8 @@ export default async function (pi: any) {
           const pm = readFileSync(projectMd, "utf8").trim()
           if (pm) injected.push(`# 项目纲领（PROJECT.md · ${projectDir}）\n\n> 写入规则：允许写入「项目目标」「里程碑进展」（非必要不写）「项目铁律/约束」（用户说“这个项目必须/不能 xxx”时写入）。禁止写入踩坑记录、日常决策、临时笔记（由 mnemopi 自动记录）。用户说“以后你都必须/不能 xxx”→写入 USER.md（跨项目偏好）。\n\n${pm}`)
         }
+        // 踩坑记录文档层（L-踩坑）：确保 docs/踩坑记录.md 存在（幂等，已存在不覆盖）
+        ensurePitfallDoc(projectDir)
       } catch (err: any) {
         log("before_agent_start.project_md.error", err?.message || String(err))
       }
@@ -516,6 +545,12 @@ export default async function (pi: any) {
         "- **禁止** 直接查询 SQLite 数据库文件（任何 .db/.sqlite 文件）",
         "- 检索记忆**只能**通过 `recall` 工具（语义排序、自动双层搜索）",
         "- recall 是语义召回，比直接查数据库更快更准，且不会漏掉向量索引中的记忆",
+        "",
+        "## 踩坑记录文档（L-踩坑）",
+        "- 项目级精选踩坑档案：`<项目>/docs/踩坑记录.md`，仅记**确定踩坑**（根因明确 + 修复验证）",
+        "- 用户提及「以前我们怎么实现」：**先 read 该文档**，不够再 recall 语义召回",
+        "- 修复确定踩坑后主动写入（### 标题（日期 修复）+ 根因/修复/关键文件/教训）",
+        "- 不随会话注入，按需读取",
       ].join("\n"))
 
       // ── 进度追踪：每次会话启动先聚合（跨天/周/月 -> 日报/周报/月报 -> PROJECT.md）──

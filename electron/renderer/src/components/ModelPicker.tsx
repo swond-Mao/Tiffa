@@ -12,9 +12,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useUiStore } from '../stores/useUiStore';
-import { useProcStore } from '../stores/useProcStore';
-import { switchModel } from '../services/sessionController';
-import type { TiffaModelInfo, TiffaModelsConfig } from '../types/tiffaDesktop';
+import { switchModel, getModelListCached } from '../services/sessionController';
+import type { TiffaModelInfo } from '../types/tiffaDesktop';
 
 const SWITCHER_WIDTH = 320;
 const SWITCHER_MAX_HEIGHT = 420;
@@ -28,7 +27,7 @@ export default function ModelPicker({ className }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<TiffaModelInfo[] | null>(null);
   const [query, setQuery] = useState('');
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeSessionPath = useSessionsStore((s) => s.activeSessionPath);
@@ -50,90 +49,33 @@ export default function ModelPicker({ className }: ModelPickerProps) {
       setOpen(false);
       return;
     }
-    // 动态定位：显示在触发按钮上方（输入条附近场景），右对齐输入条右缘（而非视口右缘）
+    // 动态定位：优先在触发按钮上方展开（输入条在底部时自然向上），
+    // 按钮贴近视口顶部时才改为向下展开。用 bottom/top 直接贴住按钮，
+    // 菜单高度自适应内容（maxHeight 仅作上限），避免固定高度导致的悬空/溢出。
     const rect = btnRef.current?.getBoundingClientRect();
     if (rect) {
+      const vh = window.innerHeight;
+      const margin = 8;
+      const spaceAbove = rect.top - margin;
+      const spaceBelow = vh - rect.bottom - margin;
       const maxH = Math.min(SWITCHER_MAX_HEIGHT, window.innerHeight * 0.6);
-      let top = rect.top - maxH - 8;
-      if (top < 8) top = rect.bottom + 6; // 上方空间不足则从按钮下方展开
       const inputArea = document.getElementById('inputArea');
       const anchorRight = inputArea ? inputArea.getBoundingClientRect().right : window.innerWidth;
       let left = anchorRight - SWITCHER_WIDTH - 8;
       if (left < 8) left = 8;
-      setPos({ left, top });
+      if (spaceAbove >= 220 || spaceAbove >= spaceBelow) {
+        // 向上展开：菜单底边贴按钮顶边，向上生长
+        setPos({ left, bottom: vh - rect.top + margin, maxHeight: Math.min(maxH, spaceAbove) });
+      } else {
+        // 向下展开：菜单顶边贴按钮底边，向下生长
+        setPos({ left, top: rect.bottom + margin, maxHeight: Math.min(maxH, spaceBelow) });
+      }
     }
     setOpen(true);
     setQuery('');
     setModels(null);
-    void loadModelList();
-  };
-
-  // ── 加载模型列表（等价旧版 loadModelSwitcherList + renderModelSwitcherList 过滤）──
-
-  const loadModelList = async () => {
-    try {
-      // hidden-models.json
-      let hidden = new Set<string>();
-      try {
-        const root = (await window.tiffaDesktop.getRootPath()) as string;
-        const res = (await window.tiffaDesktop.readFile(`${root}\\data\\agent\\hidden-models.json`)) as { content?: string } | undefined;
-        if (res && res.content) {
-          const arr = JSON.parse(res.content);
-          if (Array.isArray(arr)) hidden = new Set(arr);
-        }
-      } catch {
-        /* ignore */
-      }
-      // enabled-models.json 白名单（undefined = 未配置）
-      let enabledModels: string[] | undefined;
-      try {
-        const root = (await window.tiffaDesktop.getRootPath()) as string;
-        const res = (await window.tiffaDesktop.readFile(`${root}\\data\\agent\\enabled-models.json`)) as { content?: string } | undefined;
-        if (res && res.content) {
-          const arr = JSON.parse(res.content);
-          if (Array.isArray(arr) && arr.length > 0) enabledModels = arr;
-        }
-      } catch {
-        enabledModels = undefined;
-      }
-      // models.yml 用户配置
-      let modelsConfigData: TiffaModelsConfig | null = null;
-      try {
-        const cfg = await window.tiffaDesktop.readModelsYml();
-        if (cfg && !cfg.error && cfg.data) modelsConfigData = cfg.data;
-      } catch {
-        /* ignore */
-      }
-
-      // 引擎未就绪（含崩溃后停止重启）不调 getModels：主进程 handler 无实例会 throw
-      if (!useProcStore.getState().tiffaReady) {
-        setModels([]);
-        return;
-      }
-      const result = await window.tiffaDesktop.getModels(useSessionsStore.getState().activeSessionId);
-      if (!result || !result.models) {
-        setModels([]);
-        return;
-      }
-      let filtered = result.models.filter((m) => !hidden.has(m.id));
-      // 白名单优先；否则按 models.yml 用户配置的模型过滤
-      if (enabledModels) {
-        const isCurrent = (m: TiffaModelInfo) => currentModel === m.id || currentModel === m.name;
-        filtered = filtered.filter((m) => enabledModels!.includes(`${m.provider}/${m.id}`) || isCurrent(m));
-      } else if (modelsConfigData && modelsConfigData.providers) {
-        const userModelIds = new Set<string>();
-        for (const prov of Object.values(modelsConfigData.providers)) {
-          if (prov.models) for (const m of prov.models) userModelIds.add(m.id);
-        }
-        if (userModelIds.size > 0) {
-          const currentId = currentModel;
-          filtered = filtered.filter((m) => userModelIds.has(m.id) || m.id === currentId || m.name === currentId);
-        }
-      }
-      setModels(filtered);
-    } catch {
-      setModels([]);
-    }
+    // 死列表缓存（sessionController）：命中秒回；首次无缓存才触发一次加载（in-flight 去重）
+    void getModelListCached().then((list) => setModels(list ?? []));
   };
 
   // ── 外部点击 / Esc 关闭 ──
@@ -185,8 +127,10 @@ export default function ModelPicker({ className }: ModelPickerProps) {
 
   const activeKey = `${provider || ''}/${currentModel}`;
 
-  // 所有 hooks 已执行完毕，此条件 return 不影响 hooks 数量
-  if (!label) return null;
+  // 按钮总是显示（有活动会话即可）：指针优先，无记忆/未就绪时显示“选择模型”占位，发送时才物化。
+  // 原条件 `!label && tiffaReady` 会误隐藏：tiffaReady 是“任意实例就绪”，
+  // 切到无记忆会话时 label 为空但别的实例已就绪 → 按钮消失（用户反馈的 bug）。
+  if (!activeSessionPath) return null;
 
   return (
     <>
@@ -201,11 +145,11 @@ export default function ModelPicker({ className }: ModelPickerProps) {
           void toggle();
         }}
       >
-        {label.length > 18 ? `${label.substring(0, 18)}…` : label}
+        {label.length > 18 ? `${label.substring(0, 18)}…` : label || '选择模型'}
       </button>
       {open &&
         createPortal(
-          <div id="modelSwitcher" className="model-switcher" style={pos ? { left: pos.left, top: pos.top } : undefined}>
+          <div id="modelSwitcher" className="model-switcher" style={pos ? { left: pos.left, top: pos.top ?? 'auto', bottom: pos.bottom ?? 'auto', maxHeight: pos.maxHeight } : undefined}>
             <div className="model-switcher-header">切换模型</div>
             <div className="model-switcher-search">
               <input

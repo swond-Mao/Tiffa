@@ -17,6 +17,9 @@ export interface ActivateResult {
 export class TiffaInstanceManager {
   instances = new Map<string, TiffaInstance>(); // key: cwd#sessionId -> TiffaInstance
   spawning = new Map<string, Promise<ActivateResult>>(); // key: cwd#sessionId -> Promise
+  /** sessionId 迁移后的旧 key → 新 key 别名：前端在 IPC 延迟窗口内仍持旧 id 发消息时
+   * 能解析到已迁移实例，避免按旧 id spawn 新进程导致「对话分裂/漂移」。 */
+  aliasKeys = new Map<string, string>(); // oldKey -> newKey
   activeKey: string | null = null;
   activeCwd: string | null = null;
 
@@ -184,18 +187,40 @@ export class TiffaInstanceManager {
     return this.instances.get(this.activeKey) || null;
   }
 
-  /** 按 sessionId 精确查找实例（不依赖 activeKey） */
+  /** 解析可能存在的旧 key 别名链（惰性清理：目标已不存在则删除过期别名） */
+  private _resolveKey(key: string): string {
+    const seen = new Set<string>();
+    while (this.aliasKeys.has(key) && !seen.has(key)) {
+      seen.add(key);
+      key = this.aliasKeys.get(key)!;
+    }
+    if (seen.size > 0 && !this.instances.has(key)) {
+      for (const k of seen) this.aliasKeys.delete(k);
+    }
+    return key;
+  }
+
+  /** 按 sessionId 精确查找实例（不依赖 activeKey；支持迁移前旧 id） */
   getBySessionId(cwd: string | null, sessionId: string | null): TiffaInstance | null {
     if (!cwd || !sessionId) return null;
-    const key = this._key(cwd, sessionId);
+    const key = this._resolveKey(this._key(cwd, sessionId));
     return this.instances.get(key) || null;
   }
 
-  /** 按 sessionId 全池扫描（不依赖 activeCwd） */
+  /** 按 sessionId 全池扫描（不依赖 activeCwd；支持迁移前旧 id） */
   getBySessionIdAnywhere(sessionId: string | null): TiffaInstance | null {
     if (!sessionId) return null;
     for (const inst of this.instances.values()) {
       if (inst.sessionId === sessionId) return inst;
+    }
+    // 别名扫描：key 尾缀匹配旧 id（temp UUID）
+    const suffix = '#' + sessionId;
+    for (const [oldKey, newKey] of this.aliasKeys) {
+      if (oldKey.endsWith(suffix)) {
+        const resolved = this._resolveKey(newKey);
+        const inst = this.instances.get(resolved);
+        if (inst) return inst;
+      }
     }
     return null;
   }
@@ -214,6 +239,8 @@ export class TiffaInstanceManager {
     }
     this.instances.delete(oldKey);
     this.instances.set(newKey, inst);
+    // 保留旧 key 别名：迁移后前端可能仍持旧 id（temp）发消息/查询，解析到新 key 避免分裂
+    this.aliasKeys.set(oldKey, newKey);
     if (this.activeKey === oldKey) this.activeKey = newKey;
     if (this.spawning.has(oldKey)) {
       this.spawning.set(newKey, this.spawning.get(oldKey)!);
@@ -230,6 +257,10 @@ export class TiffaInstanceManager {
 
   /** 关闭某个 key 的实例 */
   closeByKey(key: string): void {
+    // 清理指向/来自该 key 的别名，避免悬挂
+    for (const [ok, nk] of this.aliasKeys) {
+      if (ok === key || nk === key) this.aliasKeys.delete(ok);
+    }
     const inst = this.instances.get(key);
     if (inst) {
       inst.kill();

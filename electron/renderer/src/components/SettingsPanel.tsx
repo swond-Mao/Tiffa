@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom';
 import { useUiStore } from '../stores/useUiStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useProcStore } from '../stores/useProcStore';
-import { switchModel } from '../services/sessionController';
+import { switchModel, invalidateModelListCache } from '../services/sessionController';
 import { showModalConfirm } from '../services/tabActions';
 import { escapeHtml } from '../services/utils';
 import type { TiffaModelsConfig, TiffaProviderConfig } from '../types/tiffaDesktop';
@@ -100,6 +100,8 @@ function ModelConfigSection() {
       setStatus(r && r.success ? '已保存' : `保存失败: ${(r && r.error) || ''}`);
       if (r && r.success) {
         addToast('success', '模型配置已保存');
+        // 死列表缓存失效：下次点开模型列表时按新配置重载
+        invalidateModelListCache();
         // 等价旧版 applyModelsConfigChange：agent 运行中不强行重启（避免中断任务），
         // 配置在下次重启 / 新对话时生效；空闲时才重启实例让配置立即生效。
         const activePath = useSessionsStore.getState().activeSessionPath;

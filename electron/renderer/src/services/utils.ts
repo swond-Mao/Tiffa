@@ -175,3 +175,43 @@ export function handleMessageLinkClick(e: MouseEvent): void {
     window.tiffaDesktop.openExternal(href);
   }
 }
+
+// ── 内核消息本地化 ──
+
+/**
+ * 内核英文提示 → 中文（渲染层统一过滤，不改主进程/内核）。
+ * 返回 { text, level, isTooShort }：
+ * - text：本地化后的文本（无法识别的保留原文）
+ * - level：建议的 toast 级别（undefined = 保持原级别）
+ * - isTooShort：是否为「内容过短无需压缩」类（应显示为 info 而非 error）
+ */
+export function localizeKernelMessage(raw: string): {
+  text: string;
+  level?: 'info' | 'warning' | 'error';
+  isTooShort: boolean;
+} {
+  const msg = String(raw || '').trim();
+  const low = msg.toLowerCase();
+  // 1) 压缩「内容过短/无需压缩」类：不是错误，只是告知，必须 info 级
+  const tooShortPattern =
+    /(too short|too few|not enough|nothing to|nothing left|no (content|messages|history|text)|skip(ping)?)/i;
+  if (/compact|compress|context|history|message/.test(low) && tooShortPattern.test(low)) {
+    return { text: '对话内容较短，无需压缩', level: 'info', isTooShort: true };
+  }
+  if (/too short|too few|not enough|nothing to (compact|compress|summarize)|no (content|messages|history) to/.test(low)) {
+    return { text: '对话内容较短，无需压缩', level: 'info', isTooShort: true };
+  }
+  // 2) MCP 准备/启动类
+  if (/prepar.*mcp|mcp.*(prepar|start|connect|launch|initial)/i.test(low)) {
+    return { text: '正在准备 MCP 服务…', isTooShort: false };
+  }
+  // 3) 模型切换类
+  if (/switching (the )?model|changing model|model (switch|change)/i.test(low)) {
+    return { text: '正在切换模型…', isTooShort: false };
+  }
+  // 4) 压缩失败类（保留原文信息，加中文前缀）
+  if (/(compaction|compact).*(failed|error)|failed to (compact|compress)/i.test(low)) {
+    return { text: `压缩失败：${msg}`, level: 'error', isTooShort: false };
+  }
+  return { text: msg, isTooShort: false };
+}

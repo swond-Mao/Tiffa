@@ -559,6 +559,10 @@ function setupIpc() {
     shell.openPath(filePath);
   });
 
+  ipcMain.handle('shell:showItemInFolder', async (event, filePath) => {
+    shell.showItemInFolder(filePath);
+  });
+
   // Path helpers
   ipcMain.handle('path:workspace', async () => currentWorkspaceDir);
   ipcMain.handle('path:root', async () => PORTABLE_ROOT);
@@ -1554,7 +1558,7 @@ function setupIpc() {
           cwd: normalized,
           displayName: proj.displayName || cwdDisplayName(normalized),
           sessionCount,
-          path: projectPath,
+          path: normalized,
           lastOpenedAt: proj.lastOpenedAt || '',
           addedAt: proj.addedAt || '',
         });

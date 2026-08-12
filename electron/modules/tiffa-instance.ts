@@ -364,14 +364,17 @@ export class TiffaInstance {
     }
 
     // session_switch
+    // 收紧迁移条件（与旧版注释语义一致）：prewarm 的 /memory rebuild 产生的 session_switch
+    // 是当前会话自己的路径（realSessionId === this.sessionId），不会走到迁移分支；
+    // 走到这里的（realSessionId !== this.sessionId）只可能是用户消息触发的新建会话
+    // session_switch——必须迁移，否则实例 key/sessionId 停留在 temp，前端按 real id
+    // 路由时查不到实例 → spawn 新进程 → 对话分裂/漂移。
     if (event.type === 'session_switch' && event.sessionPath && !this._restoringContext) {
       this.sessionFilePath = event.sessionPath as string;
       const realSessionId = extractSessionIdFromPath(event.sessionPath as string);
       if (realSessionId && realSessionId !== this.sessionId) {
-        if (!this.isPrewarming) {
-          if (_migrateSessionId) _migrateSessionId(this.cwd, this.sessionId, realSessionId);
-          this.sessionId = realSessionId;
-        }
+        if (_migrateSessionId) _migrateSessionId(this.cwd, this.sessionId, realSessionId);
+        this.sessionId = realSessionId;
       }
     }
 

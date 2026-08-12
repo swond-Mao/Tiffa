@@ -10,7 +10,9 @@ import { PORTABLE_ROOT } from './constants';
 import { setMainWindow } from './tiffa-instance';
 
 const STARTUP_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
-const CUSTOM_STARTUP_DIST_DIR = path.join(__dirname, 'renderer', 'dist', 'assets');
+// 本模块编译产物位于 electron/modules/，上级 electron/ 才是资源所在目录（与拆模块前 main.js 的 __dirname 一致）
+const APP_DIR = path.join(__dirname, '..');
+const CUSTOM_STARTUP_DIST_DIR = path.join(APP_DIR, 'renderer', 'dist', 'assets');
 const MAX_STARTUP_IMAGE = 20 * 1024 * 1024; // 上限 20MB，防启动卡顿
 
 /** 同步自定义启动页图片（复制到 dist/assets，供渲染层相对路径引用） */
@@ -43,11 +45,11 @@ export function createWindow(): BrowserWindow {
     minWidth: 1100,
     minHeight: 720,
     title: 'Tiffa',
-    icon: path.join(__dirname, 'assets', 'tiffa-icon.ico'),
+    icon: path.join(APP_DIR, 'assets', 'tiffa-icon.ico'),
     backgroundColor: '#1a1a2e',
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(APP_DIR, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -55,7 +57,7 @@ export function createWindow(): BrowserWindow {
   });
   setMainWindow(win);
   syncCustomStartupImage();
-  win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+  win.loadFile(path.join(APP_DIR, 'renderer', 'dist', 'index.html'));
   win.setMenu(null);
   win.once('ready-to-show', () => {
     win.show();

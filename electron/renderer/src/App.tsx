@@ -8,7 +8,7 @@
  */
 import { useEffect } from 'react';
 import { initEventRouter } from './services/eventRouter';
-import { fetchCurrentModel, loadProjects, preloadDuringWelcome } from './services/sessionController';
+import { fetchCurrentModel, loadProjects, preloadDuringWelcome, getModelListCached } from './services/sessionController';
 import { loadModelMap } from './services/historyService';
 import { initIdentity } from './services/identity';
 import ChatView from './components/ChatView';
@@ -42,6 +42,8 @@ export default function App() {
     initEventRouter();
     void loadModelMap();
     void fetchCurrentModel();
+    // 后台预载死列表缓存（遮罩期预热，不阻塞 UI；点开模型列表时秒开）
+    void getModelListCached();
     // 预热（等价旧版 preloadDuringWelcome）：遮罩等待期预载已打开 tab 的历史
     // 与所有项目的会话列表——先并行发起（tab 列表直接从 localStorage 读），
     // loadProjects 完成后幂等补一轮（项目列表此时才有数据）。

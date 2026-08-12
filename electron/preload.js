@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   // ── 外部调用 ──
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath),
+  showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
 
   // ── 路径工具 ──
   getWorkspacePath: () => ipcRenderer.invoke('path:workspace'),

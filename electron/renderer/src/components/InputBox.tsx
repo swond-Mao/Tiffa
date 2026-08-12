@@ -38,6 +38,9 @@ export default function InputBox() {
   const modelSwitching = useUiStore((s) => s.modelSwitching);
   const pendingQueueMessage = useUiStore((s) => s.pendingQueueMessage);
   const setPendingQueueMessage = useUiStore((s) => s.setPendingQueueMessage);
+  // 指针模式：实例未就绪时不锁输入/模型（可打字、可选模型），点发送才拉实例，
+  // 连接期间由 pendingActivation 锁住发送按钮防止重复触发。
+  const pendingActivation = useUiStore((s) => s.pendingActivation);
   const draftInput = useChatStore((s) => s.draftInput);
 
   const [text, setText] = useState('');
@@ -49,17 +52,20 @@ export default function InputBox() {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const shouldDisable = !tiffaReady || sessionSwitching || modelSwitching;
+  // 指针模式：!tiffaReady 不再锁输入（可打字/选模型），锁仅留给切换/模型切换/连接中
+  const shouldDisable = sessionSwitching || modelSwitching;
 
   const placeholder = shouldDisable
     ? sessionSwitching
       ? '正在切换会话…'
-      : modelSwitching
-        ? '正在切换模型…'
-        : '等待引擎就绪…'
-    : agentRunning
-      ? 'Enter 排队 | 点击引导按钮立即干预'
-      : '输入消息，Enter 发送，Shift+Enter 换行...';
+      : '正在切换模型…'
+    : pendingActivation
+      ? '正在连接引擎…'
+      : !tiffaReady
+        ? '输入消息，发送后自动连接引擎…'
+        : agentRunning
+          ? 'Enter 排队 | 点击引导按钮立即干预'
+          : '输入消息，Enter 发送，Shift+Enter 换行...';
 
   // ── textarea 高度自适应 ──
 
@@ -149,6 +155,7 @@ export default function InputBox() {
   const handleSend = () => {
     const t = text.trim();
     if (!t && images.length === 0) return;
+    if (pendingActivation) return; // 引擎连接中，防重复触发
     if (agentRunning) {
       // 生成中 Enter → 排队（等价 submitMidRun）
       if (pendingQueueMessage) useUiStore.getState().addToast('info', '排队消息已替换');
@@ -305,7 +312,7 @@ export default function InputBox() {
             id="btnCompact"
             className="input-btn compact"
             title="压缩对话上下文（点击压缩）"
-            disabled={shouldDisable || agentRunning}
+            disabled={shouldDisable || !tiffaReady || agentRunning || !!pendingActivation}
             onClick={() => void compactMessage()}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -327,8 +334,8 @@ export default function InputBox() {
               中止
             </button>
           ) : (
-            <button type="button" id="btnSend" className="input-btn send" disabled={shouldDisable} onClick={handleSend}>
-              发送
+            <button type="button" id="btnSend" className="input-btn send" disabled={shouldDisable || !!pendingActivation} onClick={handleSend}>
+              {pendingActivation ? '连接中…' : '发送'}
             </button>
           )}
         </div>

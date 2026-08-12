@@ -16,9 +16,9 @@ import {
   startFirstResponseCheck, stopFirstResponseCheck,
   markFirstResponseReceived, currentModelLabel,
 } from './generationGuard';
-import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration } from './sessionController';
+import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, invalidateModelListCache } from './sessionController';
 import { autoRenameWithLightModel } from './historyService';
-import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog } from './utils';
+import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
 import { normalizeUserContent } from './messageBuilders';
 import { finalizeStreamText } from '../stores/useChatStore';
 
@@ -115,6 +115,8 @@ function handleEvent(event: TiffaEventFrame): void {
       if (event._sessionId && sessions.activeSessionId && event._sessionId !== sessions.activeSessionId) break;
       proc.setReady(true);
       ui.setStatusText('就绪');
+      // 实例重启/新就绪：清死列表缓存，让模型校验走新实例的真实列表（后续调用自然重载）
+      invalidateModelListCache();
       // 模型恢复优先于 fetchCurrentModel
       const saved = sessions.activeSessionPath ? sessions.sessionModelMap[sessions.activeSessionPath] : null;
       if (saved && saved.provider && saved.modelId) {
@@ -131,6 +133,7 @@ function handleEvent(event: TiffaEventFrame): void {
     }
     case 'error': {
       const reason = event.message || event.error || event.reason || event.detail || '未知错误';
+      const loc = localizeKernelMessage(String(reason));
       // 网络/服务类错误：明确提示"可能是服务器不可达"，避免用户以为 Tiffa 卡死
       const netHint = /ECONNREFUSED|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|502|503|504|connection (refused|closed|reset)|network error|server (error|unreachable)/i.test(
         String(reason),
@@ -151,12 +154,13 @@ function handleEvent(event: TiffaEventFrame): void {
         proc.setInstanceRunning(projects.workspacePath, false);
         chat.finalizeAssistant(path);
         ui.setStatusText(netHint ? '出错（服务器不可达）' : '出错');
-        const errMsg = `模型出错: ${reason}${netHint}${modelInfo}`;
-        ui.addToast('error', errMsg);
+        // 内容过短等非真错误：info 级且不注入消息区错误块
+        const errMsg = loc.isTooShort ? loc.text : `模型出错: ${loc.text}${netHint}${modelInfo}`;
+        ui.addToast(loc.level || 'error', errMsg);
         // 失败原因透传到消息区（空响应处直接可见）
-        chat.injectAssistantError(path, errMsg);
+        if (!loc.isTooShort) chat.injectAssistantError(path, errMsg);
       } else {
-        ui.addToast('error', `代理出错: ${reason}${netHint}${modelInfo}`);
+        ui.addToast(loc.level || 'error', loc.isTooShort ? loc.text : `代理出错: ${loc.text}${netHint}${modelInfo}`);
       }
       break;
     }
@@ -431,10 +435,12 @@ function handleEvent(event: TiffaEventFrame): void {
           // 终端 UI 控件展示（ask 工具的交互面板等），桌面端不需要渲染，直接确认
           resp({ confirmed: true });
           break;
-        case 'notify':
-          ui.addToast(event.notifyType === 'error' ? 'error' : event.notifyType === 'warning' ? 'warning' : 'info', String(event.message || ''));
+        case 'notify': {
+          const loc = localizeKernelMessage(String(event.message || ''));
+          ui.addToast(loc.level || (event.notifyType === 'error' ? 'error' : event.notifyType === 'warning' ? 'warning' : 'info'), loc.text);
           resp({ confirmed: true });
           break;
+        }
         case 'setStatus':
           // 仅当前活跃会话的状态字符串写入全局标签，避免后台会话的 setStatus 污染当前视图
           if (!ssid || !sessions.activeSessionId || ssid === sessions.activeSessionId) {
@@ -503,17 +509,16 @@ function handleEvent(event: TiffaEventFrame): void {
       }
       break;
     }
-    case 'notice':
-      ui.addToast(
-        event.level === 'error' ? 'error' : event.level === 'warning' ? 'warning' : 'info',
-        String(event.message || ''),
-      );
+    case 'notice': {
+      const loc = localizeKernelMessage(String(event.message || ''));
+      const level = loc.level || (event.level === 'error' ? 'error' : event.level === 'warning' ? 'warning' : 'info');
+      ui.addToast(level, loc.text);
       // error/warning 级 notice 同步到状态栏（toast 会消失，状态栏常驻直到下次状态更新）
-      if (event.level === 'error' || event.level === 'warning') {
-        const nm = String(event.message || '');
-        ui.setStatusText(event.level === 'error' ? `出错: ${nm}` : nm);
+      if (level === 'error' || level === 'warning') {
+        ui.setStatusText(level === 'error' ? `出错: ${loc.text}` : loc.text);
       }
       break;
+    }
     case 'set_todos':
       if (Array.isArray(event.phases)) {
         ui.setTodoPhases(event.phases);

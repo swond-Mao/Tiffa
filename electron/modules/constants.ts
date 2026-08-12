@@ -14,7 +14,13 @@ function resolvePortableRoot(): string {
   if (process.env.PORTABLE_ROOT) {
     return path.resolve(process.env.PORTABLE_ROOT);
   }
-  return path.resolve(__dirname, '..');
+  // main.js 已先设置 global.PORTABLE_ROOT（其 __dirname 为 electron/，向上一级即便携根）
+  const g = (global as any).PORTABLE_ROOT;
+  if (typeof g === 'string' && g) {
+    return path.resolve(g);
+  }
+  // 兜底：本模块编译产物位于 electron/modules/，向上两级才是便携根（勿用单级 ..，否则指向 electron/）
+  return path.resolve(__dirname, '..', '..');
 }
 
 export const PORTABLE_ROOT = resolvePortableRoot();

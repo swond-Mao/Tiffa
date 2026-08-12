@@ -1442,8 +1442,10 @@ body {
    性能由 MessageBubble 的 React.memo（流式只重渲染变化那条）+ 历史懒加载保证；
    长代码块由 Markdown 的 PreBlock 折叠（collapsible-pre）控制。 */
 .message {
-  margin-bottom: 16px;
-  max-width: 850px;
+  /* 宽度随消息区容器自适应：窗口缩放/右侧栏展开收起时自动变宽变窄；
+     居中消除宽窗口下的右侧大片空白。上限 1200px 防止超宽屏阅读疲劳。 */
+  margin: 0 auto 16px;
+  max-width: min(100%, 1200px);
 }
 
 .message-header {
@@ -1752,6 +1754,31 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
+}
+
+/* 输入条模型选择按钮：accent 浅底 + 边框，亮/暗主题下都与输入框背景区分 */
+.input-btn.model-picker-btn {
+  background: hsl(var(--accent-main-000) / 0.12);
+  border: 1px solid hsl(var(--accent-main-000) / 0.35);
+  color: hsl(var(--accent-main-000));
+  padding: 5px 12px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-btn.model-picker-btn:hover {
+  background: hsl(var(--accent-main-000) / 0.2);
+  border-color: hsl(var(--accent-main-000));
+}
+
+/* 会话/引擎未就绪时模型选择器禁用（与旧版行为一致：准备中不可见/不可点） */
+.input-btn.model-picker-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: hsl(var(--accent-main-000) / 0.06);
+  border-color: hsl(var(--accent-main-000) / 0.2);
 }
 
 .input-btn.send {
@@ -2853,10 +2880,11 @@ html[data-mode="light"] .muse-tint {
 /* ── 模型快速切换浮层 ── */
 .model-switcher {
   position: fixed;
-  top: calc(var(--titlebar-height) + 4px + 36px); /* below titlebar + tab bar（JS 会按触发按钮实际位置覆盖）*/
-  left: calc(var(--project-panel-width) + 12px);
+  /* 位置由 JS 按触发按钮计算并覆盖（top/bottom 二选一 + left），此处不设默认值，
+     避免 top 与 JS 的 bottom 同时生效导致元素被拉伸到视口顶部。 */
   width: 320px;
-  max-height: min(500px, calc(100vh - var(--titlebar-height) - 60px));
+  display: flex;
+  flex-direction: column;
   background: hsl(var(--bg-200));
   border: 1px solid hsl(var(--border-200));
   border-radius: var(--radius-md);
@@ -2877,7 +2905,8 @@ html[data-mode="light"] .muse-tint {
 }
 
 .model-switcher-list {
-  max-height: calc(min(500px, calc(100vh - var(--titlebar-height) - 60px)) - 80px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 

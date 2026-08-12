@@ -160,6 +160,7 @@ export interface TiffaDesktopApi {
   // ── 外部调用 ──
   openExternal: (url: string) => Promise<unknown>;
   openPath: (filePath: string) => Promise<unknown>;
+  showItemInFolder: (filePath: string) => Promise<unknown>;
 
   // ── 路径工具 ──
   getWorkspacePath: () => Promise<string>;

@@ -360,6 +360,64 @@ function FilePanel() {
   const [entries, setEntries] = useState<DirEntry[] | null>(null);
   const [error, setError] = useState('');
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMenu = useCallback(() => {
+    if (menuRef.current) {
+      menuRef.current.remove();
+      menuRef.current = null;
+    }
+  }, []);
+
+  const showFileMenu = useCallback(
+    (e: React.MouseEvent, entry: DirEntry) => {
+      e.preventDefault();
+      closeMenu();
+      const menu = document.createElement('div');
+      menu.className = 'context-menu';
+      menu.innerHTML = [
+        `<div class="context-menu-item" data-action="open-windows">`,
+        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><polyline points="4 17 10 11 4 7"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+        `在 Windows 中打开`,
+        `</div>`,
+        `<div class="context-menu-divider"></div>`,
+        `<div class="context-menu-item" data-action="show-in-folder">`,
+        `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:4px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+        `在文件夹中显示`,
+        `</div>`,
+      ].join('');
+      document.body.appendChild(menu);
+      menuRef.current = menu;
+
+      let x = e.clientX;
+      let y = e.clientY;
+      const mw = 200, mh = 90;
+      if (x + mw > window.innerWidth) x = window.innerWidth - mw - 4;
+      if (y + mh > window.innerHeight) y = window.innerHeight - mh - 4;
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+
+      menu.addEventListener('click', (ev) => {
+        const item = (ev.target as HTMLElement).closest('.context-menu-item') as HTMLElement | null;
+        if (!item) return;
+        const action = item.dataset.action;
+        closeMenu();
+        if (action === 'open-windows') void window.tiffaDesktop.openPath(entry.path);
+        else if (action === 'show-in-folder') void window.tiffaDesktop.showItemInFolder(entry.path);
+      });
+
+      setTimeout(() => {
+        document.addEventListener(
+          'click',
+          (ev) => {
+            if (menuRef.current && !menuRef.current.contains(ev.target as Node)) closeMenu();
+          },
+          { once: true },
+        );
+      }, 0);
+    },
+    [closeMenu],
+  );
 
   const loadTree = useCallback(
     async (dirPath?: string) => {
@@ -495,6 +553,7 @@ function FilePanel() {
                 key={entry.path}
                 className={`file-grid-item${img ? ' image' : ''}`}
                 onClick={() => void openPreview(entry)}
+                onContextMenu={(e) => showFileMenu(e, entry)}
               >
                 {img ? (
                   <div
@@ -527,6 +586,7 @@ function FilePanel() {
                 if (entry.isDirectory) void loadTree(entry.path);
                 else void openPreview(entry);
               }}
+              onContextMenu={(e) => showFileMenu(e, entry)}
             >
               <span className="file-tree-icon">{entry.isDirectory ? 'D' : getFileIcon(entry.ext)}</span>
               <span className="ft-name">{entry.name}</span>
