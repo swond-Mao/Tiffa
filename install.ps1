@@ -367,6 +367,11 @@ if (Test-Path $pyExe) {
     $pyVer = "3.13.12"
     $pyZip = Join-Path $env:TEMP "tiffa-python-$pyVer-embed-amd64.zip"
     $pyUrl = "https://registry.npmmirror.com/-/binary/python/$pyVer/python-$pyVer-embed-amd64.zip"
+    # EAP=Stop 下 python/pip 写 stderr（如 embeddable 无 ensurepip 的报错、pip 输出）会被
+    # PowerShell 5.1 包装成 NativeCommandError 直接终止脚本——即使后续有 get-pip.py 回退。
+    # 与 Step 4/5 相同，临时切到 Continue，成败由下方 Test-Path / 退出码判断。
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
         Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip -UseBasicParsing
         # 解压到临时目录：embeddable zip 有两种结构（带顶层目录 / 直接散在根），统一归集到 python\
@@ -415,6 +420,7 @@ if (Test-Path $pyExe) {
         FAIL "Python 下载/安装失败：$_ ｜ 请手动拷贝 python\ 目录到 $ROOT\python\（或下载 Python $pyVer 后执行 pip install -r requirements-python.txt）"
     } finally {
         if (Test-Path $pyZip) { Remove-Item $pyZip -Force }
+        $ErrorActionPreference = $prevEAP
     }
 }
 
