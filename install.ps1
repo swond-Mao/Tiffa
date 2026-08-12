@@ -272,6 +272,27 @@ if (Test-Path $electronExe) {
     } else {
         FAIL "Electron 安装失败。请手动执行：cd $ROOT\electron && npm install（需联网，ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/）"
     }
+    # 统一防呆（新装/已装都检查）：构建产物（main.js / renderer/dist）不入库，
+    # 新机器 clone 后缺失会导致 Electron 无入口/无页面（空白窗口）。缺失则本地 tsc + vite 构建。
+    $elMainJs = Join-Path $electronDir "main.js"
+    $elIndex  = Join-Path $electronDir "renderer\dist\index.html"
+    if (-not (Test-Path $elMainJs) -or -not (Test-Path $elIndex)) {
+        INFO "检测到 Electron 构建产物缺失，本地构建（tsc + vite）..."
+        $prevEAP2 = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $buildCmd = "cd /d `"$electronDir`" && npm run build"
+            cmd /c $buildCmd 2>&1 | Out-String | Out-Null
+            $buildCode = $LASTEXITCODE
+            if ($buildCode -eq 0 -and (Test-Path $elMainJs) -and (Test-Path $elIndex)) {
+                OK "Electron 构建成功"
+            } else {
+                FAIL "Electron 构建失败（退出码 $buildCode）：请手动执行 cd $electronDir && npm run build"
+            }
+        } finally {
+            $ErrorActionPreference = $prevEAP2
+        }
+    }
 }
 
 # Step 6: 初始化目录和配置
