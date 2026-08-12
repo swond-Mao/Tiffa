@@ -362,6 +362,30 @@ if (-not (Test-Path $rtDst)) {
 $pyExe = Join-Path $ROOT "python\python.exe"
 if (Test-Path $pyExe) {
     OK "Python 运行时 (便携)"
+    # 防残缺：上次安装中断可能留下 python.exe 在但 pip/依赖缺失（embeddable 无 ensurepip）。
+    # 检测到 Scripts\pip.exe 缺失即补装，避免"看起来装好、实际缺依赖"。
+    $pyDir = Join-Path $ROOT "python"
+    if (-not (Test-Path (Join-Path $pyDir "Scripts\pip.exe"))) {
+        INFO "检测到 Python 缺 pip（上次安装可能中断），补装 pip 与依赖 ..."
+        $prevEAP2 = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $pyExe -m ensurepip --upgrade 2>$null
+            if (-not (Test-Path (Join-Path $pyDir "Scripts\pip.exe"))) {
+                $gp = Join-Path $env:TEMP "tiffa-get-pip.py"
+                Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $gp -UseBasicParsing
+                & $pyExe $gp -i "https://pypi.tuna.tsinghua.edu.cn/simple" 2>$null
+            }
+            if (Test-Path (Join-Path $pyDir "Scripts\pip.exe")) {
+                & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input 2>&1 | Out-Null
+                OK "Python pip 与依赖补装成功"
+            } else {
+                FAIL "Python pip 补装失败：请手动执行 cd $ROOT\python && python -m pip install -r requirements-python.txt -i https://pypi.tuna.tsinghua.edu.cn/simple"
+            }
+        } finally {
+            $ErrorActionPreference = $prevEAP2
+        }
+    }
 } else {
     INFO "未找到 python\，从国内镜像(npmmirror)下载 Python 3.13.12 并 pip 安装依赖 ..."
     $pyVer = "3.13.12"
