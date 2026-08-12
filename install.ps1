@@ -200,6 +200,12 @@ if (Test-Path $agentDir) {
         INFO "已清理残留 package-lock.json"
     }
     $installed = $false
+    # 与 Step 5 相同：$ErrorActionPreference=Stop 时，npm 写 stderr（如 "npm notice"）会被
+    # PowerShell 5.1 包装成 NativeCommandError 直接终止脚本——即使安装实际成功。
+    # 临时切到 Continue，用退出码 + agentDir 是否存在判断成败。
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         if ($attempt -gt 1) {
             INFO "第 $attempt/3 次尝试 ..."
@@ -208,16 +214,20 @@ if (Test-Path $agentDir) {
         # 用 cmd /c 直接执行完整命令字符串，绕开 PowerShell 函数参数绑定/引号/splatting 等全部陷阱。
         # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装。
         $npmCmdLine = "cd /d `"$npmGlobalDir`" && npm install @oh-my-pi/pi-coding-agent --save --force --loglevel=error"
-        cmd /c $npmCmdLine 2>&1 | Out-String | Out-Null
+        $npmOut = cmd /c $npmCmdLine 2>&1 | Out-String
         $npmCode = $LASTEXITCODE
         if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
         }
-        # 诊断：显示 npm 实际输出（最后 800 字符）和目录状态
+        # 诊断：显示 npm 实际输出（失败时，截取前 800 字符）和目录状态
         Write-Host "    [WARN] npm 安装失败（退出码 $npmCode）" -ForegroundColor Yellow
+        if ($npmOut.Trim()) { Write-Host "    [NPM-OUT] $($npmOut.Trim().Substring(0, [Math]::Min(800, $npmOut.Trim().Length)))" -ForegroundColor Yellow }
         Write-Host "    [DIAG] agentDir 是否存在: $(Test-Path $agentDir)" -ForegroundColor Yellow
         Write-Host "    [DIAG] npm-global 内容: $(if (Test-Path $npmGlobalDir) { (Get-ChildItem $npmGlobalDir -Force | Select-Object -ExpandProperty Name) -join ', ' } else { '不存在' })" -ForegroundColor Yellow
+    }
+    } finally {
+        $ErrorActionPreference = $prevEAP
     }
     if ($installed) {
         $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
