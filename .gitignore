@@ -168,6 +168,9 @@ electron/modules/*.js.map
 # Electron 运行时进度（勿入库）
 electron/.progress/
 
+# 项目纲领文件（AI 运行时自动生成/注入，勿入库）
+PROJECT.md
+*/PROJECT.md
 # 本次迁移调试临时产物
 main-diff.txt
 electron/_tail_check.js
