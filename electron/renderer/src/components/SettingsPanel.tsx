@@ -266,6 +266,8 @@ function ModelConfigSection() {
                     <ModelEntryRow
                       key={`${key}-${i}`}
                       model={m}
+                      baseUrl={prov.baseUrl}
+                      apiKey={prov.apiKey}
                       onChange={(patch) =>
                         patchProvider(key, {
                           models: (providers[key]?.models || []).map((mm, j) => (j === i ? { ...mm, ...patch } : mm)),
@@ -307,8 +309,10 @@ function ModelConfigSection() {
 }
 
 /** 模型条目行：内联编辑（点击展开） */
-function ModelEntryRow({ model, onChange, onDelete }: { model: ModelEntry; onChange: (patch: Partial<ModelEntry>) => void; onDelete: () => void }) {
+function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: ModelEntry; onChange: (patch: Partial<ModelEntry>) => void; onDelete: () => void; baseUrl?: string; apiKey?: string }) {
   const [editing, setEditing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const addToast = useUiStore((s) => s.addToast);
   // hooks 必须无条件调用：若放在 if(!editing) 之后，展开时 hooks 数量 1→2，
   // React 报 #310 "Rendered more hooks than during the previous render" → 白屏。
   const [fields, setFields] = useState({
@@ -319,6 +323,22 @@ function ModelEntryRow({ model, onChange, onDelete }: { model: ModelEntry; onCha
     reasoning: !!model.reasoning,
     vision: !!(model.input && model.input.includes('image')),
   });
+
+  const checkHealth = async () => {
+    if (!baseUrl || !model.id) {
+      addToast('warning', '健康检查需要配置 API 地址和模型 ID');
+      return;
+    }
+    setChecking(true);
+    try {
+      const res = (await window.tiffaDesktop.checkModelHealth({ baseUrl, apiKey: apiKey || '', model: model.id })) as { ok?: boolean; status?: number; detail?: string };
+      if (res && res.ok) addToast('success', `健康检查通过（HTTP ${res.status}）`);
+      else addToast('error', `健康检查失败${res && res.status ? ` HTTP ${res.status}` : ''}: ${(res && res.detail) || '未知错误'}`);
+    } catch (err) {
+      addToast('error', `健康检查失败: ${(err as Error).message}`);
+    }
+    setChecking(false);
+  };
   if (!editing) {
     const thinkBadge = model.reasoning ? ' | 思考' : '';
     const visionBadge = model.input && model.input.includes('image') ? ' | 视觉' : '';
@@ -329,16 +349,32 @@ function ModelEntryRow({ model, onChange, onDelete }: { model: ModelEntry; onCha
           {model.name || ''} | {model.contextWindow || '?'}ctx{thinkBadge}
           {visionBadge}
         </span>
-        <button
-          type="button"
-          className="model-entry-delete"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          x
-        </button>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          {baseUrl && model.id && (
+            <button
+              type="button"
+              className="model-entry-check"
+              disabled={checking}
+              onClick={(e) => {
+                e.stopPropagation();
+                void checkHealth();
+              }}
+              title="健康检查"
+            >
+              {checking ? '检查中...' : '检测'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="model-entry-delete"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            x
+          </button>
+        </div>
       </div>
     );
   }

@@ -279,7 +279,7 @@ export async function aiRenameTabSession(session: TabSession): Promise<void> {
 
   ui.addToast('info', '正在生成标题…');
 
-  // 2. 走豆包轻量模型（普通对话，不经 agent 主模型）
+  // 2. 走轻量模型补全（旁路模型优先，降级到当前模型/豆包兜底）
   const prompt = buildRenamePrompt(context, oldTitle);
   let result: { text?: string; error?: string; model?: string } | undefined;
   try {
@@ -293,7 +293,12 @@ export async function aiRenameTabSession(session: TabSession): Promise<void> {
     return;
   }
   if (result && result.error) {
-    ui.addToast('error', `AI 重命名失败: ${result.error}`);
+    // 无可用模型时给出明确提示
+    if (result.error.includes('无可用模型')) {
+      ui.addToast('warning', 'AI 重命名需要配置模型：请在设置中配置旁路模型，或确保 models.yml 中至少有一个可用的 provider');
+    } else {
+      ui.addToast('error', `AI 重命名失败: ${result.error}`);
+    }
     return;
   }
   const title = ((result && result.text) || '').trim().replace(/^["'“”《]+|["'“”》]+$/g, '').substring(0, 30);

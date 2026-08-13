@@ -1,0 +1,89 @@
+## 任务：修复压缩总结旁路模型降级逻辑
+
+### 文件
+D:/oh-my-tiffa/plugins/claude-mode-extension.ts
+
+### 问题描述
+resolveMainModelEndpoint() 函数（第 962-974 行）在以下场景返回 null，导致压缩总结无法使用主模型：
+1. current-model.json 文件不存在（用户未显式切换模型）
+2. resolveModelEndpoint(modelStr) 解析失败（models.yml 格式问题）
+3. 以上两种情况均 fallback 到 resolveBypassEndpoint()，若无旁路模型配置则返回 null
+
+### 修复方案
+修改 resolveMainModelEndpoint() 函数，在 fallback 链中加入 getFirstAvailableProvider()（需新增），从 models.yml 获取第一个可用的 provider 作为兜底。
+
+### 具体步骤
+
+步骤一：新增 getFirstAvailableProvider() 函数（插入到第 960 行之后，即 resolveMainModelEndpoint() 之前）
+
+```typescript
+  // 从 models.yml 获取第一个可用的 provider（兜底用）
+  function getFirstAvailableProvider(): { baseUrl: string; apiKey: string; model: string } | null {
+    try {
+      const modelsPath = join(AGENT_DIR, "models.yml")
+      if (!existsSync(modelsPath)) return null
+      const yml = readFileSync(modelsPath, "utf8")
+      // 匹配第一个 provider 块（格式：  provider_name:\n）
+      const providerMatch = yml.match(/\n[ ]{2}([\w.-]+):[ ]*\n[\s\S]*?(?=\n[ ]{2}[\w.-]+:|$)/)
+      if (!providerMatch) return null
+      const block = providerMatch[0]
+      const baseUrlMatch = block.match(/baseUrl:\s*["']?([^"'\s\n]+)["']?/)
+      if (!baseUrlMatch) return null
+      const apiKeyMatch = block.match(/apiKey:\s*["']?([^"'\s\n]+)["']?/)
+      // 匹配第一个模型 ID
+      const modelMatch = block.match(/id:\s*["']?([^"'\s\n]+)["']?/)
+      if (!modelMatch) return null
+      return {
+        baseUrl: baseUrlMatch[1].replace(/\/$/, ""),
+        apiKey: apiKeyMatch?.[1] || "EMPTY",
+        model: modelMatch[1],
+      }
+    } catch {
+      return null
+    }
+  }
+
+```
+
+步骤二：修改 resolveMainModelEndpoint() 函数（第 962-974 行）
+
+将原代码：
+
+```typescript
+  function resolveMainModelEndpoint(): { baseUrl: string; apiKey: string; model: string } | null {
+    try {
+      const p = join(AGENT_DIR, "current-model.json")
+      if (!existsSync(p)) return resolveBypassEndpoint()
+      const raw = readFileSync(p, "utf8")
+      const info = JSON.parse(raw)
+      if (!info || !info.provider || !info.modelId) return resolveBypassEndpoint()
+      const modelStr = `${info.provider}/${info.modelId}`
+      return resolveModelEndpoint(modelStr) || resolveBypassEndpoint()
+    } catch {
+      return resolveBypassEndpoint()
+    }
+  }
+```
+
+改为：
+
+```typescript
+  function resolveMainModelEndpoint(): { baseUrl: string; apiKey: string; model: string } | null {
+    try {
+      const p = join(AGENT_DIR, "current-model.json")
+      if (!existsSync(p)) return getFirstAvailableProvider() || resolveBypassEndpoint()
+      const raw = readFileSync(p, "utf8")
+      const info = JSON.parse(raw)
+      if (!info || !info.provider || !info.modelId) return getFirstAvailableProvider() || resolveBypassEndpoint()
+      const modelStr = `${info.provider}/${info.modelId}`
+      return resolveModelEndpoint(modelStr) || getFirstAvailableProvider() || resolveBypassEndpoint()
+    } catch {
+      return getFirstAvailableProvider() || resolveBypassEndpoint()
+    }
+  }
+```
+
+### 验收标准
+- current-model.json 不存在时，能从 models.yml 获取第一个 provider
+- resolveModelEndpoint() 解析失败时，能回退到 models.yml 第一个 provider
+- 旁路模型优先级：环境变量 > bypass-model.json > config.yml default > current-model.json > models.yml 第一个 provider

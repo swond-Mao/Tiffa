@@ -161,15 +161,18 @@ export interface HealthCheckResult {
 /** 模型健康检查：验证 endpoint 可达 + model 可用 */
 export async function checkModelHealth(arg: { baseUrl?: string; apiKey?: string; model?: string }): Promise<HealthCheckResult> {
   const u = String(arg.baseUrl || '').trim().replace(/\/$/, '');
-  const k = String(arg.apiKey || '').trim() || 'EMPTY';
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const k = String(arg.apiKey || '').trim();
   const model = String(arg.model || '').trim();
   if (!u || !model) return { ok: false, status: 0, detail: 'Base URL 与 Model ID 必填' };
+  // models.yml 本地模型 apiKey 惯例为 "none"，不发送假认证头（与 callCompletion 口径一致）
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (k && k !== 'EMPTY' && k !== 'none') headers.Authorization = `Bearer ${k}`;
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
     const r = await fetch(`${u}/chat/completions`, {
       method: 'POST',
+      headers,
       body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
       signal: ctrl.signal,
     });

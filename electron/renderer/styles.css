@@ -3041,6 +3041,20 @@ html[data-mode="light"] .muse-tint {
 }
 
 .model-entry-delete:hover { opacity: 1; background: hsl(var(--danger-000) / 0.15); }
+.model-entry-check {
+  padding: 2px 8px;
+  border: 1px solid hsl(var(--border-200));
+  background: transparent;
+  color: hsl(var(--text-400));
+  cursor: pointer;
+  font-size: 11px;
+  border-radius: 3px;
+  opacity: 0.8;
+  transition: all 0.2s;
+}
+
+.model-entry-check:hover { opacity: 1; border-color: hsl(var(--accent-main-100)); color: hsl(var(--accent-main-100)); }
+.model-entry-check:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-add-model {
   display: inline-block;
