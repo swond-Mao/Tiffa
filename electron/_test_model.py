@@ -23,9 +23,11 @@ def test_with_thinking_off(url, model):
         print(f'  FAIL: {e}')
         print()
 
-model_path = r'D:\AI\llm-models\qwen3.6\qwen3.6-27B\Qwen3.6-27B-NVFP4-MTP-GGUF.gguf'
+# 测试用模型路径（按需修改）
+# model_path = r'D:\path\to\your\model.gguf'
+model_path = r'PATH_TO_YOUR_MODEL'
 
 print('=== llama.cpp 本地 + enable_thinking:false ===')
-test_with_thinking_off('http://LOCALHOST:11434/v1', 'localmodel')
+test_with_thinking_off('http://LOCALHOST:11434/v1', 'localmodel')  # 改为你的本地服务器地址
 print('=== 远程中继 + enable_thinking:false ===')
-test_with_thinking_off('http://YOUR_SERVER_IP:9876/v1', 'localmodel')
+test_with_thinking_off('http://YOUR_SERVER_IP:9876/v1', 'localmodel')  # 改为你的服务器地址
