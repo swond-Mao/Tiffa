@@ -1,13 +1,11 @@
 # npm 镜像配置：install.ps1 第 1 步自动写入（registry=国内源），本地配置不入库
 .npmrc
 
-# Python runtime (site-packages, Playwright, etc.)
+# Python runtime (site-packages, Playwright, etc.) —— 根目录 Scripts/（Python embeddable 解压产物），必须锚定根目录
 Lib/
 include/
 install/
-scripts/
-# 但 electron/scripts/ 是 E2E 测试与发布脚本（e2e-smoke/release 等），必须入库
-!electron/scripts/
+/Scripts/
 
 # Dependencies & runtime
 npm-global/
@@ -58,8 +56,6 @@ data/agent/removed-cwds.json
 data/memory/USER.md
 data/memory/MEMORY.md
 
-# 自定义启动页图片（用户个人素材，不入库）
-data/startup-image.*
 # 个人视频素材（如待机视频等，不入库）
 data/*.mp4
 
