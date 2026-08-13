@@ -426,11 +426,42 @@ export default async function (pi: any) {
           if (aiContent) injected.push(`# AI 身份（AI.md）\n\n> 你在对话中以此身份出现：使用下方「名字」自称，并遵循「定位」设定的语气与角色与用户交流。\n\n${aiContent}`)
         } catch {}
       }
+      // (a4) 新用户检测：USER.md 和 AI.md 都为空或不存在时，注入 onboarding 引导提示
+      const userMdExists = existsSync(userMdPath)
+      const aiMdExists = existsSync(aiMdPath)
+      const isNewUser = !userMdExists && !aiMdExists
+      
+      if (isNewUser) {
+        injected.push(`# 新用户引导（onboarding）
+
+> 检测到这是首次使用 Tiffa。请主动引导用户完成初始化设置。
+
+**执行步骤**：
+1. 用友好的语气欢迎用户
+2. 按 \`skills/onboarding/SKILL.md\` 的步骤逐一提问（称呼、沟通风格、使用场景、AI 名字、工作目录、模型配置）
+3. 收集完信息后写入 USER.md 和 AI.md
+4. 完成后告知用户可以开始使用了
+
+**注意**：保持对话自然流畅，不要像填表单一样生硬。`)
+        log("before_agent_start.onboarding", "检测到新用户，注入 onboarding 引导")
+      }
 
       // (b) 项目级 PROJECT.md：项目根目录首次对话自动生成脚手架，并确定性注入 system prompt
       // 模板版本号：检测到旧版本时自动升级头部模板（保留用户正文内容）
       try {
-        const projectDir = process.cwd()
+        let projectDir = process.cwd()
+        
+        // 防止在程序运行目录（包含 Tiffa 可执行文件的目录）自动建项目
+        // 检测到程序运行目录时，切换到 workspace 作为默认项目目录
+        const EXECUTABLE_MARKERS = ["tiffa-desktop.exe", "tiffa-desktop", "main.js", "preload.js"]
+        const isPortableRoot = EXECUTABLE_MARKERS.some(marker => existsSync(join(projectDir, marker)))
+        if (isPortableRoot) {
+          projectDir = join(PORTABLE_ROOT, "workspace")
+          if (!existsSync(projectDir)) {
+            mkdirSync(projectDir, { recursive: true })
+          }
+          log("before_agent_start.project_dir", `检测到程序运行目录，切换到 workspace: ${projectDir}`)
+        }
         const projectMd = join(projectDir, "PROJECT.md")
         const SCAFFOLD_VERSION = "v2"
         const VERSION_MARKER = `<!-- scaffold:${SCAFFOLD_VERSION} -->`
@@ -1090,8 +1121,15 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
 4. 用简洁陈述句概括改动内容，不要重复用户原话`
 
   // 当前项目目录（扩展进程 cwd 即项目根目录）
+  // 防止在程序运行目录自动建项目：检测到程序运行目录时切换到 workspace
   function currentProjectDir(): string {
-    return process.cwd() || join(PORTABLE_ROOT, "workspace")
+    let dir = process.cwd()
+    const EXECUTABLE_MARKERS = ["tiffa-desktop.exe", "tiffa-desktop", "main.js", "preload.js"]
+    const isPortableRoot = EXECUTABLE_MARKERS.some(marker => existsSync(join(dir, marker)))
+    if (isPortableRoot) {
+      dir = join(PORTABLE_ROOT, "workspace")
+    }
+    return dir || join(PORTABLE_ROOT, "workspace")
   }
 
   // 项目下 .progress 目录路径，并确保存在
