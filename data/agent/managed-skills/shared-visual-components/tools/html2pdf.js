@@ -25,13 +25,15 @@ const fs = require("fs");
 
 function resolvePortableRoot() {
   if (process.env.PORTABLE_ROOT) return process.env.PORTABLE_ROOT;
-  return path.resolve(__dirname, "..", "..", "..");
+  // 从本文件位置推导：<root>/data/agent/managed-skills/shared-visual-components/tools（5 级）
+  return path.resolve(__dirname, "..", "..", "..", "..", "..");
 }
 
 function findPlaywrightCore() {
   const candidates = [
     path.join(__dirname, "..", "node_modules", "playwright-core"),
-    path.join(process.env.PORTABLE_ROOT || resolvePortableRoot(), "skills", "dashiai-ppt", "project", "node_modules", "playwright-core"),
+    // dashiai-ppt 项目内（已知存在）
+    path.join(process.env.PORTABLE_ROOT || resolvePortableRoot(), "data", "agent", "managed-skills", "dashiai-ppt", "project", "node_modules", "playwright-core"),
   ];
   for (const c of candidates) {
     try { require(c); return c; } catch (e) { /* try next */ }

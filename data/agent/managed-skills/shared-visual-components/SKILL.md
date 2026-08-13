@@ -20,7 +20,7 @@ description_cn: "统一视觉设计底座：12 套主题 + 18 个组件 + 5 个�
 ## 目录结构
 
 ```
-$PORTABLE_ROOT/skills/shared-visual-components/
+$PORTABLE_ROOT/data/agent/managed-skills/shared-visual-components/
 ├── registry.json        # 组件注册表（AI 选组件先读这个）
 ├── core/                # 基础层：reset / variables / utils
 ├── themes/              # 12 套主题 CSS（data-theme 切换）
@@ -78,7 +78,7 @@ $PORTABLE_ROOT/skills/shared-visual-components/
 <body data-theme="{THEME}">
 ```
 
-其中 `{BASE}` 是组件库根目录（`$PORTABLE_ROOT/skills/shared-visual-components`），`{THEME}` 是主题 id（如 `aurora`）。
+其中 `{BASE}` 是组件库根目录（`$PORTABLE_ROOT/data/agent/managed-skills/shared-visual-components`），`{THEME}` 是主题 id（如 `aurora`）。
 
 ## 组件清单（18 个）
 

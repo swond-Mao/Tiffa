@@ -2120,7 +2120,7 @@ function setupIpc() {
     // 1. 豆包云端独立通道（computer-use grounding.json）：本地 11434 撞单槽时优先兜底，
     //    避免重试同实例的主模型（bypass 与主模型同为 11434 时冗余度为 1，直接跳云端更顺）
     try {
-      const cfgPath = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      const cfgPath = path.join(PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
       const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
       if (cfg && cfg.api_base && cfg.model && cfg.api_key) {
         push({ name: 'doubao', baseUrl: cfg.api_base, model: cfg.model, apiKey: cfg.api_key });
@@ -2211,14 +2211,14 @@ function setupIpc() {
   // ── MCP 模型配置（computer-use grounding.json：ui_tars 视觉定位点击） ──
   ipcMain.handle('settings:getGroundingModel', async () => {
     try {
-      const p = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      const p = path.join(PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
       if (!fs.existsSync(p)) return { enabled: false, api_base: '', api_key: '', model: '' };
       return JSON.parse(fs.readFileSync(p, 'utf8'));
     } catch (err) { return { error: err.message }; }
   });
   ipcMain.handle('settings:saveGroundingModel', async (event, cfg) => {
     try {
-      const p = path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+      const p = path.join(PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
       const clean = {
         api_base: String((cfg && cfg.api_base) || '').trim(),
         api_key: String((cfg && cfg.api_key) || '').trim(),

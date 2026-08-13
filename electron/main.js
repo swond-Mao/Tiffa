@@ -2202,7 +2202,7 @@ function setupIpc() {
         // 1. 豆包云端独立通道（computer-use grounding.json）：本地 11434 撞单槽时优先兜底，
         //    避免重试同实例的主模型（bypass 与主模型同为 11434 时冗余度为 1，直接跳云端更顺）
         try {
-            const cfgPath = path_1.default.join(constants_1.PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+            const cfgPath = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
             const cfg = JSON.parse(fs_1.default.readFileSync(cfgPath, 'utf8'));
             if (cfg && cfg.api_base && cfg.model && cfg.api_key) {
                 push({ name: 'doubao', baseUrl: cfg.api_base, model: cfg.model, apiKey: cfg.api_key });
@@ -2210,9 +2210,10 @@ function setupIpc() {
         }
         catch { }
         // 2. 主模型旁路：前端当前模型优先（主力经常变，跟随当前；local 开着就用免费的本地，没开快速失败落下一级）
+        //    只要有 providerHint 就尝试，modelHint 为空时用 provider 的第一个模型兜底
         let ref = null;
-        if (providerHint && modelHint) {
-            ref = { provider: providerHint, model: modelHint };
+        if (providerHint) {
+            ref = { provider: providerHint, model: modelHint || '' };
         }
         else {
             ref = resolveDefaultModelFromConfig();
@@ -2223,7 +2224,8 @@ function setupIpc() {
                 push({ name: ref.provider, baseUrl: pc.baseUrl, model: ref.model || pc.model, apiKey: pc.apiKey });
             }
         }
-        // 3. models.yml 里其他有 apiKey 的 provider（兜底：单一模型欠费/限流时仍可用）
+        // 3. models.yml 里其他 provider（兜底：单一模型欠费/限流时仍可用）
+        //    放宽条件：有 baseUrl 即可（本地模型无需 apiKey，云端模型有 apiKey 更佳）
         try {
             const data = js_yaml_1.default.load(fs_1.default.readFileSync(path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'models.yml'), 'utf8'));
             const providers = data && data.providers;
@@ -2231,13 +2233,28 @@ function setupIpc() {
                 for (const [pid, p] of Object.entries(providers)) {
                     if (!p || !p.baseUrl)
                         continue;
-                    if (p.apiKey && p.apiKey !== 'none') {
-                        push({ name: pid, baseUrl: p.baseUrl, model: (p.models && p.models[0] && p.models[0].id) || '', apiKey: p.apiKey });
-                    }
+                    // 无模型定义时跳过，避免发空 model 请求空等 10s 超时
+                    const firstModel = p.models && p.models[0] && p.models[0].id;
+                    if (!firstModel)
+                        continue;
+                    // 优先有 apiKey 的，然后是没有 apiKey 的（本地模型）
+                    const hasKey = p.apiKey && p.apiKey !== 'none';
+                    push({
+                        name: pid,
+                        baseUrl: p.baseUrl,
+                        model: firstModel,
+                        apiKey: hasKey ? p.apiKey : '',
+                        _priority: hasKey ? 0 : 1, // 有 key 的优先
+                    });
                 }
             }
         }
         catch { }
+        // 按优先级排序：有 apiKey 的优先，旁路模型和豆包已经在前面所以不需要排
+        candidates.sort((a, b) => (a._priority ?? 0) - (b._priority ?? 0));
+        // 清理内部字段
+        for (const c of candidates)
+            delete c._priority;
         if (candidates.length === 0) {
             return { error: '无可用模型配置（models.yml 无可用 provider 且豆包 grounding.json 缺失）' };
         }
@@ -2288,7 +2305,7 @@ function setupIpc() {
     // ── MCP 模型配置（computer-use grounding.json：ui_tars 视觉定位点击） ──
     electron_1.ipcMain.handle('settings:getGroundingModel', async () => {
         try {
-            const p = path_1.default.join(constants_1.PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+            const p = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
             if (!fs_1.default.existsSync(p))
                 return { enabled: false, api_base: '', api_key: '', model: '' };
             return JSON.parse(fs_1.default.readFileSync(p, 'utf8'));
@@ -2299,7 +2316,7 @@ function setupIpc() {
     });
     electron_1.ipcMain.handle('settings:saveGroundingModel', async (event, cfg) => {
         try {
-            const p = path_1.default.join(constants_1.PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+            const p = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
             const clean = {
                 api_base: String((cfg && cfg.api_base) || '').trim(),
                 api_key: String((cfg && cfg.api_key) || '').trim(),
@@ -2316,11 +2333,12 @@ function setupIpc() {
     // ── 模型健康检查（旁路 / MCP 共用）：验证 endpoint 可达 + model 可用 ──
     electron_1.ipcMain.handle('settings:checkModelHealth', async (event, arg) => {
         const u = String((arg && arg.baseUrl) || '').trim().replace(/\/$/, '');
-        const k = String((arg && arg.apiKey) || '').trim() || 'EMPTY';
+        const k = String((arg && arg.apiKey) || '').trim();
         const model = String((arg && arg.model) || '').trim();
         if (!u || !model)
             return { ok: false, status: 0, detail: 'Base URL 与 Model ID 必填' };
-        const auth = k !== 'EMPTY' ? { Authorization: `Bearer ${k}` } : {};
+        // models.yml 本地模型 apiKey 惯例为 "none"，与 callCompletion 口径一致，不发送假认证头
+        const auth = k && k !== 'EMPTY' && k !== 'none' ? { Authorization: `Bearer ${k}` } : {};
         try {
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), 15000);

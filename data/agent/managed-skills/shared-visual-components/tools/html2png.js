@@ -28,8 +28,8 @@ const fs = require("fs");
 // ── 便携包环境探测 ──
 function resolvePortableRoot() {
   if (process.env.PORTABLE_ROOT) return process.env.PORTABLE_ROOT;
-  // 从本文件位置推导：<root>/skills/shared-visual-components/tools/html2png.js
-  return path.resolve(__dirname, "..", "..", "..");
+  // 从本文件位置推导：<root>/data/agent/managed-skills/shared-visual-components/tools/html2png.js（5 级）
+  return path.resolve(__dirname, "..", "..", "..", "..", "..");
 }
 
 function findPlaywrightCore() {
@@ -37,7 +37,7 @@ function findPlaywrightCore() {
     // 组件库自带（若未来 npm i）
     path.join(__dirname, "..", "node_modules", "playwright-core"),
     // dashiai-ppt 项目内（已知存在）
-    path.join(process.env.PORTABLE_ROOT || resolvePortableRoot(), "skills", "dashiai-ppt", "project", "node_modules", "playwright-core"),
+    path.join(process.env.PORTABLE_ROOT || resolvePortableRoot(), "data", "agent", "managed-skills", "dashiai-ppt", "project", "node_modules", "playwright-core"),
   ];
   for (const c of candidates) {
     try { require(c); return c; } catch (e) { /* try next */ }

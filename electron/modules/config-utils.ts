@@ -132,7 +132,7 @@ export function writeBypassModel(cfg: { baseUrl?: string; apiKey?: string; model
 /** 读取 MCP grounding 模型配置 */
 export function readGroundingModel(customPath?: string): { enabled: string; api_base: string; api_key: string; model: string } | null {
   try {
-    const p = customPath || path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+    const p = customPath || path.join(PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
     if (!fs.existsSync(p)) return null;
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
@@ -142,7 +142,7 @@ export function readGroundingModel(customPath?: string): { enabled: string; api_
 
 /** 写入 MCP grounding 模型配置 */
 export function writeGroundingModel(cfg: { api_base?: string; api_key?: string; model?: string; enabled?: boolean }, customPath?: string): void {
-  const p = customPath || path.join(PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+  const p = customPath || path.join(PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
   const clean = {
     api_base: String(cfg.api_base || '').trim(),
     api_key: String(cfg.api_key || '').trim(),

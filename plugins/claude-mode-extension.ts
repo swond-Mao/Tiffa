@@ -189,23 +189,23 @@ export default async function (pi: any) {
     "craftman": [
       "\n\n---\n[系统注入 · 禁止自行拼接路径]",
       `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
-      `craftman.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "craftman", "craftman.py")}`,
-      `调用示例: python "${join(PORTABLE_ROOT, "skills", "craftman", "craftman.py")}" --plan-file <plan.json> --no-confirm`,
+      `craftman.py 绝对路径: ${join(PORTABLE_ROOT, "data", "agent", "managed-skills", "craftman", "craftman.py")}`,
+      `调用示例: python "${join(PORTABLE_ROOT, "data", "agent", "managed-skills", "craftman", "craftman.py")}" --plan-file <plan.json> --no-confirm`,
     ].join("\n"),
     "comfyui-image-gen": [
       "\n\n---\n[系统注入 · 禁止自行拼接路径]",
       `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
-      `comfy.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "comfyui-image-gen", "comfy.py")}`,
+      `comfy.py 绝对路径: ${join(PORTABLE_ROOT, "data", "agent", "managed-skills", "comfyui-image-gen", "comfy.py")}`,
     ].join("\n"),
     "computer-use": [
       "\n\n---\n[系统注入 · 禁止自行拼接路径]",
       `Python 解释器: ${join(PORTABLE_ROOT, "python", "python.exe")}`,
-      `computer_use.py 绝对路径: ${join(PORTABLE_ROOT, "skills", "computer-use", "computer_use.py")}`,
+      `computer_use.py 绝对路径: ${join(PORTABLE_ROOT, "data", "agent", "managed-skills", "computer-use", "computer_use.py")}`,
     ].join("\n"),
     "shared-visual-components": [
       "\n\n---\n[系统注入 · 组件库绝对路径，禁止自行拼接]",
-      `组件库根目录: ${join(PORTABLE_ROOT, "skills", "shared-visual-components")}`,
-      `registry.json: ${join(PORTABLE_ROOT, "skills", "shared-visual-components", "registry.json")}`,
+      `组件库根目录: ${join(PORTABLE_ROOT, "data", "agent", "managed-skills", "shared-visual-components")}`,
+      `registry.json: ${join(PORTABLE_ROOT, "data", "agent", "managed-skills", "shared-visual-components", "registry.json")}`,
       "使用方式：读 registry.json 选布局/主题/组件 → 复制组件到你的 HTML → 替换占位符 → 引入 core/reset.css + core/variables.css + core/utils.css + themes/<主题>.css，<body data-theme=\"<主题id>\"> 换肤",
     ].join("\n"),
   }
@@ -438,7 +438,7 @@ export default async function (pi: any) {
 
 **执行步骤**：
 1. 用友好的语气欢迎用户
-2. 按 \`skills/onboarding/SKILL.md\` 的步骤逐一提问（称呼、沟通风格、使用场景、AI 名字、工作目录、模型配置）
+2. 按 \`data/agent/managed-skills/onboarding/SKILL.md\` 的步骤逐一提问（称呼、沟通风格、使用场景、AI 名字、工作目录、模型配置）
 3. 收集完信息后写入 USER.md 和 AI.md
 4. 完成后告知用户可以开始使用了
 
@@ -486,7 +486,7 @@ export default async function (pi: any) {
             "### 路径约定",
             "",
             "- `PORTABLE_ROOT`：Tiffa 安装根目录，启动时自动解析（`--portable-root` CLI 参数 / `PORTABLE_ROOT` 环境变量 / `__dirname/..`），代码中始终用 `path.join(PORTABLE_ROOT, ...)` 拼接",
-            "- 文档中记录路径时用 `$ROOT/...` 表示相对于 `PORTABLE_ROOT` 的路径（如 `$ROOT/data/agent/`、`$ROOT/skills/`、`$ROOT/workspace/`）",
+            "- 文档中记录路径时用 `$ROOT/...` 表示相对于 `PORTABLE_ROOT` 的路径（如 `$ROOT/data/agent/`、`$ROOT/data/agent/managed-skills/`、`$ROOT/workspace/`）",
             "- 内核环境变量也基于 `PORTABLE_ROOT`：`PI_CODING_AGENT_DIR=$ROOT/data/agent`，`HOME=$ROOT/home`，`BUN_INSTALL=$ROOT`",
             "- `projects.json` 中的 cwd 在启动时会自动迁移盘符（`extractWorkspaceSuffix` 提取 `workspace/` 后缀，重新拼接到当前 `PORTABLE_ROOT`），所以历史记录不怕盘符变化",
             "",
@@ -958,18 +958,47 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
     }
   }
 
+  // 从 models.yml 获取第一个可用的 provider（兜底用）
+  // 兜底链：current-model.json 缺失/解析失败 -> models.yml 第一个 provider -> 旁路（env > bypass-model.json > config default）
+  function getFirstAvailableProvider(): { baseUrl: string; apiKey: string; model: string } | null {
+    try {
+      const modelsPath = join(AGENT_DIR, "models.yml")
+      if (!existsSync(modelsPath)) return null
+      const yml = readFileSync(modelsPath, "utf8")
+      // 匹配第一个 provider 块（格式：  provider_name:\n）
+      const providerMatch = yml.match(/\n[ ]{2}([\w.-]+):[ ]*\n[\s\S]*?(?=\n[ ]{2}[\w.-]+:|$)/)
+      if (!providerMatch) return null
+      const block = providerMatch[0]
+      const baseUrlMatch = block.match(/baseUrl:\s*["']?([^"'\s\n]+)["']?/)
+      if (!baseUrlMatch) return null
+      const apiKeyMatch = block.match(/apiKey:\s*["']?([^"'\s\n]+)["']?/)
+      // 匹配第一个模型 ID
+      const modelMatch = block.match(/id:\s*["']?([^"'\s\n]+)["']?/)
+      if (!modelMatch) return null
+      return {
+        baseUrl: baseUrlMatch[1].replace(/\/$/, ""),
+        apiKey: apiKeyMatch?.[1] || "EMPTY",
+        // 与 resolveModelEndpoint 返回格式保持一致（provider/modelId），
+        // 供 callBypassModel 取末段、session_before_compact ② 分支模型去重比较
+        model: `${providerMatch[1]}/${modelMatch[1]}`,
+      }
+    } catch {
+      return null
+    }
+  }
+
   // 读取 current-model.json（main.js 在 tiffa:setModel 时写入），解析当前会话实际使用的主模型 endpoint
   function resolveMainModelEndpoint(): { baseUrl: string; apiKey: string; model: string } | null {
     try {
       const p = join(AGENT_DIR, "current-model.json")
-      if (!existsSync(p)) return resolveBypassEndpoint() // fallback 到 default 角色
+      if (!existsSync(p)) return getFirstAvailableProvider() || resolveBypassEndpoint() // fallback：models.yml 第一个 provider -> default 角色
       const raw = readFileSync(p, "utf8")
       const info = JSON.parse(raw)
-      if (!info || !info.provider || !info.modelId) return resolveBypassEndpoint()
+      if (!info || !info.provider || !info.modelId) return getFirstAvailableProvider() || resolveBypassEndpoint()
       const modelStr = `${info.provider}/${info.modelId}`
-      return resolveModelEndpoint(modelStr) || resolveBypassEndpoint()
+      return resolveModelEndpoint(modelStr) || getFirstAvailableProvider() || resolveBypassEndpoint()
     } catch {
-      return resolveBypassEndpoint()
+      return getFirstAvailableProvider() || resolveBypassEndpoint()
     }
   }
 

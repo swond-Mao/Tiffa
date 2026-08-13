@@ -302,13 +302,13 @@ $dirs = @(
     "data\agent\sessions",
     "data\agent\rules",
     "data\agent\memories",
+    "data\agent\managed-skills",
     "data\memory",
     "data\memory\inbox",
     "data\logs",
     "workspace",
     "home",
-    "plugins",
-    "skills"
+    "plugins"
 )
 foreach ($d in $dirs) {
     $p = Join-Path $ROOT $d

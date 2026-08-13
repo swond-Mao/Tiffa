@@ -119,7 +119,7 @@ function writeBypassModel(cfg, customPath) {
 /** 读取 MCP grounding 模型配置 */
 function readGroundingModel(customPath) {
     try {
-        const p = customPath || path_1.default.join(constants_1.PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+        const p = customPath || path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
         if (!fs_1.default.existsSync(p))
             return null;
         return JSON.parse(fs_1.default.readFileSync(p, 'utf8'));
@@ -130,7 +130,7 @@ function readGroundingModel(customPath) {
 }
 /** 写入 MCP grounding 模型配置 */
 function writeGroundingModel(cfg, customPath) {
-    const p = customPath || path_1.default.join(constants_1.PORTABLE_ROOT, 'skills', 'computer-use', 'grounding.json');
+    const p = customPath || path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
     const clean = {
         api_base: String(cfg.api_base || '').trim(),
         api_key: String(cfg.api_key || '').trim(),
@@ -142,16 +142,20 @@ function writeGroundingModel(cfg, customPath) {
 /** 模型健康检查：验证 endpoint 可达 + model 可用 */
 async function checkModelHealth(arg) {
     const u = String(arg.baseUrl || '').trim().replace(/\/$/, '');
-    const k = String(arg.apiKey || '').trim() || 'EMPTY';
-    const headers = { 'Content-Type': 'application/json' };
+    const k = String(arg.apiKey || '').trim();
     const model = String(arg.model || '').trim();
     if (!u || !model)
         return { ok: false, status: 0, detail: 'Base URL 与 Model ID 必填' };
+    // models.yml 本地模型 apiKey 惯例为 "none"，不发送假认证头（与 callCompletion 口径一致）
+    const headers = { 'Content-Type': 'application/json' };
+    if (k && k !== 'EMPTY' && k !== 'none')
+        headers.Authorization = `Bearer ${k}`;
     try {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 15000);
         const r = await fetch(`${u}/chat/completions`, {
             method: 'POST',
+            headers,
             body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),
             signal: ctrl.signal,
         });
