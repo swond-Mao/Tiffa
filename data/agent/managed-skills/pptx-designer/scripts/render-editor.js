@@ -110,6 +110,20 @@ function main() {
   const outFile = get('-o') || path.join(projectDir, 'output', 'editor.html');
   const { design, pages } = loadProject(projectDir);
 
+  // 图片元素预处理：_src 转 file:// URL，编辑器内可直接预览真实图片（加载失败回退占位）
+  function preprocessImages(page) {
+    (page.elements || []).forEach(el => {
+      if (el.type === 'image' && el.path) {
+        const abs = path.resolve(el.path);
+        if (fs.existsSync(abs)) el._src = 'file:///' + abs.replace(/\\/g, '/');
+        else delete el._src;
+      } else if (el._src) {
+        delete el._src;
+      }
+    });
+  }
+  pages.forEach(preprocessImages);
+
   // 注入页面数据（编辑器 JS 使用）
   const deckData = JSON.stringify({ design, pages }).replace(/</g, '\\u003c');
 
@@ -153,6 +167,11 @@ function main() {
   .add { background:#334155; border:1px dashed #64748B; color:#94A3B8; width:100%; padding:5px; border-radius:5px; cursor:pointer; margin-top:6px; font-size:12px; }
   #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#059669; color:#fff; padding:8px 18px; border-radius:8px; font-size:13px; opacity:0; transition:.3s; z-index:99; }
   #toast.show { opacity:1; }
+  #exportBanner { display:none; background:#7F1D1D; color:#FECACA; padding:8px 14px; font-size:13px; align-items:center; gap:10px; border-bottom:1px solid #991B1B; }
+  #exportBanner code { background:rgba(255,255,255,.12); padding:1px 6px; border-radius:4px; font-size:12px; }
+  #exportBanner .btn { padding:3px 12px; font-size:12px; background:#991B1B; color:#FECACA; }
+  #exportBanner .btn:hover { background:#B91C1C; }
+  #exportBanner.ok { background:#065F46; color:#A7F3D0; border-bottom-color:#047857; }
 </style>
 </head>
 <body>
@@ -165,7 +184,13 @@ function main() {
       ${Object.entries(THEMES).map(([id,t])=>`<option value="${id}">${t.name}</option>`).join('')}
     </select>
     <button class="btn btn-ghost" onclick="exportDeck()">导出 deck.json</button>
-    <button class="btn btn-primary" onclick="exportPages()">导出 pages/*.js</button>
+    <button class="btn btn-ghost" onclick="exportPages()">导出 pages/*.js</button>
+    <button class="btn btn-primary" style="background:#7C3AED" onclick="exportTo('pptx')">导出 PPTX</button>
+    <button class="btn btn-primary" style="background:#059669" onclick="exportTo('pdf')">导出 PDF</button>
+  </div>
+  <div id="exportBanner">
+    <span>导出服务未启动，无法一键导出 PPTX/PDF。请先运行 <code>node scripts/serve-export.cjs</code></span>
+    <button class="btn" onclick="checkExportService(true)">重试</button>
   </div>
   <div id="stage">
     <div id="canvasWrap"><div id="canvas"></div></div>
@@ -253,6 +278,11 @@ function elHtml(el, page){
     case 'line':
       return '<svg style="position:absolute;left:'+(el.x1||0)+'px;top:'+(el.y1||0)+'px;overflow:visible" width="2" height="2"><line x1="0" y1="0" x2="'+((el.x2||0)-(el.x1||0))+'" y2="'+((el.y2||0)-(el.y1||0))+'" stroke="'+(el.color||'#1A1A1A')+'" stroke-width="'+(el.width||2)+'"/></svg>';
     case 'image': {
+      if (el._src) {
+        const fit = el.objectFit === 'contain' ? 'contain' : 'cover';
+        const radius = el.radius ? 'border-radius:'+el.radius+'px;' : '';
+        return '<img src="'+el._src+'" data-x="'+(el.x||0)+'" data-y="'+(el.y||0)+'" data-w="'+(el.w||0)+'" data-h="'+(el.h||0)+'" style="position:absolute;'+style+'object-fit:'+fit+';'+radius+'" onerror="imgFail(event)">';
+      }
       const cap = el.caption ? '图片占位 · '+el.caption : '图片占位';
       return '<div style="position:absolute;'+style+';background:#E2E8F0;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#64748B;font-size:14px">'+esc(cap)+'</div>';
     }
@@ -346,54 +376,60 @@ function renderPanel(){
   if(selIdx < 0){ panel.innerHTML = '<div class="empty">点击元素编辑</div>'; return; }
   const el = DECK.pages[cur].elements[selIdx];
   let h = '<h3>元素 #'+(selIdx+1)+' · '+el.type+'</h3>';
-  h += '<div class="row2"><div class="field"><label>X</label><input type="number" value="'+(el.x||0)+'" onchange="setF('+selIdx+',\'x\',+this.value)"></div>';
-  h += '<div class="field"><label>Y</label><input type="number" value="'+(el.y||0)+'" onchange="setF('+selIdx+',\'y\',+this.value)"></div></div>';
-  h += '<div class="row2"><div class="field"><label>宽</label><input type="number" value="'+(el.w||0)+'" onchange="setF('+selIdx+',\'w\',+this.value)"></div>';
-  h += '<div class="field"><label>高</label><input type="number" value="'+(el.h||0)+'" onchange="setF('+selIdx+',\'h\',+this.value)"></div></div>';
+  h += '<div class="row2"><div class="field"><label>X</label><input type="number" value="'+(el.x||0)+'" onchange="setF('+selIdx+',\\'x\\',+this.value)"></div>';
+  h += '<div class="field"><label>Y</label><input type="number" value="'+(el.y||0)+'" onchange="setF('+selIdx+',\\'y\\',+this.value)"></div></div>';
+  h += '<div class="row2"><div class="field"><label>宽</label><input type="number" value="'+(el.w||0)+'" onchange="setF('+selIdx+',\\'w\\',+this.value)"></div>';
+  h += '<div class="field"><label>高</label><input type="number" value="'+(el.h||0)+'" onchange="setF('+selIdx+',\\'h\\',+this.value)"></div></div>';
   if(el.type === 'text'){
     h += '<div class="field"><label>文字</label><textarea rows="3" style="width:100%;background:#0F172A;border:1px solid #334155;color:#E2E8F0;border-radius:5px;padding:6px" onchange="setT('+selIdx+',this.value)">'+esc(el.text||'')+'</textarea></div>';
-    h += '<div class="row2"><div class="field"><label>字号</label><input type="number" value="'+(el.fontSize||18)+'" onchange="setF('+selIdx+',\'fontSize\',+this.value)"></div>';
-    h += '<div class="field"><label>颜色</label><input type="color" value="'+(el.color||'#1A1A1A')+'" onchange="setF('+selIdx+',\'color\',this.value)"></div></div>';
-    h += '<div class="row2"><div class="field"><label>加粗</label><select onchange="setF('+selIdx+',\'bold\',this.value===\'true\')"><option value="false"'+(el.bold?'':' selected')+'>否</option><option value="true"'+(el.bold?' selected':'')+'>是</option></select></div>';
-    h += '<div class="field"><label>对齐</label><select onchange="setF('+selIdx+',\'align\',this.value)"><option'+(el.align==='left'?' selected':'')+'>left</option><option'+(el.align==='center'?' selected':'')+'>center</option><option'+(el.align==='right'?' selected':'')+'>right</option></select></div></div>';
-    h += '<div class="field"><label>行距</label><input type="number" value="'+(el.lineSpacing||'')+'" placeholder="自动" onchange="setF('+selIdx+',\'lineSpacing\',+this.value||undefined)"></div>';
+    h += '<div class="row2"><div class="field"><label>字号</label><input type="number" value="'+(el.fontSize||18)+'" onchange="setF('+selIdx+',\\'fontSize\\',+this.value)"></div>';
+    h += '<div class="field"><label>颜色</label><input type="color" value="'+(el.color||'#1A1A1A')+'" onchange="setF('+selIdx+',\\'color\\',this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>加粗</label><select onchange="setF('+selIdx+',\\'bold\\',this.value===\\'true\\')"><option value="false"'+(el.bold?'':' selected')+'>否</option><option value="true"'+(el.bold?' selected':'')+'>是</option></select></div>';
+    h += '<div class="field"><label>对齐</label><select onchange="setF('+selIdx+',\\'align\\',this.value)"><option'+(el.align==='left'?' selected':'')+'>left</option><option'+(el.align==='center'?' selected':'')+'>center</option><option'+(el.align==='right'?' selected':'')+'>right</option></select></div></div>';
+    h += '<div class="field"><label>行距</label><input type="number" value="'+(el.lineSpacing||'')+'" placeholder="自动" onchange="setF('+selIdx+',\\'lineSpacing\\',+this.value||undefined)"></div>';
   }
   if(el.type === 'rect' || el.type === 'roundRect' || el.type === 'ellipse'){
-    h += '<div class="row2"><div class="field"><label>填充</label><input type="color" value="'+(el.fill||'#3B82F6')+'" onchange="setF('+selIdx+',\'fill\',this.value)"></div>';
-    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||0)+'" onchange="setF('+selIdx+',\'radius\',+this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>填充</label><input type="color" value="'+(el.fill||'#3B82F6')+'" onchange="setF('+selIdx+',\\'fill\\',this.value)"></div>';
+    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||0)+'" onchange="setF('+selIdx+',\\'radius\\',+this.value)"></div></div>';
   }
   if(el.type === 'chart'){ h += chartPanel(el, selIdx); }
+  if(el.type === 'image'){
+    h += '<div class="field"><label>图片路径（绝对路径或相对项目目录）</label><input type="text" value="'+esc(el.path||'')+'" onchange="setImagePath('+selIdx+',this.value)"></div>';
+    h += '<div class="row2"><div class="field"><label>填充</label><select onchange="setF('+selIdx+',\\'objectFit\\',this.value)"><option value="cover"'+(el.objectFit!=='contain'?' selected':'')+'>cover 裁剪</option><option value="contain"'+(el.objectFit==='contain'?' selected':'')+'>contain 完整</option></select></div>';
+    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||0)+'" onchange="setF('+selIdx+',\\'radius\\',+this.value)"></div></div>';
+    h += '<div class="field"><label>占位说明（图缺失时显示）</label><input type="text" value="'+esc(el.caption||'')+'" onchange="setF('+selIdx+',\\'caption\\',this.value)"></div>';
+  }
   if(el.type === 'table'){
     h += '<div class="field"><label>表格内容（每行一记录，用 | 分列）</label><textarea rows="6" style="width:100%;background:#0F172A;border:1px solid #334155;color:#E2E8F0;border-radius:5px;padding:6px" onchange="setTable('+selIdx+',this.value)">'+esc((el.rows||[]).map(r=>r.map(c=>typeof c==='string'?c:c.text).join('|')).join('\\n'))+'</textarea></div>';
   }
   // 增强元素编辑
   if(el.type === 'gradientBar'){
-    h += '<div class="row2"><div class="field"><label>起始色</label><input type="color" value="'+(el.from||'#3B82F6')+'" onchange="setF('+selIdx+',\'from\',this.value)"></div>';
-    h += '<div class="field"><label>结束色</label><input type="color" value="'+(el.to||'#0EA5E9')+'" onchange="setF('+selIdx+',\'to\',this.value)"></div></div>';
-    h += '<div class="row2"><div class="field"><label>方向</label><select onchange="setF('+selIdx+',\'dir\',this.value)"><option'+(el.dir!=='vertical'?' selected':'')+'>horizontal</option><option'+(el.dir==='vertical'?' selected':'')+'>vertical</option></select></div>';
-    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||6)+'" onchange="setF('+selIdx+',\'radius\',+this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>起始色</label><input type="color" value="'+(el.from||'#3B82F6')+'" onchange="setF('+selIdx+',\\'from\\',this.value)"></div>';
+    h += '<div class="field"><label>结束色</label><input type="color" value="'+(el.to||'#0EA5E9')+'" onchange="setF('+selIdx+',\\'to\\',this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>方向</label><select onchange="setF('+selIdx+',\\'dir\\',this.value)"><option'+(el.dir!=='vertical'?' selected':'')+'>horizontal</option><option'+(el.dir==='vertical'?' selected':'')+'>vertical</option></select></div>';
+    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||6)+'" onchange="setF('+selIdx+',\\'radius\\',+this.value)"></div></div>';
   }
   if(el.type === 'glowOrb'){
-    h += '<div class="field"><label>颜色</label><input type="color" value="'+(el.color||'#3B82F6')+'" onchange="setF('+selIdx+',\'color\',this.value)"></div>';
-    h += '<div class="row2"><div class="field"><label>直径</label><input type="number" value="'+(el.r||200)+'" onchange="setF('+selIdx+',\'r\',+this.value)"></div>';
-    h += '<div class="field"><label>模糊</label><input type="number" value="'+(el.blur||40)+'" onchange="setF('+selIdx+',\'blur\',+this.value)"></div></div>';
+    h += '<div class="field"><label>颜色</label><input type="color" value="'+(el.color||'#3B82F6')+'" onchange="setF('+selIdx+',\\'color\\',this.value)"></div>';
+    h += '<div class="row2"><div class="field"><label>直径</label><input type="number" value="'+(el.r||200)+'" onchange="setF('+selIdx+',\\'r\\',+this.value)"></div>';
+    h += '<div class="field"><label>模糊</label><input type="number" value="'+(el.blur||40)+'" onchange="setF('+selIdx+',\\'blur\\',+this.value)"></div></div>';
   }
   if(el.type === 'decoBlock'){
-    h += '<div class="field"><label>填充色</label><input type="color" value="'+(el.fill||'#3B82F6')+'" onchange="setF('+selIdx+',\'fill\',this.value)"></div>';
-    h += '<div class="row2"><div class="field"><label>透明度</label><input type="number" min="0" max="1" step="0.05" value="'+(el.alpha===undefined?0.1:el.alpha)+'" onchange="setF('+selIdx+',\'alpha\',+this.value)"></div>';
-    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||8)+'" onchange="setF('+selIdx+',\'radius\',+this.value)"></div></div>';
+    h += '<div class="field"><label>填充色</label><input type="color" value="'+(el.fill||'#3B82F6')+'" onchange="setF('+selIdx+',\\'fill\\',this.value)"></div>';
+    h += '<div class="row2"><div class="field"><label>透明度</label><input type="number" min="0" max="1" step="0.05" value="'+(el.alpha===undefined?0.1:el.alpha)+'" onchange="setF('+selIdx+',\\'alpha\\',+this.value)"></div>';
+    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||8)+'" onchange="setF('+selIdx+',\\'radius\\',+this.value)"></div></div>';
   }
   if(el.type === 'kpiBlock'){
-    h += '<div class="row2"><div class="field"><label>数值</label><input type="text" value="'+esc(el.value!==undefined?el.value:'')+'" onchange="setF('+selIdx+',\'value\',this.value)"></div>';
-    h += '<div class="field"><label>标签</label><input type="text" value="'+esc(el.label||'')+'" onchange="setF('+selIdx+',\'label\',this.value)"></div></div>';
-    h += '<div class="row2"><div class="field"><label>数字颜色</label><input type="color" value="'+(el.color||'#2FE07F')+'" onchange="setF('+selIdx+',\'color\',this.value)"></div>';
-    h += '<div class="field"><label>数号大小</label><input type="number" value="'+(el.numSize||44)+'" onchange="setF('+selIdx+',\'numSize\',+this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>数值</label><input type="text" value="'+esc(el.value!==undefined?el.value:'')+'" onchange="setF('+selIdx+',\\'value\\',this.value)"></div>';
+    h += '<div class="field"><label>标签</label><input type="text" value="'+esc(el.label||'')+'" onchange="setF('+selIdx+',\\'label\\',this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>数字颜色</label><input type="color" value="'+(el.color||'#2FE07F')+'" onchange="setF('+selIdx+',\\'color\\',this.value)"></div>';
+    h += '<div class="field"><label>数号大小</label><input type="number" value="'+(el.numSize||44)+'" onchange="setF('+selIdx+',\\'numSize\\',+this.value)"></div></div>';
   }
   panel.innerHTML = h;
 }
 
 function chartPanel(el, idx){
-  let h = '<div class="field"><label>图表类型</label><select onchange="setF('+idx+',\'chartType\',this.value)">';
+  let h = '<div class="field"><label>图表类型</label><select onchange="setF('+idx+',\\'chartType\\',this.value)">';
   ['bar','line','pie','doughnut','area'].forEach(t=>{ h += '<option'+(el.chartType===t?' selected':'')+'>'+t+'</option>'; });
   h += '</select></div>';
   h += '<div class="field"><label>分类（逗号分隔）</label><input type="text" value="'+(el.labels||[]).join(',')+'" onchange="setLabels('+idx+',this.value)"></div>';
@@ -437,6 +473,72 @@ function addSeries(i){
 }
 function delSeries(i,si){ DECK.pages[cur].elements[i].series.splice(si,1); render(); renderPanel(); }
 
+// ---------- 一键导出（本地导出服务） ----------
+// 端口默认 47832，可用 URL 参数覆盖：editor.html?port=47833
+const EXPORT_PORT = Number(new URLSearchParams(location.search).get('port')) || 47832;
+const EXPORT_BASE = 'http://127.0.0.1:' + EXPORT_PORT;
+// 导出服务健康检查：未启动时顶栏下显示红条提示
+async function checkExportService(manual){
+  const banner = document.getElementById('exportBanner');
+  if(!banner) return false;
+  try{
+    const ctl = new AbortController();
+    const timer = setTimeout(function(){ ctl.abort(); }, 2000);
+    const resp = await fetch(EXPORT_BASE + '/api/health', { signal: ctl.signal });
+    clearTimeout(timer);
+    const data = resp.ok ? await resp.json() : null;
+    const ok = !!(data && data.ok);
+    banner.style.display = ok ? 'none' : 'flex';
+    if(manual && !ok) toast('导出服务未就绪');
+    return ok;
+  }catch(e){
+    banner.style.display = 'flex';
+    if(manual) toast('导出服务未就绪');
+    return false;
+  }
+}
+function exportDir(){
+  try{
+    let p = decodeURIComponent(location.pathname || '');
+    if(p.charAt(0) === '/') p = p.slice(1); // file:///D:/... → D:/...
+    const idx = p.lastIndexOf('/');
+    return idx > 0 ? p.slice(0, idx) : ''; // editor.html 所在目录（项目 output/）
+  }catch{ return ''; }
+}
+async function exportTo(format){
+  const outDir = exportDir();
+  if(!outDir){ toast('无法确定项目 output 目录'); return; }
+  if(!(await checkExportService())){ toast('导出服务未启动，请先运行 node scripts/serve-export.cjs'); return; }
+  toast('正在导出 '+format.toUpperCase()+' …');
+  try{
+    const resp = await fetch(EXPORT_BASE+'/api/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deck: DECK, format, outDir }),
+    });
+    const data = await resp.json();
+    if(data && data.ok){ toast('✅ 已导出: ' + data.file); }
+    else { toast('导出失败: ' + ((data&&data.error)||'未知错误')); console.error('[export]', data); }
+  }catch(e){
+    toast('导出服务未启动：请先运行 node scripts/serve-export.cjs');
+    console.error('[export]', e);
+  }
+}
+function setImagePath(i,v){
+  const el = DECK.pages[cur].elements[i];
+  el.path = v;
+  if(v){ el._src = 'file:///' + String(v).replace(/\\\\/g,'/'); } else { delete el._src; }
+  render(); renderPanel();
+}
+function imgFail(ev){
+  const el = ev && ev.currentTarget;
+  if(!el) return;
+  const d = document.createElement('div');
+  d.style.cssText = 'position:absolute;left:'+(el.dataset.x||0)+'px;top:'+(el.dataset.y||0)+'px;width:'+(el.dataset.w||0)+'px;height:'+(el.dataset.h||0)+'px;background:#E2E8F0;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#64748B;font-size:14px';
+  d.textContent = '图片加载失败';
+  el.replaceWith(d);
+}
+
 // ---------- 导出 ----------
 function exportDeck(){
   const blob = new Blob([JSON.stringify(DECK,null,2)], {type:'application/json'});
@@ -448,7 +550,7 @@ function exportPages(){
   const files = {};
   DECK.pages.forEach((p,i)=>{
     const idx = String(i+1).padStart(2,'0');
-    files['slide_'+idx+'_'+slug(p.id)+'.js'] = '// 页 '+(i+1)+' · '+p.type+' · '+p.role+'\nmodule.exports = '+JSON.stringify(p,null,2)+';\n';
+    files['slide_'+idx+'_'+slug(p.id)+'.js'] = '// 页 '+(i+1)+' · '+p.type+' · '+p.role+'\\\nmodule.exports = '+JSON.stringify(p,null,2)+';\\n';
   });
   files['design.json'] = JSON.stringify(DECK.design,null,2);
   // 打包下载（逐个下载）
@@ -497,6 +599,7 @@ function applyThemeToPage(tid){
 }
 themeSel.addEventListener('change', e => applyThemeToPage(e.target.value));
 render(); syncThemeSel(); fitCanvas();
+checkExportService(false);
 </script>
 </body>
 </html>`;

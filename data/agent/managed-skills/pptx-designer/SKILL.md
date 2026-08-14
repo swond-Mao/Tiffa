@@ -56,7 +56,9 @@ triggers:
 └── output/                  # 生成产物
     ├── preview.html         # 翻页预览
     ├── editor.html          # 交互式编辑器
-    └── 最终.pptx            # 编译产物（用户确认后生成）
+    ├── deck.pptx            # 编辑器一键导出（可编辑，视觉高保真）
+    ├── deck.pdf             # 编辑器一键导出（PDF）
+    └── 最终.pptx            # 编译产物（原生全形状，用户确认后生成）
 ```
 
 **产物纪律**：
@@ -104,8 +106,25 @@ node scripts/profile_template.js <模板.pptx> -o design.json
 node scripts/render-editor.js --project <项目目录>   # → output/editor.html
 node scripts/preview.js --project <项目目录>         # → output/preview.html
 ```
+**必须同时启动导出服务**（一次性，保持运行）：
+```bash
+node scripts/serve-export.cjs   # 后台运行，勿关
+```
 把 editor.html 给用户打开，让用户在编辑器里**改字/换主题/调布局/加删元素**。
 > 不要替用户编译 .pptx！用户还没改过，编译了也是废的。
+> 编辑器打开时若服务未启动会显示红条提示，点「重试」或检查服务进程。
+
+### Step 4.5：一键导出（编辑器内直接出可编辑 PPTX/PDF）
+**编辑器顶栏的「导出 PPTX」「导出 PDF」按钮**可直接产出文件，无需回到命令行：
+
+1. 导出服务已在 Step 4 启动（`node scripts/serve-export.cjs`）；若服务未启动，编辑器顶部显示红条提示
+2. 用户在编辑器里点「导出 PPTX/PDF」→ 产物写到 `<项目目录>/output/deck.pptx` / `deck.pdf`
+3. 服务端口冲突时用 `editor.html?port=<端口>` 覆盖（服务端同样 `--port <端口>`）
+
+> 导出引擎：`vendor/html-deck-to-pptx`（逐节点保真回退链——可映射的 DOM 转成可编辑形状，
+> 映射不了的区域截图但文字从实时 DOM 抽回保持可编辑）。图片内联 base64，成品不依赖素材路径。
+> 与 build.js 的区别：build.js 产出**原生全形状** .pptx（渐变/装饰降级为形状），
+> 一键导出产出**高保真视觉** .pptx（复杂视觉截图保真，文字可编辑）。两种路径互补，按需选用。
 
 ### Step 5：用户确认后编译
 **用户说"满意了/可以了/导出吧/生成 pptx"**，再执行：
@@ -160,7 +179,8 @@ module.exports = {
 node scripts/build.js --project <目录> -o <输出.pptx>    # 编译（含 lint）
 node scripts/build.js --project <目录> --lint-only       # 只校验
 node scripts/preview.js --project <目录>                 # 翻页式 HTML 预览
-node scripts/render-editor.js --project <目录>           # 交互式编辑器（拖拽/改字/图表强调/导出）
+node scripts/render-editor.js --project <目录>           # 交互式编辑器（拖拽/改字/图表强调/一键导出）
+node scripts/serve-export.cjs [--port 47832]             # 一键导出服务（编辑器导出按钮的后端）
 node scripts/profile_template.js <模板.pptx> -o design.json  # 模板风格分析
 node scripts/extract_assets.js <材料.docx> -o resources/images # 材料图片提取
 ```
