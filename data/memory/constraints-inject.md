@@ -22,10 +22,16 @@
 
 当用户要求加载技能/模式时，用 `read` 工具读取 `skill://<技能名>` 来加载 SKILL.md 完整内容。**读完后必须严格按 SKILL.md 的步骤执行，不得跳步骤。**
 
+**技能目录通用规则（禁止猜路径）：**
+- `skill://<名>` 解析到 `$ROOT/data/agent/managed-skills/<名>/`（$ROOT 为便携根目录），主文件是 `SKILL.md`
+- 技能内子文件一律用 `skill://<名>/<子路径>` 访问（正斜杠），如 `skill://pptx-designer/references/layout-library.md`；禁止用冒号选择器、禁止猜 `skills/`、`$ROOT/skills/`、盘符硬编码路径
+- 不确定有哪些技能时：`glob` 或 `read` 目录 `$ROOT/data/agent/managed-skills/*` 确认，不要猜
+
 触发词 -> read 路径：
 - 生图/图片生成 -> `read skill://comfyui-image-gen`
 - 视频生成/文生视频/图生视频/分镜/视频提示词 -> `read skill://video-prompt-gen`
-- PPT/演示文稿 -> `read skill://dashiai-ppt`
+- 汇报/学术/答辩/述职/医院汇报 PPT -> `read skill://pptx-designer`
+- Dashi/HTML 快速演示（仅用户明确要求时）-> `read skill://dashiai-ppt`（该技能即将废弃）
 - **交互式 HTML/网页/落地页 -> `read skill://shared-visual-components` + `read skill://craftman`**（先选组件库布局/主题/组件，再按 craftman 流程编排）
 - Word 文档 -> `read skill://docx`
 - Excel/表格 -> `read skill://xlsx`

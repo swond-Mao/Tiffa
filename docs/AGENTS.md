@@ -193,7 +193,7 @@ gap-fill 原设计为「每会话独立 dump 最近 50 条消息原文（`data/m
 
 Tiffa 无自定义 `skill` 工具。技能通过内核原生 `read skill://<name>` 协议加载：
 
-- 模型用 `read` 工具读取 `skill://<技能名>` → 内核解析到 `skills/<技能名>/SKILL.md` → 返回完整内容
+- 模型用 `read` 工具读取 `skill://<技能名>` → 内核解析到 `data/agent/managed-skills/<技能名>/SKILL.md` → 返回完整内容
 - `skills.customDirectories` 设置（agent.db settings 表）指向 `$ROOT/skills`
 - `constraints-inject.md` 中列出触发词到 `read skill://` 路径的映射
 

@@ -210,6 +210,18 @@ export default async function (pi: any) {
     ].join("\n"),
   }
 
+  // 通用技能路径提示：任何 skill:// 读取后都会注入，避免弱模型猜路径；
+  // 白名单 SKILL_PATH_HINTS 只保留有脚本/特殊用法的技能，其余走这里（新增技能无需改本文件）
+  function buildGenericSkillHint(skillName: string): string {
+    const root = join(PORTABLE_ROOT, "data", "agent", "managed-skills", skillName)
+    return [
+      "\n\n---\n[系统注入 · 技能目录固定位置，禁止自行拼接路径]",
+      `技能根目录: ${root}`,
+      `SKILL.md: ${join(root, "SKILL.md")}`,
+      `子文件访问: read skill://${skillName}/<子路径>（如 skill://${skillName}/references/xxx.md）`,
+    ].join("\n")
+  }
+
   // 技能脚本 -> 对应 skill 名 + 是否必须先问用户
   const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean; requireStyleAsk?: boolean }> = [
     { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?comfy\.py/i, skill: "comfyui-image-gen", requireAsk: true },
@@ -1691,9 +1703,12 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       log("tool_result", `tool=${tool}`)
 
       // 技能路径注入：读取 skill:// 后追加绝对路径提示（弱模型不会自己拼）
-      if (tool === "read" && lastSkillRead && SKILL_PATH_HINTS[lastSkillRead] && !event.isError) {
-        const hint = SKILL_PATH_HINTS[lastSkillRead]
+      // 白名单优先（craftman 等带脚本/特殊用法），其余走通用兜底（任意 skill 都注入根目录）
+      if (tool === "read" && lastSkillRead && !event.isError) {
+        const skillName = lastSkillRead
         lastSkillRead = "" // 消费一次后清空
+        const hint = SKILL_PATH_HINTS[skillName] ?? buildGenericSkillHint(skillName)
+        if (!hint) return undefined
         const existing = Array.isArray(event.content) ? event.content : []
         return {
           content: [...existing, { type: "text", text: hint }],
