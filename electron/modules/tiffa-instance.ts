@@ -62,6 +62,9 @@ export class TiffaInstance {
   maxCrashRestart = 3;
   _restartTimer: ReturnType<typeof setTimeout> | null = null;
   isPrewarming = false;
+  /** 用户消息（prompt/steer/follow_up）已发出未完成：prewarm 定时器必须避开，
+   *  否则 isPrewarming=true 会把用户回复流尾部全部吞掉（见 _handleEvent prewarm 过滤） */
+  userPromptInFlight = false;
   sessionFilePath: string | null = null;
   _titleGenerated = false;
   _restoringContext = false;
@@ -220,6 +223,9 @@ export class TiffaInstance {
         this.isPrewarming = false;
         console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消预热过滤`);
       }
+      if (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up') {
+        this.userPromptInFlight = true;
+      }
       if (this._restoringContext && (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up')) {
         this._restoringContext = false;
         console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消上下文恢复过滤`);
@@ -264,6 +270,9 @@ export class TiffaInstance {
       this.isPrewarming = false;
       console.log(`[TiffaInstance:${this._shortCwd()}] 用户 raw 命令(${frame.type})到达，取消预热过滤`);
     }
+    if (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up') {
+      this.userPromptInFlight = true;
+    }
     const line = JSON.stringify(frame) + '\n';
     try {
       this.process!.stdin!.write(line, 'utf8');
@@ -281,7 +290,7 @@ export class TiffaInstance {
       this.crashCount = 0;
       console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
       setTimeout(() => {
-        if (this.agentRunning) return;
+        if (this.agentRunning || this.userPromptInFlight || this._restoringContext) return;
         this.isPrewarming = true;
         this.sendRaw({ type: 'prompt', message: '/memory rebuild' });
         setTimeout(() => { this.isPrewarming = false; }, 30000);
@@ -314,6 +323,7 @@ export class TiffaInstance {
       mainLog(`[${this._shortCwd()}#${this.sessionId}] agent_end code=${event._wasPrewarming ? 'prewarm' : 'normal'}`);
       event._wasPrewarming = this.isPrewarming;
       this.agentRunning = false;
+      this.userPromptInFlight = false;
       if (!event._wasPrewarming && !this._titleGenerated) {
         this._titleGenerated = true;
         setTimeout(() => {
