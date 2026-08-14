@@ -15,8 +15,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const CANVAS_W = 1280;
-const CANVAS_H = 720;
+const { THEMES, CANVAS_W, CANVAS_H, themeCSS, themeVars } = require(path.join(__dirname, 'visual', 'themes.js'));
 const { shrinkFactor } = require('./shrink');
 
 function loadProject(projectDir) {
@@ -161,6 +160,10 @@ function main() {
     <span class="title">${esc(design.title || 'PPT 编辑器')}</span>
     <span id="tabs"></span>
     <div class="spacer"></div>
+    <label class="theme-label" style="color:#94A3B8;font-size:12px;margin-right:4px">主题</label>
+    <select id="themeSel" style="background:#0F172A;border:1px solid #334155;color:#CBD5E1;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer">
+      ${Object.entries(THEMES).map(([id,t])=>`<option value="${id}">${t.name}</option>`).join('')}
+    </select>
     <button class="btn btn-ghost" onclick="exportDeck()">导出 deck.json</button>
     <button class="btn btn-primary" onclick="exportPages()">导出 pages/*.js</button>
   </div>
@@ -171,6 +174,11 @@ function main() {
   <div id="toast"></div>
 <script>
 const DECK = ${deckData};
+// 主题库（16 套，供编辑器切主题/装饰/背景用）
+const themeMap = ${JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k,t])=>
+  [k,{ bg:t.bg, dark:!!t.dark, texture:t.texture,
+       palette:Object.fromEntries(Object.entries(t.palette).filter(([kk])=>!kk.startsWith('--'))),
+       decoration:t.decoration||{} }])))};
 let cur = 0;          // 当前页索引
 let selIdx = -1;      // 选中的元素索引
 let drag = null;      // 拖拽状态
@@ -187,8 +195,15 @@ function toast(msg){
 // ---------- 渲染当前页 ----------
 function render(){
   const page = DECK.pages[cur];
-  canvas.style.background = page.background || '#FFFFFF';
+  const themeId = page.theme || (DECK.design&&DECK.design.theme) || 'generic';
+  const th = themeMap[themeId] || themeMap.generic;
   canvas.innerHTML = '';
+  // 主题背景（含径向光效纹理）
+  let bg = page.background || th.bg;
+  if(th.texture==='radial') bg += '; background-image: radial-gradient(ellipse 60% 45% at 82% 12%, '+rgbaOf(th.palette.primary,0.2)+' 0%, transparent 55%), radial-gradient(ellipse 50% 50% at 8% 88%, '+rgbaOf(th.palette.accent,0.18)+' 0%, transparent 50%)';
+  canvas.style.background = bg;
+  // 装饰层（角落强调条 / 页脚条）
+  canvas.insertAdjacentHTML('beforeend', decoHtml(page, th));
   page.elements.forEach((el,i)=>{
     const div = document.createElement('div');
     div.className = 'el' + (i===selIdx ? ' selected' : '');
@@ -199,6 +214,23 @@ function render(){
     canvas.appendChild(div);
   });
   renderTabs();
+}
+// ---------- 页面装饰层（编辑器预览） ----------
+function decoHtml(page, th){
+  const p = th.palette, d = page.decoration || th.decoration || {}, corner = d.corner || '';
+  let h = '';
+  if(corner==='bar'){
+    h += '<div style="position:absolute;right:0;top:0;width:140px;height:8px;background:'+p.primary+';opacity:.85;pointer-events:none;"></div>';
+    h += '<div style="position:absolute;right:0;top:8px;width:90px;height:4px;background:'+p.accent+';opacity:.5;pointer-events:none;"></div>';
+  } else if(corner==='glow' && th.dark){
+    h += '<div style="position:absolute;right:-60px;top:-60px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle, '+rgbaOf(p.primary,0.22)+', transparent 65%);pointer-events:none;"></div>';
+  } else if(corner==='barDark' && th.dark){
+    h += '<div style="position:absolute;left:0;bottom:0;width:100%;height:6px;background:linear-gradient(90deg,'+p.primary+','+p.accent+');opacity:.9;pointer-events:none;"></div>';
+  }
+  if(page.role !== 'hero' && d.footer !== false){
+    h += '<div style="position:absolute;left:0;bottom:0;width:180px;height:4px;background:'+p.primary+';opacity:.5;pointer-events:none;"></div>';
+  }
+  return h;
 }
 
 function elHtml(el, page){
@@ -234,9 +266,25 @@ function elHtml(el, page){
       const rows = (el.rows||[]).map(r=>'<tr>'+r.map(c=>'<td style="border:1px solid '+(el.borderColor||'#E2E8F0')+';padding:4px 8px;font-weight:'+(c.bold?'bold':'normal')+';color:'+(c.color||el.color||'#333')+'">'+esc(c.text)+'</td>').join('')+'</tr>').join('');
       return '<div style="position:absolute;'+style+';overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:'+(el.fontSize||14)+'px">'+rows+'</table></div>';
     }
+    case 'gradientBar': {
+      const g = (el.dir==='vertical') ? 'linear-gradient(0deg, '+(el.from||'#3B82F6')+', '+(el.to||'#0EA5E9')+')' : 'linear-gradient(90deg, '+(el.from||'#3B82F6')+', '+(el.to||'#0EA5E9')+')';
+      return '<div style="position:absolute;'+style+'background:'+g+';border-radius:'+((el.radius===undefined?6:el.radius))+'px"></div>';
+    }
+    case 'glowOrb': {
+      const r = el.r||200, cx=(el.x||0), cy=(el.y||0);
+      return '<div style="position:absolute;left:'+cx+'px;top:'+cy+'px;width:'+r+'px;height:'+r+'px;border-radius:50%;background:radial-gradient(circle, '+(el.color||'#3B82F6')+(el.alpha===undefined?'59':Math.round(el.alpha*255).toString(16))+', transparent 70%);filter:blur('+(el.blur||40)+'px);pointer-events:none;"></div>';
+    }
+    case 'decoBlock': {
+      return '<div style="position:absolute;'+style+'background:'+(el.fill||'#3B82F6')+';border-radius:'+(el.radius===undefined?8:el.radius)+'px;opacity:'+(el.alpha===undefined?0.1:el.alpha)+';pointer-events:none;"></div>';
+    }
+    case 'kpiBlock': {
+      return '<div style="position:absolute;'+style+'background:'+(el.fill||'rgba(255,255,255,0.06)')+';border:1px solid '+(el.borderColor||'rgba(255,255,255,0.3)')+';border-radius:'+(el.radius===undefined?12:el.radius)+'px;display:flex;flex-direction:column;justify-content:center;padding:12px 16px;box-sizing:border-box;"><div style="font-size:'+(el.numSize||44)+'px;font-weight:800;color:'+(el.color||'#2FE07F')+';line-height:1.1">'+esc(el.value!==undefined?el.value:(el.text||''))+'</div>'+(el.label?'<div style="font-size:'+(el.labelSize||14)+'px;color:#8A94A6;margin-top:6px">'+esc(el.label)+'</div>':'')+'</div>';
+    }
     default: return '';
   }
 }
+// hex → rgba（浏览器端辅助）
+function rgbaOf(hex, a){ var h=String(hex||'').replace('#',''); if(!h) return hex; var full=h.length===3?h.split('').map(function(c){return c+c}).join(''):h; var n=parseInt(full,16); return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ---------- 页面 tabs ----------
@@ -244,7 +292,7 @@ function renderTabs(){
   $('#tabs').innerHTML = DECK.pages.map((p,i)=>
     '<button class="tab'+(i===cur?' active':'')+'" onclick="goPage('+i+')">'+(i+1)+' '+(p.type||'')+'</button>').join('');
 }
-function goPage(i){ cur=i; selIdx=-1; render(); $('#panel').innerHTML='<div class="empty">点击元素编辑</div>'; }
+function goPage(i){ cur=i; selIdx=-1; render(); syncThemeSel(); $('#panel').innerHTML='<div class="empty">点击元素编辑</div>'; }
 
 // ---------- 选中 + 拖拽 ----------
 function select(i, e){
@@ -317,6 +365,29 @@ function renderPanel(){
   if(el.type === 'chart'){ h += chartPanel(el, selIdx); }
   if(el.type === 'table'){
     h += '<div class="field"><label>表格内容（每行一记录，用 | 分列）</label><textarea rows="6" style="width:100%;background:#0F172A;border:1px solid #334155;color:#E2E8F0;border-radius:5px;padding:6px" onchange="setTable('+selIdx+',this.value)">'+esc((el.rows||[]).map(r=>r.map(c=>typeof c==='string'?c:c.text).join('|')).join('\\n'))+'</textarea></div>';
+  }
+  // 增强元素编辑
+  if(el.type === 'gradientBar'){
+    h += '<div class="row2"><div class="field"><label>起始色</label><input type="color" value="'+(el.from||'#3B82F6')+'" onchange="setF('+selIdx+',\'from\',this.value)"></div>';
+    h += '<div class="field"><label>结束色</label><input type="color" value="'+(el.to||'#0EA5E9')+'" onchange="setF('+selIdx+',\'to\',this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>方向</label><select onchange="setF('+selIdx+',\'dir\',this.value)"><option'+(el.dir!=='vertical'?' selected':'')+'>horizontal</option><option'+(el.dir==='vertical'?' selected':'')+'>vertical</option></select></div>';
+    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||6)+'" onchange="setF('+selIdx+',\'radius\',+this.value)"></div></div>';
+  }
+  if(el.type === 'glowOrb'){
+    h += '<div class="field"><label>颜色</label><input type="color" value="'+(el.color||'#3B82F6')+'" onchange="setF('+selIdx+',\'color\',this.value)"></div>';
+    h += '<div class="row2"><div class="field"><label>直径</label><input type="number" value="'+(el.r||200)+'" onchange="setF('+selIdx+',\'r\',+this.value)"></div>';
+    h += '<div class="field"><label>模糊</label><input type="number" value="'+(el.blur||40)+'" onchange="setF('+selIdx+',\'blur\',+this.value)"></div></div>';
+  }
+  if(el.type === 'decoBlock'){
+    h += '<div class="field"><label>填充色</label><input type="color" value="'+(el.fill||'#3B82F6')+'" onchange="setF('+selIdx+',\'fill\',this.value)"></div>';
+    h += '<div class="row2"><div class="field"><label>透明度</label><input type="number" min="0" max="1" step="0.05" value="'+(el.alpha===undefined?0.1:el.alpha)+'" onchange="setF('+selIdx+',\'alpha\',+this.value)"></div>';
+    h += '<div class="field"><label>圆角</label><input type="number" value="'+(el.radius||8)+'" onchange="setF('+selIdx+',\'radius\',+this.value)"></div></div>';
+  }
+  if(el.type === 'kpiBlock'){
+    h += '<div class="row2"><div class="field"><label>数值</label><input type="text" value="'+esc(el.value!==undefined?el.value:'')+'" onchange="setF('+selIdx+',\'value\',this.value)"></div>';
+    h += '<div class="field"><label>标签</label><input type="text" value="'+esc(el.label||'')+'" onchange="setF('+selIdx+',\'label\',this.value)"></div></div>';
+    h += '<div class="row2"><div class="field"><label>数字颜色</label><input type="color" value="'+(el.color||'#2FE07F')+'" onchange="setF('+selIdx+',\'color\',this.value)"></div>';
+    h += '<div class="field"><label>数号大小</label><input type="number" value="'+(el.numSize||44)+'" onchange="setF('+selIdx+',\'numSize\',+this.value)"></div></div>';
   }
   panel.innerHTML = h;
 }
@@ -408,7 +479,24 @@ window.addEventListener('resize', fitCanvas);
 document.addEventListener('click', e=>{ if(e.target === canvas || e.target.id === 'canvasWrap'){ selIdx=-1; render(); renderPanel(); } });
 
 // ---------- 启动 ----------
-render(); fitCanvas();
+// 供编辑器用的紧凑主题名表（浏览器端，需在 syncThemeSel 前定义）
+const THEMES_MAP = ${JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k,t])=>[k,t.name])))};
+// 主题切换：改当前页 theme 字段并重渲染
+const themeSel = document.getElementById('themeSel');
+function syncThemeSel(){
+  const page = DECK.pages[cur];
+  const tid = page.theme || (DECK.design&&DECK.design.theme) || 'generic';
+  themeSel.value = THEMES_MAP[tid] ? tid : 'generic';
+}
+function applyThemeToPage(tid){
+  const page = DECK.pages[cur];
+  page.theme = tid;
+  render();
+  renderTabs();
+  toast('主题已切换：' + (THEMES_MAP[tid] || tid));
+}
+themeSel.addEventListener('change', e => applyThemeToPage(e.target.value));
+render(); syncThemeSel(); fitCanvas();
 </script>
 </body>
 </html>`;

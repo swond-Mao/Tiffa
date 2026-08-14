@@ -20,9 +20,8 @@
  */
 const path = require('path');
 const fs = require('fs');
+const { THEMES: THEME_DEFS, CANVAS_W, CANVAS_H } = require(path.join(__dirname, 'visual', 'themes.js'));
 
-const CANVAS_W = 1280;   // 逻辑画布宽（设计稿）
-const CANVAS_H = 720;    // 逻辑画布高（设计稿）
 const INCH_PER_PX = 10 / 1280; // 逻辑 px → 英寸
 const PT_PER_PX = INCH_PER_PX * 72; // 逻辑 px → pt（字号）
 
@@ -31,7 +30,15 @@ const NEUTRAL = new Set(['#ffffff', '#000000']);
 
 function px(v) { return v * INCH_PER_PX; }
 function pt(v) { return v * PT_PER_PX; } // px 字号 → pt
-function hex(c) { return String(c).replace('#', '').toUpperCase(); }
+function hex(c) {
+  const s = String(c).trim();
+  // rgba(r,g,b[,a]) / rgb(r,g,b) → RRGGBB（忽略 alpha，.pptx 颜色为 6 位 hex）
+  const m = s.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) {
+    return ((1 << 24) + (+m[1] << 16) + (+m[2] << 8) + +m[3]).toString(16).slice(1).toUpperCase();
+  }
+  return s.replace('#', '').toUpperCase();
+}
 function norm(c) { return String(c).toLowerCase(); }
 
 // 边界裁剪：超出画布的元素自动裁剪（返回裁剪后的 {x,y,w,h}）
@@ -263,6 +270,75 @@ function renderElement(slide, pptx, el, page) {
       });
       break;
     }
+    /* ── 增强元素（双引擎视觉 → 原生 .pptx 降级映射） ── */
+    case 'gradientBar': {
+      // pptxgenjs 渐变兼容有限：用 from 色矩形 + to 色半透 overlay 叠出渐变感
+      const from = hex(el.from || '#3B82F6');
+      const to = hex(el.to || '#0EA5E9');
+      const radius = el.radius !== undefined ? px(el.radius) : px(6);
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: o.x, y: o.y, w: o.w, h: o.h, rectRadius: radius,
+        fill: { color: from }, line: { type: 'none' },
+      });
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: o.x, y: o.y, w: o.w, h: o.h, rectRadius: radius,
+        fill: { color: to, transparency: 45 }, line: { type: 'none' },
+      });
+      break;
+    }
+    case 'glowOrb': {
+      // 光晕降级：多层同心椭圆 + 递减透明度（近似 HTML radial-gradient 光晕）
+      const color = el.color || '#3B82F6';
+      const alpha = el.alpha !== undefined ? el.alpha : 0.35;
+      const blur = el.blur || 40;
+      const cx = o.x, cy = o.y, r = Math.max(o.w, o.h) || px(el.r || 200);
+      const layers = [0.22, 0.5, 1].map((f, li) => ({
+        size: r * (li === 0 ? 1 : li === 1 ? 0.72 : 0.45),
+        trans: Math.min(100, 100 - alpha * 100 * (li === 0 ? 0.5 : li === 1 ? 0.85 : 1)),
+      }));
+      layers.forEach(l => {
+        slide.addShape(pptx.ShapeType.ellipse, {
+          x: cx + (r - l.size) / 2, y: cy + (r - l.size) / 2, w: l.size, h: l.size,
+          fill: { color: hex(color), transparency: l.trans }, line: { type: 'none' },
+        });
+      });
+      void blur;
+      break;
+    }
+    case 'decoBlock': {
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: o.x, y: o.y, w: o.w, h: o.h,
+        rectRadius: el.radius !== undefined ? px(el.radius) : px(8),
+        fill: { color: hex(el.fill || '#3B82F6'), transparency: el.alpha !== undefined ? Math.round((1 - el.alpha) * 100) : 90 },
+        line: { type: 'none' },
+      });
+      break;
+    }
+    case 'kpiBlock': {
+      // 色块衬底 + 大数值 + 标签
+      const numColor = el.color || '#1E3A5F';
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: o.x, y: o.y, w: o.w, h: o.h,
+        rectRadius: el.radius !== undefined ? px(el.radius) : px(12),
+        fill: el.fill ? { color: hex(el.fill), transparency: el.fillTrans || 90 }
+                      : { color: 'FFFFFF', transparency: 92 },
+        line: { color: hex(el.borderColor || '#E2E8F0'), width: px(1) },
+      });
+      const val = el.value !== undefined ? el.value : (el.text || '');
+      slide.addText(String(val), {
+        x: px((el.x || 0) + 14), y: px((el.y || 0) + 12), w: Math.max(0, px((el.w || 0) - 28)), h: px(70),
+        fontSize: pt(el.numSize || 44), bold: true, color: hex(numColor),
+        fontFace: el.fontFace || page.fontFace || '微软雅黑', margin: 0, fit: 'shrink',
+      });
+      if (el.label) {
+        slide.addText(el.label, {
+          x: px((el.x || 0) + 14), y: px((el.y || 0) + 92), w: Math.max(0, px((el.w || 0) - 28)), h: px(30),
+          fontSize: pt(el.labelSize || 14), color: hex(el.labelColor || '#64748B'),
+          fontFace: el.fontFace || page.fontFace || '微软雅黑', margin: 0, fit: 'shrink',
+        });
+      }
+      break;
+    }
     default:
       throw new Error(`未知元素类型: ${el.type}`);
   }
@@ -279,8 +355,39 @@ function build(projectDir, outFile) {
 
   pages.forEach((page, i) => {
     const slide = pptx.addSlide();
-    if (page.background) slide.background = { color: hex(page.background) };
+    // 主题背景（页级 override > 主题背景 > 默认白）
+    const themeId = page.theme || design.theme || 'generic';
+    const th = THEME_DEFS[themeId] || THEME_DEFS.generic;
+    const bg = page.background || (th && th.bg);
+    if (bg) slide.background = { color: hex(bg) };
     if (page.backgroundImage) slide.background = { path: path.resolve(page.backgroundImage) };
+    // 主题装饰层（角落强调条 / 页脚条）垫在元素下层
+    if (th) {
+      const d = page.decoration || th.decoration || {};
+      const corner = d.corner || '';
+      const p = th.palette || {};
+      if (corner === 'bar') {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: px(1140), y: 0, w: px(140), h: px(8),
+          fill: { color: hex(p.primary || '3B82F6') }, line: { type: 'none' },
+        });
+        slide.addShape(pptx.ShapeType.rect, {
+          x: px(1140), y: px(8), w: px(90), h: px(4),
+          fill: { color: hex(p.accent || '0EA5E9'), transparency: 50 }, line: { type: 'none' },
+        });
+      } else if (corner === 'barDark') {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: 0, y: px(714), w: px(1280), h: px(6),
+          fill: { color: hex(p.primary || '3B82F6') }, line: { type: 'none' },
+        });
+      }
+      if (page.role !== 'hero' && d.footer !== false) {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: 0, y: px(716), w: px(180), h: px(4),
+          fill: { color: hex(p.primary || '3B82F6'), transparency: 50 }, line: { type: 'none' },
+        });
+      }
+    }
     page.elements.forEach(el => renderElement(slide, pptx, el, page));
     // 页码兜底: 内容页未显式写页码时自动补
     if (!['cover', 'section', 'ending'].includes(page.type) &&

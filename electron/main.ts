@@ -121,6 +121,20 @@ process.on('unhandledRejection', (reason) => {
 });
 
 
+// ── 项目 cwd 校验：禁止把 Tiffa 基础目录当工作目录（防目录漂移污染 projects.json / 会话 cwd）──
+// 基础目录 = PORTABLE_ROOT 内、workspace 外（data/、electron/、python/、plugins/、home/ 等）
+// 用户项目应位于 workspace/ 下的子目录，或 PORTABLE_ROOT 之外的任意目录
+function assertProjectCwd(cwd: string): { ok: true; normalized: string } | { ok: false; error: string } {
+  const normalized = path.resolve(cwd);
+  const rootNorm = path.resolve(PORTABLE_ROOT).toLowerCase();
+  const wsNorm = path.resolve(path.join(PORTABLE_ROOT, 'workspace')).toLowerCase();
+  const cwdNorm = normalized.toLowerCase();
+  if (cwdNorm.startsWith(rootNorm + path.sep) && !cwdNorm.startsWith(wsNorm + path.sep)) {
+    return { ok: false, error: `不允许以 Tiffa 基础目录作为工作目录：${normalized}。请选择 workspace/ 下的项目目录或其他用户目录。` };
+  }
+  return { ok: true, normalized };
+}
+
 function setupIpc() {
   // ── 多实例感知的辅助函数 ──
   // 所有 Tiffa 命令都路由到当前活跃实例
@@ -279,7 +293,9 @@ function setupIpc() {
   // 激活对话级实例（每对话独立进程）——显式设置 activeKey
   ipcMain.handle('tiffa:activateSession', async (event, cwd, sessionId) => {
     try {
-      const normalized = path.resolve(cwd);
+      const check = assertProjectCwd(cwd);
+      if (!check.ok) return { error: check.error };
+      const normalized = check.normalized;
       ensureProjectInJson(normalized);
       // 显式激活：设置 activeKey（用户主动切换对话时才调用）
       tiffaManager.activeKey = tiffaManager._key(normalized, sessionId);
@@ -440,7 +456,9 @@ function setupIpc() {
   // ── 多实例管理 IPC ──
   ipcMain.handle('tiffa:activate', async (event, cwd) => {
     try {
-      const normalized = path.resolve(cwd);
+      const check = assertProjectCwd(cwd);
+      if (!check.ok) return { error: check.error };
+      const normalized = check.normalized;
       // 显式用户操作：如果路径曾被删除，从黑名单移除（允许重新添加）
       unremoveCwd(normalized);
       // 确保项目注册到 projects.json

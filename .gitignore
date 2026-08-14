@@ -170,3 +170,7 @@ PROJECT.md
 # 本次迁移调试临时产物
 main-diff.txt
 electron/_tail_check.js
+
+# managed-skills 依赖（各技能 node_modules / 缓存）
+data/agent/managed-skills/*/node_modules/
+data/agent/managed-skills/*/.cache/

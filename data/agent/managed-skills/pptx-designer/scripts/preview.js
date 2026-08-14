@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
- * pptx-designer preview.js
- * 页面定义(pages/*.js) → 翻页式 HTML 预览（全屏 16:9，键盘/滚轮/圆点翻页）
+ * pptx-designer preview.js — 翻页式 HTML 预览（双引擎视觉）
+ *
+ * 页面定义(pages/*.js + design.theme) → HTML 版式 + 主题装饰层
+ * 顶部有主题下拉，可实时切换 16 套主题看视觉差异。
  *
  * 用法:
  *   node scripts/preview.js --project <项目目录> [-o preview.html]
  *
- * 说明: 预览定位为"版式快照"，字体/图表等以近似样式呈现，最终以 .pptx 为准。
+ * 预览定位为"版式快照"，最终以 .pptx 为准（见 build.js）。
  */
+'use strict';
 const path = require('path');
 const fs = require('fs');
-
-const CANVAS_W = 1280;
-const CANVAS_H = 720;
+const { elHtml, decorationHtml, esc } = require(path.join(__dirname, 'visual', 'elHtml.js'));
+const { THEMES, CANVAS_W, CANVAS_H, themeCSS, themeVars } = require(path.join(__dirname, 'visual', 'themes.js'));
 const { shrinkFactor } = require('./shrink');
 
 function loadProject(projectDir) {
@@ -28,85 +30,15 @@ function loadProject(projectDir) {
   return { design, pages, pagesDir };
 }
 
-function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// 估算文本需要的字号缩放系数（超出框宽/高时缩小），保证预览不溢出
-// 与 build.js 共享 scripts/shrink.js 同一算法
-function elHtml(el, page) {
-  const style = `left:${el.x || 0}px;top:${el.y || 0}px;width:${el.w || 0}px;height:${el.h || 0}px;`;
-  switch (el.type) {
-    case 'text': {
-      const { factor, fontSize: sfs, lineH: slh } = shrinkFactor(el);
-      const fs = sfs;
-      const lineH = slh;
-      const align = el.align || 'left';
-      const valign = el.valign || 'top';
-      const color = el.color || '#1A1A1A';
-      let inner;
-      if (el.runs && el.runs.length) {
-        inner = el.runs.map(r => {
-          const rfs = Math.round((r.fontSize || el.fontSize || 18) * factor);
-          return `<span style="font-weight:${r.bold ? 'bold' : 'normal'};font-style:${r.italic ? 'italic' : 'normal'};color:${r.color || color};font-size:${rfs}px">${esc(r.text)}</span>`;
-        }).join('');
-      } else {
-        inner = esc(el.text || '');
-      }
-      const lineHpx = lineH ? `line-height:${lineH / fs};` : '';
-      return `<div style="position:absolute;${style}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
-    }
-    case 'rect':
-    case 'roundRect': {
-      const bg = el.fill || 'transparent';
-      const opacity = el.opacity !== undefined ? `opacity:${el.opacity};` : '';
-      const radius = (el.type === 'roundRect' || el.radius !== undefined) ? `border-radius:${el.radius || 8}px;` : '';
-      const border = el.lineColor ? `border:${el.lineWidth || 1}px solid ${el.lineColor};` : '';
-      return `<div style="position:absolute;${style}background:${bg};${opacity}${radius}${border}"></div>`;
-    }
-    case 'ellipse': {
-      return `<div style="position:absolute;${style}background:${el.fill || 'transparent'};border-radius:50%;${el.opacity !== undefined ? `opacity:${el.opacity};` : ''}"></div>`;
-    }
-    case 'line': {
-      return `<svg style="position:absolute;left:${el.x1 || 0}px;top:${el.y1 || 0}px;overflow:visible" width="2" height="2"><line x1="0" y1="0" x2="${(el.x2 || 0) - (el.x1 || 0)}" y2="${(el.y2 || 0) - (el.y1 || 0)}" stroke="${el.color || '#1A1A1A'}" stroke-width="${el.width || 2}"/></svg>`;
-    }
-    case 'image': {
-      const rel = path.relative(process.cwd(), el.path).replace(/\\/g, '/');
-      const exists = fs.existsSync(el.path);
-      if (!exists) {
-        const cap = el.caption ? `图片占位 · ${el.caption}` : '图片占位';
-        return `<div style="position:absolute;${style};background:#E2E8F0;border-radius:${el.radius || 8}px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">`
-          + `<div style="font-size:16px;color:#64748B">${esc(cap)}</div>`
-          + `<div style="font-size:10px;color:#94A3B8;word-break:break-all;padding:0 12px">${esc(rel)}</div>`
-          + `</div>`;
-      }
-      const fit = el.objectFit === 'contain' ? 'contain' : 'cover';
-      return `<img src="${rel}" style="position:absolute;${style}object-fit:${fit}"/>`;
-    }
-    case 'chart': {
-      const labels = el.labels || [];
-      const series = el.series || [];
-      const rows = labels.map((lb, i) =>
-        `<tr><td>${esc(lb)}</td>${series.map(s => `<td>${esc(s.values[i])}</td>`).join('')}</tr>`).join('');
-      const head = `<tr><th></th>${series.map(s => `<th>${esc(s.name || '')}</th>`).join('')}</tr>`;
-      return `<div style="position:absolute;${style};border:1px dashed #94A3B8;border-radius:8px;padding:12px;box-sizing:border-box;overflow:auto;background:rgba(255,255,255,0.6)"><div style="font-size:12px;color:#64748B;margin-bottom:6px">[${el.chartType} 图表占位 · 以 .pptx 为准]</div><table style="border-collapse:collapse;font-size:12px">${head}${rows}</table></div>`;
-    }
-    case 'table': {
-      const rows = (el.rows || []).map(r =>
-        `<tr>${r.map(c => `<td style="border:1px solid ${el.borderColor || '#E2E8F0'};padding:6px 10px;font-weight:${c.bold ? 'bold' : 'normal'};color:${c.color || el.color || '#1A1A1A'}">${esc(c.text)}</td>`).join('')}</tr>`).join('');
-      return `<div style="position:absolute;${style};overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:${el.fontSize || 14}px">${rows}</table></div>`;
-    }
-    default:
-      return `<!-- 未知元素 ${el.type} -->`;
-  }
-}
-
 function pageHtml(page, idx, total, design) {
-  const bg = page.background || '#FFFFFF';
-  const body = page.elements.map(el => elHtml(el, page)).join('\n');
+  const themeId = page.theme || design.theme || 'generic';
+  const theme = THEMES[themeId] || THEMES.generic;
+  const body = page.elements.map(el => elHtml(el, page, theme)).join('\n');
+  const deco = decorationHtml(page, theme);
   const tag = `<span class="tag">${page.type} · ${page.role}</span>`;
-  return `<section class="slide" style="background:${bg}" data-id="${esc(page.id)}">
-    <div class="slide-inner">${body}</div>
+  const bgStyle = page.background ? page.background : themeCSS(themeId);
+  return `<section class="slide" data-theme="${themeId}" ${page.background?'data-custombg="1"':''} data-id="${esc(page.id)}" style="background:${bgStyle};color:${theme.palette.text}">
+    <div class="slide-inner">${deco}${body}</div>
     <div class="meta">${idx + 1} / ${total} ${tag}</div>
   </section>`;
 }
@@ -119,6 +51,10 @@ function main() {
   const { design, pages } = loadProject(projectDir);
   const slides = pages.map((p, i) => pageHtml(p, i, pages.length, design)).join('\n');
   const dots = pages.map((p, i) => `<button class="dot" data-i="${i}"></button>`).join('');
+
+  // 主题下拉选项
+  const themeOptions = Object.entries(THEMES)
+    .map(([id, t]) => `<option value="${id}">${esc(t.name)}</option>`).join('');
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -146,9 +82,17 @@ function main() {
   .dot { width:10px; height:10px; border-radius:5px; border:1px solid rgba(255,255,255,.4);
          background:transparent; cursor:pointer; transition:.2s; padding:0; }
   .dot.active { background:#3B82F6; border-color:#3B82F6; transform:scale(1.3); }
-  .hint { position:fixed; top:18px; right:18px; color:rgba(255,255,255,.4); font-size:12px; z-index:50; }
+  .hint { position:fixed; top:18px; right:90px; color:rgba(255,255,255,.4); font-size:12px; z-index:50; }
   .fullbtn { position:fixed; bottom:18px; right:18px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
              color:#E2E8F0; width:44px; height:44px; border-radius:22px; font-size:16px; cursor:pointer; z-index:50; }
+  /* 主题切换工具条 */
+  .theme-toolbar { position:fixed; top:18px; right:18px; z-index:60; display:flex; align-items:center; gap:8px;
+                   background:rgba(30,41,59,.9); padding:6px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.15); }
+  .theme-toolbar label { color:#94A3B8; font-size:12px; }
+  .theme-toolbar select { background:#1E293B; color:#E2E8F0; border:1px solid #334155; border-radius:6px;
+                          padding:4px 8px; font-size:13px; cursor:pointer; }
+  .theme-toolbar .tag-flash { font-size:11px; color:#4ADE80; opacity:0; transition:.3s; }
+  .theme-toolbar .tag-flash.show { opacity:1; }
 </style>
 </head>
 <body>
@@ -158,19 +102,25 @@ function main() {
     </div>
   </div>
   <div class="dots">${dots}</div>
+  <div class="theme-toolbar">
+    <label>主题</label>
+    <select id="themeSel">${themeOptions}</select>
+    <span class="tag-flash" id="flash">✓ 已切换</span>
+  </div>
   <div class="nav">
     <button id="prev">‹</button>
     <span class="counter"><span id="cur">1</span> / ${pages.length}</span>
     <button id="next">›</button>
   </div>
   <button class="fullbtn" id="full">⛶</button>
-  <div class="hint">← → 翻页 · 空格全屏 · 滚轮切页</div>
+  <div class="hint">← → 翻页 · 空格全屏 · 滚轮切页 · 右上切换主题</div>
 <script>
 (function(){
   var slides = document.querySelectorAll('.slide');
   var dots = document.querySelectorAll('.dot');
   var track = document.querySelector('.track');
   var cur = 0, total = slides.length, scTimer = null;
+  var themes = ${JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k,t])=>[k,{bg:t.bg,palette:t.palette,texture:t.texture}])))};
   function go(i){
     if(i < 0) i = 0; if(i >= total) i = total - 1;
     cur = i;
@@ -178,6 +128,36 @@ function main() {
     document.getElementById('cur').textContent = cur + 1;
     dots.forEach(function(d, k){ d.classList.toggle('active', k === cur); });
   }
+  function themeBg(th){
+    var bg = th.bg, tex = th.texture, p = th.palette, img = '';
+    if(tex === 'radial') img = '; background-image: radial-gradient(ellipse 60% 45% at 82% 12%, ' + p.primary + '33 0%, transparent 55%), radial-gradient(ellipse 50% 50% at 8% 88%, ' + p.accent + '2e 0%, transparent 50%)';
+    else if(tex === 'dot') img = '; background-image: radial-gradient(circle, ' + p.line + ' 1px, transparent 1px); background-size: 24px 24px';
+    else if(tex === 'grid') img = '; background-image: linear-gradient(' + p.line + ' 1px, transparent 1px), linear-gradient(90deg, ' + p.line + ' 1px, transparent 1px); background-size: 40px 40px';
+    return bg + img;
+  }
+  // 切换全局主题（预览只改视觉层：背景/文字色/装饰色变量；版式坐标不变）
+  var curTheme = document.querySelector('#themeSel').value;
+  function applyTheme(thId){
+    var th = themes[thId]; if(!th) return;
+    curTheme = thId;
+    document.querySelectorAll('.slide').forEach(function(s){
+      // 页面显式设了背景（如深色封面）不随主题切换覆盖，避免字色重叠
+      if(s.getAttribute('data-custombg') !== '1'){
+        s.style.background = themeBg(th);
+        s.style.color = th.palette.text;
+      }
+    });
+    // 装饰层用 CSS 变量重绘（渐变条/强调色依赖主题 palette）
+    document.documentElement.style.setProperty('--tp-primary', th.palette.primary);
+    document.documentElement.style.setProperty('--tp-accent', th.palette.accent);
+    document.documentElement.style.setProperty('--tp-line', th.palette.line);
+    document.documentElement.style.setProperty('--tp-sub', th.palette.sub);
+    document.documentElement.style.setProperty('--tp-text', th.palette.text);
+    var flash = document.getElementById('flash');
+    flash.classList.add('show');
+    setTimeout(function(){ flash.classList.remove('show'); }, 800);
+  }
+  document.getElementById('themeSel').addEventListener('change', function(e){ applyTheme(e.target.value); });
   function scale(){
     var vw = window.innerWidth, vh = window.innerHeight;
     var s = Math.min(vw / 1280, vh / 720);
@@ -198,6 +178,11 @@ function main() {
     scTimer = setTimeout(function(){ go(e.deltaY > 0 ? cur + 1 : cur - 1); }, 120);
   });
   window.addEventListener('resize', scale);
+  document.documentElement.style.setProperty('--tp-primary', themes[curTheme].palette.primary);
+  document.documentElement.style.setProperty('--tp-accent', themes[curTheme].palette.accent);
+  document.documentElement.style.setProperty('--tp-line', themes[curTheme].palette.line);
+  document.documentElement.style.setProperty('--tp-sub', themes[curTheme].palette.sub);
+  document.documentElement.style.setProperty('--tp-text', themes[curTheme].palette.text);
   scale(); go(0);
 })();
 </script>
@@ -206,7 +191,7 @@ function main() {
 
   fs.mkdirSync(path.dirname(path.resolve(outFile)), { recursive: true });
   fs.writeFileSync(path.resolve(outFile), html);
-  console.log(`✅ 翻页式预览已生成: ${path.resolve(outFile)}`);
+  console.log(`✅ 翻页式预览已生成（${pages.length} 页，${Object.keys(THEMES).length} 套主题可切换）: ${path.resolve(outFile)}`);
 }
 
 main();

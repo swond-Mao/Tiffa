@@ -449,19 +449,10 @@ export default async function (pi: any) {
       // (b) 项目级 PROJECT.md：项目根目录首次对话自动生成脚手架，并确定性注入 system prompt
       // 模板版本号：检测到旧版本时自动升级头部模板（保留用户正文内容）
       try {
-        let projectDir = process.cwd()
+        const projectDir = resolveProjectDir()
         
-        // 防止在程序运行目录（包含 Tiffa 可执行文件的目录）自动建项目
-        // 检测到程序运行目录时，切换到 workspace 作为默认项目目录
-        const EXECUTABLE_MARKERS = ["tiffa-desktop.exe", "tiffa-desktop", "main.js", "preload.js"]
-        const isPortableRoot = EXECUTABLE_MARKERS.some(marker => existsSync(join(projectDir, marker)))
-        if (isPortableRoot) {
-          projectDir = join(PORTABLE_ROOT, "workspace")
-          if (!existsSync(projectDir)) {
-            mkdirSync(projectDir, { recursive: true })
-          }
-          log("before_agent_start.project_dir", `检测到程序运行目录，切换到 workspace: ${projectDir}`)
-        }
+        // 防止在程序运行目录自动建项目：真实程序根（含可执行文件）切到 workspace；
+        // 基础目录（electron/、data/ 等）/ workspace 根由 resolveProjectDir 从 projects.json 解析最近项目，防工作目录漂移
         const projectMd = join(projectDir, "PROJECT.md")
         const SCAFFOLD_VERSION = "v2"
         const VERSION_MARKER = `<!-- scaffold:${SCAFFOLD_VERSION} -->`
@@ -662,6 +653,13 @@ export default async function (pi: any) {
               log("tool_call.blocked", `${tool} -> ${fp} (new workspace subdir: ${firstDir})`)
               return { block: true, reason: `[claude-mode] 禁止在 workspace 下新建项目目录 "${firstDir}"。` }
             }
+          }
+          // 禁止往 Tiffa 便携根目录（PORTABLE_ROOT）写文件：基础目录 = data/、electron/、python/、plugins/、home/ 等
+          // 工作产物只能放 workspace/ 下的项目目录；维护基础目录文件需用户明确要求并手动操作
+          const normRoot = resolve(PORTABLE_ROOT).replace(/\\/g, "/").toLowerCase()
+          if (normFp.startsWith(normRoot + "/") && !normFp.startsWith(normWs + "/")) {
+            log("tool_call.blocked", `${tool} -> ${fp} (write to Tiffa base dir)`)
+            return { block: true, reason: `[claude-mode] 禁止向 Tiffa 基础目录写文件：${fp}。Tiffa 的运行目录（data/、electron/、python/、plugins/ 等）不允许 AI 写入，工作产物请放到 workspace/ 下的项目目录。如需维护基础目录文件（如技能、配置），请由用户手动操作。` }
           }
         }
       }
@@ -1149,16 +1147,56 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
 3. 如果无法判断，输出：完成一次会话工作
 4. 用简洁陈述句概括改动内容，不要重复用户原话`
 
-  // 当前项目目录（扩展进程 cwd 即项目根目录）
-  // 防止在程序运行目录自动建项目：检测到程序运行目录时切换到 workspace
-  function currentProjectDir(): string {
-    let dir = process.cwd()
-    const EXECUTABLE_MARKERS = ["tiffa-desktop.exe", "tiffa-desktop", "main.js", "preload.js"]
-    const isPortableRoot = EXECUTABLE_MARKERS.some(marker => existsSync(join(dir, marker)))
-    if (isPortableRoot) {
-      dir = join(PORTABLE_ROOT, "workspace")
+  // ── 逻辑项目目录解析（防工作目录漂移）──
+  // 「程序运行目录」只看可执行文件标记；main.js/preload.js 可能是应用子目录的编译产物（dev 场景），不作为判据
+  function isProgramRootDir(dir: string): boolean {
+    const PROGRAM_MARKERS = ["tiffa-desktop.exe", "tiffa-desktop", "Tiffa.exe", "tiffa.exe"]
+    return PROGRAM_MARKERS.some(marker => existsSync(join(dir, marker)))
+  }
+
+  // 从 projects.json 取最近打开的项目目录（lastOpenedAt 最新且未归档）
+  function latestProjectFromJson(): string | null {
+    try {
+      const p = join(AGENT_DIR, "projects.json")
+      if (!existsSync(p)) return null
+      const data = JSON.parse(readFileSync(p, "utf8")) as { projects?: { cwd?: string; lastOpenedAt?: string; archived?: boolean }[] }
+      const projects = (data?.projects || []).filter(x => x.cwd && !x.archived)
+      if (projects.length === 0) return null
+      projects.sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
+      return projects[0].cwd || null
+    } catch {
+      return null
     }
-    return dir || join(PORTABLE_ROOT, "workspace")
+  }
+
+  // 解析「逻辑项目目录」：
+  // 1. 真实程序根（含可执行文件）-> workspace
+  // 2. cwd 在便携包基础目录内（electron/、data/、python/ 等）或 workspace 根 -> projects.json 最近项目 -> workspace 根
+  // 3. 其余（workspace 子项目 / PORTABLE_ROOT 外用户目录）-> 保持 cwd
+  function resolveProjectDir(): string {
+    const cwd = process.cwd()
+    if (isProgramRootDir(cwd)) {
+      log("project_dir.program_root", `检测到程序运行目录，切换到 workspace`)
+      return join(PORTABLE_ROOT, "workspace")
+    }
+    const rootNorm = resolve(PORTABLE_ROOT).toLowerCase()
+    const cwdNorm = resolve(cwd).toLowerCase()
+    const wsNorm = resolve(join(PORTABLE_ROOT, "workspace")).toLowerCase()
+    const inBase = cwdNorm === rootNorm || cwdNorm.startsWith(rootNorm + "\\")
+    if (!inBase) return cwd // PORTABLE_ROOT 之外：用户自定义目录
+    if (cwdNorm.startsWith(wsNorm + "\\")) return cwd // workspace 下子目录：正常项目
+    // workspace 根 或 基础目录：从 projects.json 取最近项目，避免把容器/基础目录当工作目录
+    const proj = latestProjectFromJson()
+    if (proj) {
+      log("project_dir.from_projects_json", `cwd=${cwd} -> 最近项目 ${proj}`)
+      return proj
+    }
+    return wsNorm
+  }
+
+  // 当前项目目录（扩展进程 cwd 即项目根目录；基础目录/容器目录时从 projects.json 解析，防漂移）
+  function currentProjectDir(): string {
+    return resolveProjectDir()
   }
 
   // 项目下 .progress 目录路径，并确保存在
