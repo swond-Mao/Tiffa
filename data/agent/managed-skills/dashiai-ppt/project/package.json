@@ -11,9 +11,11 @@
     "goal:scaffold": "node scripts/goal-scaffold.mjs",
     "validate:goal-spec": "node scripts/validate-goal-spec.mjs",
     "render:goal": "tsx scripts/render-goal-deck.jsx",
+    "render:goal:check": "node scripts/render-and-check.mjs",
+    "check:placeholders": "node scripts/check-placeholders.mjs",
     "preview:https": "node scripts/serve-preview-https.mjs",
     "preview:start": "node scripts/start-preview-server.mjs",
-  "render:themes": "node -e \"console.log('Theme preview render skipped')\"",
+    "render:themes": "node -e \"console.log('Theme preview render skipped')\"",
     "validate:swiss": "node scripts/validate-swiss-deck.mjs",
     "validate:goal-copy": "node scripts/validate-goal-copy.mjs",
     "export:pptx": "node scripts/export-pptx.mjs",
@@ -22,15 +24,16 @@
   "dependencies": {
     "gsap": "^3.15.0",
     "html-to-image": "^1.11.13",
+    "oh-my-tiffa": "file:../../../../../electron",
     "pptxgenjs": "^4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "tsx": "^4.20.0",
     "esbuild": "^0.28.0",
-    "pngjs": "^7.0.0",
+    "pdf-lib": "^1.17.1",
     "playwright-core": "^1.60.0",
-    "pdf-lib": "^1.17.1"
+    "pngjs": "^7.0.0",
+    "tsx": "^4.20.0"
   }
 }

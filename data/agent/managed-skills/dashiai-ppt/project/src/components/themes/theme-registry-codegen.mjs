@@ -10,7 +10,7 @@
 // 已接入主题(与 src/components/themes/theme* 目录、generated-metadata 的 themeKey 一致)。
 export const ALL_THEME_KEYS = [
   'theme01', 'theme02', 'theme03', 'theme04', 'theme05', 'theme06',
-  'theme07', 'theme08', 'theme09', 'theme10', 'theme11', 'theme12',
+  'theme07', 'theme08', 'theme09', 'theme10', 'theme11', 'theme12', 'theme13',
 ];
 
 // 各主题(可选)的图片槽 React context。没有 context 的主题(02/04/05/07/12)不出现在此表里,

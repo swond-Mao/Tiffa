@@ -118,10 +118,21 @@ export const GENERATED_THEME_PACKS = [
     "audience": "娱乐品牌、活动策划、内容团队、潮流消费品牌",
     "mode": "replace",
     "pageCount": 86
+  },
+  {
+    "key": "theme13",
+    "displayName": "公卫例会风",
+    "label": "公卫例会风",
+    "name": "公卫例会风",
+    "scenario": "政务汇报、医疗公卫、政策解读、学术会议",
+    "audience": "政府机构、医院、事业单位、研究机构",
+    "mode": "replace",
+    "pageCount": 71
   }
 ];
 
 export const GENERATED_THEME_PAGES = [
+
   {
     "key": "theme01_page001",
     "themeKey": "theme01",
@@ -180682,5 +180693,12563 @@ export const GENERATED_THEME_PAGES = [
         }
       ]
     }
+  },
+  {
+    "key": "theme13_page001",
+    "themeKey": "theme13",
+    "pageNumber": 1,
+    "layout": "THEME13-001",
+    "slot": "cover-lean-page",
+    "label": "封面 01",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "showSweep",
+        "label": "光晕扫光",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSweep",
+        "desc": "右上角放射光晕与透镜光斑装饰的显隐。"
+      },
+      {
+        "key": "showTags",
+        "label": "关键词标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTags",
+        "desc": "底部关键词标签行（降本 / 提效 …）的显隐。"
+      },
+      {
+        "key": "showBars",
+        "label": "条码图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBars",
+        "desc": "底部绿 / 琥珀 / 红条码图形的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0D100A",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色（作用于 Logo、条码与高亮）。"
+      }
+    ],
+    "defaultProps": {
+      "logo": "「请输入机构名称」",
+      "phase": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "titleL1": "「请输入标题」",
+      "titleL2": "「请输入标题」",
+      "year": "2026",
+      "sub": "「请输入内容」",
+      "tags": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "showSweep": true,
+      "showBars": true,
+      "showTags": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page002",
+    "themeKey": "theme13",
+    "pageNumber": 2,
+    "layout": "THEME13-002",
+    "slot": "cover-supply-chain-page",
+    "label": "封面 02",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "右侧主视觉图片槽数量（0–1）。"
+      },
+      {
+        "key": "images",
+        "label": "图片",
+        "type": "images",
+        "countKey": "imageCount",
+        "publicKey": "images",
+        "desc": "右侧主视觉可替换图片。"
+      },
+      {
+        "key": "showTimeline",
+        "label": "年份时间轴",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTimeline",
+        "desc": "正文下方 2026—2028 三年时间轴的显隐。"
+      },
+      {
+        "key": "showLenses",
+        "label": "透镜光斑",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLenses",
+        "desc": "右侧绿色面板上的透镜光斑装饰显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0D100A",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色（作用于结语短条与高亮）。"
+      }
+    ],
+    "defaultProps": {
+      "phaseLeft": "「请输入内容」",
+      "phaseRight": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "titleL1": "「请输入标题」",
+      "titleL2": "「请输入标题」",
+      "subPre": "「请输入内容」",
+      "years": "2026-2028",
+      "subPost": "「请输入内容」",
+      "summary": "「请输入内容」",
+      "logo": "「请输入机构名称」",
+      "photoLabel": "「请输入标签」",
+      "timeline": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "imageCount": 1,
+      "images": [],
+      "showTimeline": true,
+      "showLenses": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page003",
+    "themeKey": "theme13",
+    "pageNumber": 3,
+    "layout": "THEME13-003",
+    "slot": "cover-retail-trend-page",
+    "label": "封面 03",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "showCrumbs",
+        "label": "面包屑标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCrumbs",
+        "desc": "标题上方 RETAIL · OPERATION · GROWTH 面包屑显隐。"
+      },
+      {
+        "key": "showSlogan",
+        "label": "口号胶囊",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSlogan",
+        "desc": "深色口号胶囊条的显隐。"
+      },
+      {
+        "key": "showBase",
+        "label": "底部弧形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBase",
+        "desc": "底部绿色弧形台座（含透镜与条码）的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0D100A",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色（作用于分隔点与底部台座）。"
+      }
+    ],
+    "defaultProps": {
+      "logo": "「请输入机构名称」",
+      "phase": "「请输入内容」",
+      "crumbs": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "titleL1": "「请输入标题」",
+      "titleL2": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "slogan": "「请输入内容」",
+      "showCrumbs": true,
+      "showSlogan": true,
+      "showBase": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page004",
+    "themeKey": "theme13",
+    "pageNumber": 4,
+    "layout": "THEME13-004",
+    "slot": "cover-supply-strategy-page",
+    "label": "封面 04",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "showNetwork",
+        "label": "关系网络图",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showNetwork",
+        "desc": "右侧关系节点网络 SVG 装饰的显隐。"
+      },
+      {
+        "key": "showFrame",
+        "label": "内描边框",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showFrame",
+        "desc": "高级感内描边框的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F5A623",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#FFFFFF",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色（作用于网络节点、高亮词与短条）。"
+      }
+    ],
+    "defaultProps": {
+      "markCn": "「请输入机构名称」",
+      "markEn": "「请输入机构名称」",
+      "pageno": "03 / 04",
+      "pill": "「请输入内容」",
+      "eyebrow": "「请输入内容」",
+      "titleL1": "「请输入标题」",
+      "titleL2": "「请输入标题」",
+      "summary": "「请输入内容」",
+      "footEn": "ENTER CONTENT",
+      "showNetwork": true,
+      "showFrame": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page005",
+    "themeKey": "theme13",
+    "pageNumber": 5,
+    "layout": "THEME13-005",
+    "slot": "cover-page",
+    "label": "封面 05",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "backgroundVariant",
+        "label": "背景风格",
+        "type": "radio",
+        "default": "gradient",
+        "options": [
+          {
+            "value": "gradient",
+            "label": "光晕"
+          },
+          {
+            "value": "solid",
+            "label": "纯色"
+          },
+          {
+            "value": "dark",
+            "label": "深色"
+          }
+        ],
+        "publicKey": "backgroundVariant",
+        "desc": "封面底色与氛围：浅色 + 渐变光晕 / 纯净浅色 / 深色反白。"
+      },
+      {
+        "key": "heroMotif",
+        "label": "主视觉",
+        "type": "radio",
+        "default": "both",
+        "options": [
+          {
+            "value": "lens",
+            "label": "透镜"
+          },
+          {
+            "value": "number",
+            "label": "数字"
+          },
+          {
+            "value": "both",
+            "label": "组合"
+          }
+        ],
+        "publicKey": "heroMotif",
+        "desc": "右侧主视觉：品牌透镜光斑 / 大号焦点数字 / 两者组合。"
+      },
+      {
+        "key": "numberSlant",
+        "label": "数字倾斜",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "numberSlant",
+        "desc": "大号数字采用品牌标志性的倾斜处理。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰元素",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "顶部标签、底部热力条与角落光晕等装饰细节的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于渐变、透镜、数字与高亮。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "reportTag": "「请输入标签」",
+      "titleL1": "「请输入标题」",
+      "titleL2Em": "「请输入标题」",
+      "titleL2Rest": "「请输入标题」",
+      "brandLabel": "「请输入机构名称」",
+      "brandSub": "「请输入内容」",
+      "sub": "「请输入内容」",
+      "thesis": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "featureNumber": "2024",
+      "featureLabel": "「请输入标签」",
+      "specs": [
+        {
+          "0": "「请输入内容」",
+          "1": "2024"
+        },
+        {
+          "0": "「请输入内容」",
+          "1": "「请输入内容」"
+        },
+        {
+          "0": "「请输入内容」",
+          "1": "「请输入内容」"
+        },
+        {
+          "0": "「请输入内容」",
+          "1": "「请输入内容」"
+        }
+      ],
+      "backgroundVariant": "「请输入内容」",
+      "heroMotif": "「请输入内容」",
+      "numberSlant": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page006",
+    "themeKey": "theme13",
+    "pageNumber": 6,
+    "layout": "THEME13-006",
+    "slot": "summary-page",
+    "label": "页面 06",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "cardCount",
+        "label": "指标卡数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "底部核心指标卡的数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮其中一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bars",
+        "options": [
+          {
+            "value": "bars",
+            "label": "占比条"
+          },
+          {
+            "value": "donut",
+            "label": "环形图"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "右侧分类占比的呈现方式。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "关键词标签与背景光晕等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "keywords": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "closing": "「请输入内容」",
+      "chartTitle": "「请输入标题」",
+      "shareLabel": "「请输入标签」",
+      "tracks": [
+        {
+          "label": "「请输入标签」",
+          "pct": 43.3
+        },
+        {
+          "label": "「请输入标签」",
+          "pct": 25.3
+        },
+        {
+          "label": "「请输入标签」",
+          "pct": 16.3
+        },
+        {
+          "label": "「请输入标签」",
+          "pct": 10
+        },
+        {
+          "label": "「请输入标签」",
+          "pct": 5.1
+        }
+      ],
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "lead": "「请输入内容」",
+          "tail": "「请输入内容」",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "lead": "「请输入内容」",
+          "tail": "「请输入内容」",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "lead": "「请输入内容」",
+          "tail": "「请输入内容」",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "lead": "「请输入内容」",
+          "tail": "「请输入内容」",
+          "unit": "「单位」"
+        }
+      ],
+      "cardCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "chartType": "「请输入内容」",
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page007",
+    "themeKey": "theme13",
+    "pageNumber": 7,
+    "layout": "THEME13-007",
+    "slot": "contents-page",
+    "label": "目录 07",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "cardCount",
+        "label": "章节卡数量",
+        "type": "slider",
+        "default": 8,
+        "min": 3,
+        "max": 8,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "展示的章节卡数量（3–8）。"
+      },
+      {
+        "key": "columns",
+        "label": "每行列数",
+        "type": "radio",
+        "default": 4,
+        "options": [
+          {
+            "value": 3,
+            "label": "3 列"
+          },
+          {
+            "value": 4,
+            "label": "4 列"
+          }
+        ],
+        "dependsOn": "cardCount",
+        "dependsOnValues": [
+          3,
+          4,
+          5,
+          6
+        ],
+        "publicKey": "columns",
+        "desc": "章节卡的网格列数；3 列仅用于 6 张以内。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一章节卡作为阅读重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 1,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          },
+          {
+            "value": 4,
+            "label": "第 5 个"
+          },
+          {
+            "value": 5,
+            "label": "第 6 个"
+          },
+          {
+            "value": 6,
+            "label": "第 7 个"
+          },
+          {
+            "value": 7,
+            "label": "第 8 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的章节卡。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "序号水印与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chapters": [
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT"
+        }
+      ],
+      "cardCount": 8,
+      "focusEnabled": true,
+      "focusIndex": 1,
+      "columns": 4,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page008",
+    "themeKey": "theme13",
+    "pageNumber": 8,
+    "layout": "THEME13-008",
+    "slot": "method-page",
+    "label": "页面 08",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "cardCount",
+        "label": "方法卡数量",
+        "type": "slider",
+        "default": 3,
+        "min": 1,
+        "max": 3,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "展示的方法层数量（1–3）。"
+      },
+      {
+        "key": "layout",
+        "label": "排布方式",
+        "type": "radio",
+        "default": "stack",
+        "options": [
+          {
+            "value": "stack",
+            "label": "堆叠"
+          },
+          {
+            "value": "row",
+            "label": "并排"
+          }
+        ],
+        "publicKey": "layout",
+        "desc": "方法卡的排布：纵向堆叠或横向并排。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一方法层作为重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 2,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的方法卡。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "底部方法链与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "layers": [
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "desc": "「请输入内容」",
+          "q": "「请输入内容」"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "desc": "「请输入内容」",
+          "q": "「请输入内容」"
+        },
+        {
+          "no": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "desc": "「请输入内容」",
+          "q": "「请输入内容」"
+        }
+      ],
+      "steps": [
+        {
+          "label": "「请输入标签」",
+          "detail": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "detail": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "detail": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "detail": "「请输入内容」"
+        }
+      ],
+      "cardCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 2,
+      "layout": "stack",
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page009",
+    "themeKey": "theme13",
+    "pageNumber": 9,
+    "layout": "THEME13-009",
+    "slot": "case-page",
+    "label": "案例页 09",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "cardCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 1,
+        "max": 3,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "展示的案例卡数量（1–3）。"
+      },
+      {
+        "key": "imageCount",
+        "label": "图片呈现",
+        "type": "radio",
+        "default": 3,
+        "options": [
+          {
+            "value": 0,
+            "label": "纯色纹理"
+          },
+          {
+            "value": 3,
+            "label": "全部图片"
+          }
+        ],
+        "publicKey": "imageCount",
+        "desc": "仅支持两种模式：所有卡片使用绿色纹理，或所有卡片使用图片。"
+      },
+      {
+        "key": "images",
+        "label": "图片",
+        "type": "images",
+        "countKey": "imageCount",
+        "publicKey": "images",
+        "desc": "案例卡片可替换图片。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张案例卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的案例卡。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "重点标签、背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "cases": [
+        {
+          "logic": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "zh": "「请输入内容」",
+          "chips": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "lead": "「请输入内容」",
+          "plus": true,
+          "unit": "「单位」",
+          "metricLabel": "「请输入标签」"
+        },
+        {
+          "logic": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "zh": "「请输入内容」",
+          "chips": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "lead": "「请输入内容」",
+          "unit": "「单位」",
+          "metricLabel": "「请输入标签」"
+        },
+        {
+          "logic": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "zh": "「请输入内容」",
+          "chips": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "lead": "「请输入内容」",
+          "unit": "「单位」",
+          "metricLabel": "「请输入标签」"
+        }
+      ],
+      "cardCount": 3,
+      "imageCount": 3,
+      "images": [],
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page010",
+    "themeKey": "theme13",
+    "pageNumber": 10,
+    "layout": "THEME13-010",
+    "slot": "monthly-page",
+    "label": "页面 10",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bars",
+        "options": [
+          {
+            "value": "bars",
+            "label": "热力柱"
+          },
+          {
+            "value": "grid",
+            "label": "热力格"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "月度热度的呈现方式：竖向热力柱 / 方格热力图。"
+      },
+      {
+        "key": "showSecondary",
+        "label": "辅助序列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSecondary",
+        "desc": "叠加月度均值参考线。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个月作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 7,
+        "options": [
+          {
+            "value": 0,
+            "label": "1 月"
+          },
+          {
+            "value": 1,
+            "label": "2 月"
+          },
+          {
+            "value": 2,
+            "label": "3 月"
+          },
+          {
+            "value": 3,
+            "label": "4 月"
+          },
+          {
+            "value": 4,
+            "label": "5 月"
+          },
+          {
+            "value": 5,
+            "label": "6 月"
+          },
+          {
+            "value": 6,
+            "label": "7 月"
+          },
+          {
+            "value": 7,
+            "label": "8 月"
+          },
+          {
+            "value": 8,
+            "label": "9 月"
+          },
+          {
+            "value": 9,
+            "label": "10 月"
+          },
+          {
+            "value": 10,
+            "label": "11 月"
+          },
+          {
+            "value": 11,
+            "label": "12 月"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的月份。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "峰值标记、背景光晕与底部条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于热度配色与高亮。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "anchorLead": "「请输入内容」",
+      "anchorUnit": "「单位」",
+      "anchorNote": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "axisLabel": "「请输入标签」",
+      "months": [
+        45,
+        58,
+        59,
+        86,
+        105,
+        93,
+        92,
+        118,
+        108,
+        73,
+        81,
+        52
+      ],
+      "peaks": [
+        4,
+        7,
+        8
+      ],
+      "avg": 80.8,
+      "chartType": "「请输入内容」",
+      "focusEnabled": true,
+      "focusIndex": 7,
+      "showSecondary": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page011",
+    "themeKey": "theme13",
+    "pageNumber": 11,
+    "layout": "THEME13-011",
+    "slot": "ranking-page",
+    "label": "排名页 11",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "公司数量",
+        "type": "slider",
+        "default": 10,
+        "min": 5,
+        "max": 10,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "榜单展示的公司数量（5–10）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮榜单前列作为视觉重点。"
+      },
+      {
+        "key": "focusCount",
+        "label": "重点数量",
+        "type": "slider",
+        "default": 3,
+        "min": 1,
+        "max": 3,
+        "step": 1,
+        "publicKey": "itemCount",
+        "desc": "高亮的前列条目数量（前 N 名）。"
+      },
+      {
+        "key": "showSecondary",
+        "label": "分类配色",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSecondary",
+        "desc": "按分类为条形与圆点配色；关闭后为单色。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "分类图例、背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "note": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "companies": [
+        {
+          "name": "「请输入机构名称」",
+          "amount": 66,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 65,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 50,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 11,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 10,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 10,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 6.8,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 5.2,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 5,
+          "track": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "amount": 2.6,
+          "track": "「请输入内容」"
+        }
+      ],
+      "rowCount": 10,
+      "focusEnabled": true,
+      "focusCount": 3,
+      "showSecondary": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page012",
+    "themeKey": "theme13",
+    "pageNumber": 12,
+    "layout": "THEME13-012",
+    "slot": "matrix-page",
+    "label": "页面 12",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一象限作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "明星兑现"
+          },
+          {
+            "value": 1,
+            "label": "叙事泡沫"
+          },
+          {
+            "value": 2,
+            "label": "隐形价值"
+          },
+          {
+            "value": 3,
+            "label": "等待验证"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的象限。"
+      },
+      {
+        "key": "showSecondary",
+        "label": "辅助信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSecondary",
+        "desc": "各象限代表方向标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "坐标轴标签、箭头与背景光晕等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "axisX": "「请输入内容」",
+      "axisY": "「请输入内容」",
+      "axisYNote": "「请输入内容」",
+      "axisXNote": "「请输入内容」",
+      "quadrants": [
+        {
+          "name": "「请输入机构名称」",
+          "pos": "「请输入内容」",
+          "dirs": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "tone": "accent",
+          "col": 2,
+          "row": 1
+        },
+        {
+          "name": "「请输入机构名称」",
+          "pos": "「请输入内容」",
+          "dirs": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "tone": "warn",
+          "col": 1,
+          "row": 1
+        },
+        {
+          "name": "「请输入机构名称」",
+          "pos": "「请输入内容」",
+          "dirs": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "tone": "ink",
+          "col": 2,
+          "row": 2
+        },
+        {
+          "name": "「请输入机构名称」",
+          "pos": "「请输入内容」",
+          "dirs": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "tone": "faint",
+          "col": 1,
+          "row": 2
+        }
+      ],
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showSecondary": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page013",
+    "themeKey": "theme13",
+    "pageNumber": 13,
+    "layout": "THEME13-013",
+    "slot": "risk-page",
+    "label": "风险页 13",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "cardCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 5,
+        "min": 2,
+        "max": 5,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "展示的状态卡数量（2–5）。"
+      },
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉图片槽数量（0–1）；为 0 时状态卡占据整页宽度。图片以裁切填充侧栏，可双击重新取景。"
+      },
+      {
+        "key": "showSecondary",
+        "label": "辅助信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSecondary",
+        "desc": "顶部状态传导链的显隐。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一项状态作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          },
+          {
+            "value": 4,
+            "label": "第 5 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的状态卡。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "警示标记、背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "chainTitle": "「请输入标题」",
+      "closing": "「请输入内容」",
+      "risks": [
+        {
+          "node": "「请输入内容」",
+          "title": "「请输入标题」",
+          "desc": "「请输入内容」"
+        },
+        {
+          "node": "「请输入内容」",
+          "title": "「请输入标题」",
+          "desc": "「请输入内容」"
+        },
+        {
+          "node": "「请输入内容」",
+          "title": "「请输入标题」",
+          "desc": "「请输入内容」"
+        },
+        {
+          "node": "「请输入内容」",
+          "title": "「请输入标题」",
+          "desc": "「请输入内容」"
+        },
+        {
+          "node": "「请输入内容」",
+          "title": "「请输入标题」",
+          "desc": "「请输入内容」"
+        }
+      ],
+      "cardCount": 5,
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showSecondary": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page014",
+    "themeKey": "theme13",
+    "pageNumber": 14,
+    "layout": "THEME13-014",
+    "slot": "outlook-page",
+    "label": "页面 14",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "columnCount",
+        "label": "对比栏数量",
+        "type": "slider",
+        "default": 2,
+        "min": 1,
+        "max": 2,
+        "step": 1,
+        "publicKey": "columnCount",
+        "desc": "并排对比栏数量（1–2）；为 1 时单栏占据整行。"
+      },
+      {
+        "key": "itemCount",
+        "label": "条目数量",
+        "type": "slider",
+        "default": 3,
+        "min": 1,
+        "max": 3,
+        "step": 1,
+        "publicKey": "itemCount",
+        "desc": "每个对比栏内的方向条目数量（1–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个对比栏作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 栏"
+          },
+          {
+            "value": 1,
+            "label": "第 2 栏"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的对比栏。"
+      },
+      {
+        "key": "showTimeline",
+        "label": "阶段时间轴",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTimeline",
+        "desc": "底部阶段性时间轴的显隐。"
+      },
+      {
+        "key": "nodeCount",
+        "label": "节点数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "nodeCount",
+        "desc": "时间轴上的阶段节点数量（2–3）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "timelineLabel": "「请输入标签」",
+      "columns": [
+        {
+          "kind": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "tone": "accent",
+          "items": [
+            {
+              "name": "「请输入机构名称」",
+              "note": "「请输入内容」"
+            },
+            {
+              "name": "「请输入机构名称」",
+              "note": "「请输入内容」"
+            },
+            {
+              "name": "「请输入机构名称」",
+              "note": "「请输入内容」"
+            }
+          ]
+        },
+        {
+          "kind": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "tone": "neg",
+          "items": [
+            {
+              "name": "「请输入机构名称」",
+              "note": "「请输入内容」"
+            },
+            {
+              "name": "「请输入机构名称」",
+              "note": "「请输入内容」"
+            },
+            {
+              "name": "「请输入机构名称」",
+              "note": "「请输入内容」"
+            }
+          ]
+        }
+      ],
+      "nodes": [
+        {
+          "year": "2025",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "year": "2026",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "year": "2027",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "columnCount": 2,
+      "itemCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showTimeline": true,
+      "nodeCount": 3,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page015",
+    "themeKey": "theme13",
+    "pageNumber": 15,
+    "layout": "THEME13-015",
+    "slot": "quote-page",
+    "label": "引言页 15",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "align",
+        "label": "对齐方式",
+        "type": "radio",
+        "default": "center",
+        "options": [
+          {
+            "value": "center",
+            "label": "居中"
+          },
+          {
+            "value": "left",
+            "label": "左对齐"
+          }
+        ],
+        "publicKey": "align",
+        "desc": "金句与辅助信息的整体对齐方式。"
+      },
+      {
+        "key": "showConclusions",
+        "label": "辅助信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showConclusions",
+        "desc": "底部核心结论行的显隐。"
+      },
+      {
+        "key": "conclusionCount",
+        "label": "结论数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "itemCount",
+        "desc": "展示的核心结论条目数量（0–3）。"
+      },
+      {
+        "key": "showQuoteMark",
+        "label": "引号装饰",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showQuoteMark",
+        "desc": "超大引号装饰符号的显隐。"
+      },
+      {
+        "key": "showSource",
+        "label": "数据来源",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSource",
+        "desc": "底部数据来源说明行的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、镜头光斑与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于金句重点词与装饰。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "quoteLead": "「请输入内容」",
+      "quoteEm1": "「请输入内容」",
+      "quoteMid": "「请输入内容」",
+      "quoteEm2": "「请输入内容」",
+      "quoteTail": "「请输入内容」",
+      "conclusions": [
+        {
+          "idx": "「请输入内容」",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "idx": "「请输入内容」",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "idx": "「请输入内容」",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "source": "「数据来源」",
+      "align": "center",
+      "showConclusions": true,
+      "conclusionCount": 3,
+      "showQuoteMark": true,
+      "showSource": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page016",
+    "themeKey": "theme13",
+    "pageNumber": 16,
+    "layout": "THEME13-016",
+    "slot": "chapter-page",
+    "label": "章节页 16",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "backgroundVariant",
+        "label": "背景风格",
+        "type": "radio",
+        "default": "dark",
+        "options": [
+          {
+            "value": "dark",
+            "label": "深色"
+          },
+          {
+            "value": "paper",
+            "label": "浅色"
+          }
+        ],
+        "publicKey": "backgroundVariant",
+        "desc": "章节页背景：深色（强换气节奏）/ 浅色（与正文统一）。"
+      },
+      {
+        "key": "layout",
+        "label": "排版",
+        "type": "radio",
+        "default": "left",
+        "options": [
+          {
+            "value": "left",
+            "label": "左对齐"
+          },
+          {
+            "value": "center",
+            "label": "居中"
+          }
+        ],
+        "publicKey": "layout",
+        "desc": "标题与关键词的整体排布方式。"
+      },
+      {
+        "key": "showIndex",
+        "label": "章节序号",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showIndex",
+        "desc": "超大章节编号水印的显隐。"
+      },
+      {
+        "key": "showKeywords",
+        "label": "关键词",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showKeywords",
+        "desc": "本章关键词标签行的显隐。"
+      },
+      {
+        "key": "keywordCount",
+        "label": "关键词数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "keywordCount",
+        "desc": "展示的关键词数量（2–4）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "镜头光斑、背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "index": "02",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "keywords": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "backgroundVariant": "dark",
+      "layout": "left",
+      "showIndex": true,
+      "showKeywords": true,
+      "keywordCount": 4,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page017",
+    "themeKey": "theme13",
+    "pageNumber": 17,
+    "layout": "THEME13-017",
+    "slot": "deal-map-page",
+    "label": "页面 17",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "viewMode",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "scatter",
+        "options": [
+          {
+            "value": "scatter",
+            "label": "散点"
+          },
+          {
+            "value": "cluster",
+            "label": "聚合气泡"
+          }
+        ],
+        "publicKey": "viewMode",
+        "desc": "散点：逐笔交易点阵；聚合气泡：每个区间汇总为一个气泡。"
+      },
+      {
+        "key": "bandCount",
+        "label": "分组数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "bandCount",
+        "desc": "数值区间分组数量（2–4）。"
+      },
+      {
+        "key": "bubbleScale",
+        "label": "气泡大小",
+        "type": "slider",
+        "default": 1,
+        "min": 0.6,
+        "max": 1.4,
+        "step": 0.1,
+        "publicKey": "bubbleScale",
+        "desc": "气泡整体大小比例。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一数值区间作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 3,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 组"
+          },
+          {
+            "value": 1,
+            "label": "第 2 组"
+          },
+          {
+            "value": 2,
+            "label": "第 3 组"
+          },
+          {
+            "value": 3,
+            "label": "第 4 组"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的数值区间。"
+      },
+      {
+        "key": "showLegend",
+        "label": "图例",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLegend",
+        "desc": "分类颜色图例的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "anchorLead": "「请输入内容」",
+      "anchorUnit": "「单位」",
+      "anchorNote": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "legendLabel": "ENTER CONTENT",
+      "bands": [
+        {
+          "range": "「请输入内容」",
+          "count": 41,
+          "mid": 1.5,
+          "total": 58
+        },
+        {
+          "range": "「请输入内容」",
+          "count": 29,
+          "mid": 3.5,
+          "total": 91
+        },
+        {
+          "range": "「请输入内容」",
+          "count": 15,
+          "mid": 7.5,
+          "total": 103
+        },
+        {
+          "range": "「请输入内容」",
+          "count": 12,
+          "mid": 18,
+          "total": 718
+        }
+      ],
+      "tracks": [
+        {
+          "name": "「请输入机构名称」",
+          "tone": "accent"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tone": "ink"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tone": "pos"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tone": "warn"
+        }
+      ],
+      "viewMode": "「请输入内容」",
+      "bandCount": 4,
+      "bubbleScale": 1,
+      "focusEnabled": true,
+      "focusIndex": 3,
+      "showLegend": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page018",
+    "themeKey": "theme13",
+    "pageNumber": 18,
+    "layout": "THEME13-018",
+    "slot": "cold-start-page",
+    "label": "页面 18",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bars",
+        "options": [
+          {
+            "value": "bars",
+            "label": "柱状"
+          },
+          {
+            "value": "line",
+            "label": "折线"
+          },
+          {
+            "value": "area",
+            "label": "面积"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主图表（月度序列）的呈现方式：柱状 / 折线 / 面积。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "指标卡数量（2–4）；自动重排为完整网格。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showContext",
+        "label": "背景对比",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showContext",
+        "desc": "全年时间段对比条的显隐，用于交代当前时间段在全年中的位置。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于图表、时间段标记与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "season": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartLabel": "「请输入标签」",
+      "months": [
+        {
+          "m": "「请输入内容」",
+          "amount": 45
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 58
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 59
+        }
+      ],
+      "context": [
+        {
+          "q": "「请输入内容」",
+          "amount": 162
+        },
+        {
+          "q": "「请输入内容」",
+          "amount": 284
+        },
+        {
+          "q": "「请输入内容」",
+          "amount": 318
+        },
+        {
+          "q": "「请输入内容」",
+          "amount": 206
+        }
+      ],
+      "contextActive": 0,
+      "contextLabel": "「请输入标签」",
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "162",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "18",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "9.0",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "32",
+          "unit": "「单位」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showContext": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page019",
+    "themeKey": "theme13",
+    "pageNumber": 19,
+    "layout": "THEME13-019",
+    "slot": "accelerate-page",
+    "label": "页面 19",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 4,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "表格展示的行数量（3–5）。"
+      },
+      {
+        "key": "showChange",
+        "label": "环比列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showChange",
+        "desc": "环比变化列（涨跌徽标）的显隐。"
+      },
+      {
+        "key": "showJudgment",
+        "label": "判断列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showJudgment",
+        "desc": "信号判断列的显隐；关闭后表格更紧凑。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于时间段标记、高亮行与锚点数字。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "season": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "val": "「请输入数值」",
+        "chg": "「请输入数值」",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "val": "120",
+          "unit": "「单位」",
+          "chg": "「请输入数值」",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "val": "74",
+          "unit": "「单位」",
+          "chg": "「请输入数值」",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "val": "54",
+          "unit": "「单位」",
+          "chg": "「请输入数值」",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "val": "22",
+          "unit": "「单位」",
+          "chg": "「请输入数值」",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "val": "14",
+          "unit": "「单位」",
+          "chg": "「请输入数值」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "rowCount": 4,
+      "showChange": true,
+      "showJudgment": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page020",
+    "themeKey": "theme13",
+    "pageNumber": 20,
+    "layout": "THEME13-020",
+    "slot": "peak-page",
+    "label": "页面 20",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "area",
+        "options": [
+          {
+            "value": "area",
+            "label": "面积图"
+          },
+          {
+            "value": "bars",
+            "label": "柱状图"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主视觉信息图表样式：高亮面积图 / 月度柱状图。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "峰值指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showPeakMarker",
+        "label": "峰值标记",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "图表上峰值月份的标记与数值气泡的显隐。"
+      },
+      {
+        "key": "showAverage",
+        "label": "均值线",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showAverage",
+        "desc": "全年月度均值参考线的显隐。"
+      },
+      {
+        "key": "showQuarterBand",
+        "label": "区间高亮",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showQuarterBand",
+        "desc": "当前时间段（Q3 · 7—9 月）高亮背景带的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于时间段标记、图表与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "season": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartLabel": "「请输入标签」",
+      "peakTag": "「请输入标签」",
+      "avgLabel": "「请输入标签」",
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "318",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "31",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "10.3",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "8",
+          "unit": "「单位」"
+        }
+      ],
+      "months": [
+        45,
+        58,
+        59,
+        86,
+        105,
+        93,
+        92,
+        118,
+        108,
+        73,
+        81,
+        52
+      ],
+      "monthLabels": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "peakIndex": 7,
+      "avg": 80.8,
+      "q3Range": [
+        6,
+        8
+      ],
+      "chartType": "「请输入内容」",
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showPeakMarker": true,
+      "showAverage": true,
+      "showQuarterBand": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page021",
+    "themeKey": "theme13",
+    "pageNumber": 21,
+    "layout": "THEME13-021",
+    "slot": "cooldown-page",
+    "label": "页面 21",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "nodeCount",
+        "label": "节点数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "nodeCount",
+        "desc": "时间轴 / 曲线上的阶段节点数量（2–4）。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个时间轴节点作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 3,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的节点。"
+      },
+      {
+        "key": "showCurve",
+        "label": "趋势曲线",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCurve",
+        "desc": "年度回落曲线（面积 + 折线）的显隐。"
+      },
+      {
+        "key": "showBaseline",
+        "label": "基准参考线",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBaseline",
+        "desc": "年初水平虚线参考线的显隐，用于交代“仍处高位”。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于曲线、高亮节点与指标卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "season": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "baselineLabel": "「请输入标签」",
+      "chartLabel": "「请输入标签」",
+      "declineLabel": "「请输入标签」",
+      "declineValue": "「请输入内容」",
+      "nodes": [
+        {
+          "q": "「请输入内容」",
+          "amount": 162,
+          "phase": "「请输入内容」",
+          "note": "「请输入内容」"
+        },
+        {
+          "q": "「请输入内容」",
+          "amount": 284,
+          "phase": "「请输入内容」",
+          "note": "「请输入内容」"
+        },
+        {
+          "q": "「请输入内容」",
+          "amount": 318,
+          "phase": "「请输入内容」",
+          "note": "「请输入内容」"
+        },
+        {
+          "q": "「请输入内容」",
+          "amount": 206,
+          "phase": "「请输入内容」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "activeIndex": 3,
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "206",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "22",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "9.4",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "-35.2%",
+          "unit": "「单位」",
+          "badge": true
+        }
+      ],
+      "nodeCount": 4,
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 3,
+      "showCurve": true,
+      "showBaseline": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page022",
+    "themeKey": "theme13",
+    "pageNumber": 22,
+    "layout": "THEME13-022",
+    "slot": "peak-trough-page",
+    "label": "页面 22",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bars",
+        "options": [
+          {
+            "value": "bars",
+            "label": "柱状"
+          },
+          {
+            "value": "lollipop",
+            "label": "棒点"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主图表样式：实心柱状 / 棒棒糖（细杆 + 圆点）。"
+      },
+      {
+        "key": "barCount",
+        "label": "柱子数量",
+        "type": "slider",
+        "default": 12,
+        "min": 6,
+        "max": 12,
+        "step": 1,
+        "publicKey": "barCount",
+        "desc": "展示的月份数量（6–12），自右向左裁剪。"
+      },
+      {
+        "key": "highlightExtremes",
+        "label": "峰谷高亮",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "highlightExtremes",
+        "desc": "是否用强调色 / 警示色区分峰值与低位月份。"
+      },
+      {
+        "key": "showAverage",
+        "label": "均值参考线",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showAverage",
+        "desc": "全年平均水平虚线参考线的显隐。"
+      },
+      {
+        "key": "calloutCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 4,
+        "step": 1,
+        "publicKey": "calloutCount",
+        "desc": "峰谷信息卡数量（0–4）；为 0 时仅保留图表。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张峰谷信息卡。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的信息卡。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于峰值柱、均值线与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartLabel": "「请输入标签」",
+      "avgLabel": "「请输入标签」",
+      "months": [
+        {
+          "m": "「请输入内容」",
+          "amount": 45,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 58,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 59,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 86,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 105,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 93,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 92,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 118,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 108,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 73,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 81,
+          "kind": "「请输入内容」"
+        },
+        {
+          "m": "「请输入内容」",
+          "amount": 52,
+          "kind": "「请输入内容」"
+        }
+      ],
+      "extremes": [
+        {
+          "tag": "「请输入标签」",
+          "m": "「请输入内容」",
+          "value": "118",
+          "unit": "「单位」",
+          "dir": "「请输入内容」"
+        },
+        {
+          "tag": "「请输入标签」",
+          "m": "「请输入内容」",
+          "value": "108",
+          "unit": "「单位」",
+          "dir": "「请输入内容」"
+        },
+        {
+          "tag": "「请输入标签」",
+          "m": "「请输入内容」",
+          "value": "45",
+          "unit": "「单位」",
+          "dir": "「请输入内容」"
+        },
+        {
+          "tag": "「请输入标签」",
+          "m": "「请输入内容」",
+          "value": "52",
+          "unit": "「单位」",
+          "dir": "「请输入内容」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "barCount": 12,
+      "highlightExtremes": true,
+      "showAverage": true,
+      "calloutCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page023",
+    "themeKey": "theme13",
+    "pageNumber": 23,
+    "layout": "THEME13-023",
+    "slot": "waterfall-page",
+    "label": "页面 23",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "stepCount",
+        "label": "台阶数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "stepCount",
+        "desc": "瀑布图的贡献台阶数量（3–5）；合计自动重算。"
+      },
+      {
+        "key": "showTotal",
+        "label": "合计列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTotal",
+        "desc": "末尾全年合计落地柱的显隐。"
+      },
+      {
+        "key": "showConnectors",
+        "label": "连接线",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showConnectors",
+        "desc": "台阶之间的虚线连接线的显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "每个台阶上方增量数值的显隐。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个贡献台阶作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          },
+          {
+            "value": 4,
+            "label": "第 5 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的台阶。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于高亮台阶、合计柱与连接线。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartLabel": "「请输入标签」",
+      "totalLabel": "「请输入标签」",
+      "totalUnit": "「单位」",
+      "steps": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 420,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 245,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 158,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 97,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 50,
+          "note": "「请输入内容」"
+        }
+      ],
+      "stepCount": 5,
+      "showTotal": true,
+      "showConnectors": true,
+      "showValues": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page024",
+    "themeKey": "theme13",
+    "pageNumber": 24,
+    "layout": "THEME13-024",
+    "slot": "deal-size-page",
+    "label": "页面 24",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 4,
+        "min": 1,
+        "max": 4,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "数值区间分组数量（1–4）。"
+      },
+      {
+        "key": "metricMode",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "both",
+        "options": [
+          {
+            "value": "both",
+            "label": "双维"
+          },
+          {
+            "value": "count",
+            "label": "仅数量"
+          },
+          {
+            "value": "amount",
+            "label": "仅数值"
+          }
+        ],
+        "publicKey": "metricMode",
+        "desc": "展示维度：数量 + 数值对照 / 仅数量 / 仅数值。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "条形末端数值标签的显隐。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个数值区间作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 3,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的区间。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于数值条与高亮区间。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "countLabel": "「请输入标签」",
+      "amountLabel": "「请输入标签」",
+      "rows": [
+        {
+          "band": "「请输入内容」",
+          "count": 41,
+          "amount": 58
+        },
+        {
+          "band": "「请输入内容」",
+          "count": 29,
+          "amount": 91
+        },
+        {
+          "band": "「请输入内容」",
+          "count": 15,
+          "amount": 103
+        },
+        {
+          "band": "「请输入内容」",
+          "count": 12,
+          "amount": 718
+        }
+      ],
+      "rowCount": 4,
+      "metricMode": "「请输入内容」",
+      "showValues": true,
+      "focusEnabled": true,
+      "focusIndex": 3,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page025",
+    "themeKey": "theme13",
+    "pageNumber": 25,
+    "layout": "THEME13-025",
+    "slot": "avg-ticket-page",
+    "label": "页面 25",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "numberSlant",
+        "label": "数字倾斜",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "numberSlant",
+        "desc": "主数字是否应用品牌斜切（italic-slant）效果。"
+      },
+      {
+        "key": "auxCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "auxCount",
+        "desc": "辅助指标数量（0–3）；为 0 时只保留主数字。"
+      },
+      {
+        "key": "showCaption",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCaption",
+        "desc": "主数字下方解释性说明的显隐。"
+      },
+      {
+        "key": "showNote",
+        "label": "辅助注释",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showNote",
+        "desc": "底部补充注释的显隐。"
+      },
+      {
+        "key": "showLens",
+        "label": "品牌图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLens",
+        "desc": "品牌透镜图形（焦点圆盘）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于主数字下划线、品牌图形与点缀。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "numLead": "「请输入内容」",
+      "numTail": "「请输入内容」",
+      "numUnit": "「单位」",
+      "numCaption": "「请输入内容」",
+      "note": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "aux": [
+        {
+          "label": "「请输入标签」",
+          "value": "97",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "970",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "64",
+          "unit": "「单位」"
+        }
+      ],
+      "numberSlant": true,
+      "auxCount": 3,
+      "showCaption": true,
+      "showNote": true,
+      "showLens": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page026",
+    "themeKey": "theme13",
+    "pageNumber": 26,
+    "layout": "THEME13-026",
+    "slot": "investor-page",
+    "label": "页面 26",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 4,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "图片墙的图片槽数量（0–4）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "showLabels",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLabels",
+        "desc": "每张图片上叠加的机构名称 / 角色标签的显隐。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张图片作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的图片。"
+      },
+      {
+        "key": "showAnchor",
+        "label": "重点数字",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showAnchor",
+        "desc": "右上锚点数字（活跃机构数量）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于高亮图片框、机构标签与锚点数字。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "anchorLead": "「请输入内容」",
+      "anchorUnit": "「单位」",
+      "anchorNote": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "slots": [
+        {
+          "name": "「请输入机构名称」",
+          "role": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "role": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "role": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "role": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 3,
+      "imageRatio": "portrait",
+      "showLabels": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showAnchor": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page027",
+    "themeKey": "theme13",
+    "pageNumber": 27,
+    "layout": "THEME13-027",
+    "slot": "active-capital-page",
+    "label": "资本页 27",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 6,
+        "min": 4,
+        "max": 7,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "排行榜展示的机构行数量（4–7）。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bars",
+        "options": [
+          {
+            "value": "bars",
+            "label": "条形"
+          },
+          {
+            "value": "lollipop",
+            "label": "棒点"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "排名条的呈现方式：实心条形 / 棒点（lollipop）。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "每条排名条末端的数值标签显隐。"
+      },
+      {
+        "key": "showTags",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTags",
+        "desc": "每家机构的偏好分类标签显隐。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 名"
+          },
+          {
+            "value": 1,
+            "label": "第 2 名"
+          },
+          {
+            "value": 2,
+            "label": "第 3 名"
+          },
+          {
+            "value": 3,
+            "label": "第 4 名"
+          },
+          {
+            "value": 4,
+            "label": "第 5 名"
+          },
+          {
+            "value": 5,
+            "label": "第 6 名"
+          },
+          {
+            "value": 6,
+            "label": "第 7 名"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的机构行。"
+      },
+      {
+        "key": "showAnchor",
+        "label": "重点数字",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showAnchor",
+        "desc": "左侧锚点数字（头部机构覆盖占比）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于高亮行、排名条与锚点数字。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "anchorLead": "「请输入内容」",
+      "anchorNote": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "axisLabel": "「请输入标签」",
+      "rows": [
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 14
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 11
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 9
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 7
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 6
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 5
+        },
+        {
+          "name": "「请输入机构名称」",
+          "tag": "「请输入标签」",
+          "val": 4
+        }
+      ],
+      "rowCount": 6,
+      "chartType": "「请输入内容」",
+      "showValues": true,
+      "showTags": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showAnchor": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page028",
+    "themeKey": "theme13",
+    "pageNumber": 28,
+    "layout": "THEME13-028",
+    "slot": "concentration-page",
+    "label": "页面 28",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "numberSlant",
+        "label": "数字倾斜",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "numberSlant",
+        "desc": "主数字是否应用品牌斜切（italic-slant）效果。"
+      },
+      {
+        "key": "tierCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "tierCount",
+        "desc": "份额条中显式展示的头部分层数量（2–3）；剩余自动并入「其他」。"
+      },
+      {
+        "key": "showRemainder",
+        "label": "其他分段",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showRemainder",
+        "desc": "是否在份额条末尾补上「其他机构」剩余分段。"
+      },
+      {
+        "key": "showShareBar",
+        "label": "份额图表",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showShareBar",
+        "desc": "堆叠份额条（按机构排名分层）的显隐。"
+      },
+      {
+        "key": "auxCount",
+        "label": "辅助数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "auxCount",
+        "desc": "辅助指标数量（0–3）；为 0 时只保留主数字。"
+      },
+      {
+        "key": "showNote",
+        "label": "辅助注释",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showNote",
+        "desc": "底部补充注释的显隐。"
+      },
+      {
+        "key": "showLens",
+        "label": "品牌图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLens",
+        "desc": "品牌透镜图形（焦点圆盘）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于主数字下划线、份额条与品牌图形。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "numLead": "「请输入内容」",
+      "numTail": "「请输入内容」",
+      "numCaption": "「请输入内容」",
+      "note": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "barTitle": "「请输入标题」",
+      "tiers": [
+        {
+          "label": "「请输入标签」",
+          "v": 22
+        },
+        {
+          "label": "「请输入标签」",
+          "v": 11
+        },
+        {
+          "label": "「请输入标签」",
+          "v": 9
+        }
+      ],
+      "remainderLabel": "「请输入标签」",
+      "aux": [
+        {
+          "label": "「请输入标签」",
+          "value": "48",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "37",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "14",
+          "unit": "「单位」"
+        }
+      ],
+      "numberSlant": true,
+      "tierCount": 3,
+      "showRemainder": true,
+      "showShareBar": true,
+      "auxCount": 3,
+      "showNote": true,
+      "showLens": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page029",
+    "themeKey": "theme13",
+    "pageNumber": 29,
+    "layout": "THEME13-029",
+    "slot": "syndicate-page",
+    "label": "页面 29",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 6,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "表格展示的行数量（3–6）。"
+      },
+      {
+        "key": "showRound",
+        "label": "阶段列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showStage",
+        "desc": "数值阶段列的显隐。"
+      },
+      {
+        "key": "showSyndicate",
+        "label": "阵容列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSyndicate",
+        "desc": "领投 / 跟投阵容列（机构缩写徽标）的显隐；关闭后表格更紧凑。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          },
+          {
+            "value": 5,
+            "label": "第 6 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showStatLine",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showStatLine",
+        "desc": "标题下方汇总统计行的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于高亮行、阵容徽标与点缀。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "colHeads": {
+        "co": "「请输入内容」",
+        "dim": "「请输入内容」",
+        "val": "「请输入数值」",
+        "round": "「请输入数值」",
+        "syn": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "co": "「请输入内容」",
+          "dim": "「请输入内容」",
+          "val": "64",
+          "unit": "「单位」",
+          "round": "「请输入数值」",
+          "syn": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ]
+        },
+        {
+          "co": "「请输入内容」",
+          "dim": "「请输入内容」",
+          "val": "58",
+          "unit": "「单位」",
+          "round": "「请输入数值」",
+          "syn": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ]
+        },
+        {
+          "co": "「请输入内容」",
+          "dim": "「请输入内容」",
+          "val": "47",
+          "unit": "「单位」",
+          "round": "「请输入数值」",
+          "syn": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ]
+        },
+        {
+          "co": "「请输入内容」",
+          "dim": "「请输入内容」",
+          "val": "36",
+          "unit": "「单位」",
+          "round": "「请输入数值」",
+          "syn": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ]
+        },
+        {
+          "co": "「请输入内容」",
+          "dim": "「请输入内容」",
+          "val": "24",
+          "unit": "「单位」",
+          "round": "「请输入数值」",
+          "syn": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ]
+        },
+        {
+          "co": "「请输入内容」",
+          "dim": "「请输入内容」",
+          "val": "18",
+          "unit": "「单位」",
+          "round": "「请输入数值」",
+          "syn": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ]
+        }
+      ],
+      "rowCount": 5,
+      "showRound": true,
+      "showSyndicate": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showStatLine": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page030",
+    "themeKey": "theme13",
+    "pageNumber": 30,
+    "layout": "THEME13-030",
+    "slot": "knowledge-page",
+    "label": "知识页 30",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "itemCount",
+        "desc": "指标栏条目数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一条指标作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标。"
+      },
+      {
+        "key": "showProgress",
+        "label": "进度指标",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showProgress",
+        "desc": "底部渗透 / 采用率进度条的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮指标与进度条。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "38",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "9",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "4.2",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "620",
+          "unit": "「单位」"
+        }
+      ],
+      "progress": {
+        "label": "「请输入标签」",
+        "value": 58,
+        "display": "「请输入内容」"
+      },
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showProgress": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page031",
+    "themeKey": "theme13",
+    "pageNumber": 31,
+    "layout": "THEME13-031",
+    "slot": "legal-page",
+    "label": "制度页 31",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "场景表格展示的行数量（3–5）。"
+      },
+      {
+        "key": "showShare",
+        "label": "占比列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "场景占比列（迷你条 + 数值）的显隐。"
+      },
+      {
+        "key": "showFlow",
+        "label": "流程图",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showFlow",
+        "desc": "底部横向工作流程条的显隐。"
+      },
+      {
+        "key": "flowStepCount",
+        "label": "流程数量",
+        "type": "slider",
+        "default": 4,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "flowStepCount",
+        "desc": "流程节点数量（3–5）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、占比条、高亮行与流程节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "share": "「请输入数值」",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "share": 46,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "share": 22,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "share": 14,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "share": 11,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "share": 7,
+          "note": "「请输入内容」"
+        }
+      ],
+      "flowTitle": "「请输入标题」",
+      "flow": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "rowCount": 5,
+      "showShare": true,
+      "showFlow": true,
+      "flowStepCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page032",
+    "themeKey": "theme13",
+    "pageNumber": 32,
+    "layout": "THEME13-032",
+    "slot": "healthcare-page",
+    "label": "医疗页 32",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "landscape",
+        "options": [
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "branchCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "branchCount",
+        "desc": "数值分布分支数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个分支作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 1,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的分支。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "分支柱顶部数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮分支与柱形。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "branches": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 11,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 14,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 9,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "landscape",
+      "branchCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 1,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page033",
+    "themeKey": "theme13",
+    "pageNumber": 33,
+    "layout": "THEME13-033",
+    "slot": "finance-page",
+    "label": "财务页 33",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "donut",
+        "options": [
+          {
+            "value": "donut",
+            "label": "环形图"
+          },
+          {
+            "value": "bars",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "场景占比图表样式：环形图 / 占比条。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "场景占比分段数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个场景作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的场景。"
+      },
+      {
+        "key": "showLegend",
+        "label": "图例",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLegend",
+        "desc": "环形图右侧图例列表的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、图表与高亮场景。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "segments": [
+        {
+          "label": "「请输入标签」",
+          "value": 31,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 28,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 24,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 17,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "chartType": "「请输入内容」",
+      "segmentCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showLegend": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page034",
+    "themeKey": "theme13",
+    "pageNumber": 34,
+    "layout": "THEME13-034",
+    "slot": "compute-page",
+    "label": "算力页 34",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "cluster",
+        "options": [
+          {
+            "value": "cluster",
+            "label": "集群网格"
+          },
+          {
+            "value": "bars",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主图表样式：算力集群热力网格 / 资源占比条。"
+      },
+      {
+        "key": "gridDensity",
+        "label": "图表密度",
+        "type": "slider",
+        "default": 12,
+        "min": 8,
+        "max": 16,
+        "step": 1,
+        "publicKey": "gridDensity",
+        "desc": "集群网格的列密度（8–16）；行数自动推导。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "左侧指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showSplit",
+        "label": "占比图",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSplit",
+        "desc": "资源构成占比（网格上方条带 / 占比条）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、集群高负载单元与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartTitle": "「请输入标题」",
+      "splitTitle": "「请输入标题」",
+      "clusterLegend": "ENTER CONTENT",
+      "clusterScaleLabel": "「请输入标签」",
+      "splitShareLabel": "「请输入标签」",
+      "metrics": [
+        {
+          "lbl": "「请输入内容」",
+          "val": "64",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "9",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "7.1",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "58",
+          "unit": "「单位」"
+        }
+      ],
+      "split": [
+        {
+          "label": "「请输入标签」",
+          "value": 58,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 30,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 12,
+          "note": "「请输入内容」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "gridDensity": 12,
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showSplit": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page035",
+    "themeKey": "theme13",
+    "pageNumber": 35,
+    "layout": "THEME13-035",
+    "slot": "chip-page",
+    "label": "芯片页 35",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 4,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "表格展示的行数量（3–5）。"
+      },
+      {
+        "key": "showShare",
+        "label": "占比列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showShare",
+        "desc": "资金拆分列（迷你占比条）的显隐。"
+      },
+      {
+        "key": "showJudgment",
+        "label": "判断列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showJudgment",
+        "desc": "判断列的显隐；关闭后表格更紧凑。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于层级标记、高亮行与总额数字。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorUnit": "「单位」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "val": "「请输入数值」",
+        "share": "「请输入数值」",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "46",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "32",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "19",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "8",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "5",
+          "note": "「请输入内容」"
+        }
+      ],
+      "rowCount": 4,
+      "showShare": true,
+      "showJudgment": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page036",
+    "themeKey": "theme13",
+    "pageNumber": 36,
+    "layout": "THEME13-036",
+    "slot": "robotics-page",
+    "label": "智能页 36",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "landscape",
+        "options": [
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "应用方向分布数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个应用方向作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的应用方向。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "应用柱顶部数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮应用与柱形。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "segments": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 21,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 11,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 9,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "landscape",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page037",
+    "themeKey": "theme13",
+    "pageNumber": 37,
+    "layout": "THEME13-037",
+    "slot": "autonomy-page",
+    "label": "自动驾驶页 37",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bars",
+        "options": [
+          {
+            "value": "bars",
+            "label": "占比条"
+          },
+          {
+            "value": "donut",
+            "label": "环形图"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "场景拆分图表样式：占比条 / 环形图。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "场景拆分分段数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个场景作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的场景。"
+      },
+      {
+        "key": "showArch",
+        "label": "装饰图示",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showArch",
+        "desc": "车载 AI 架构层级条（感知 → 决策 → 控制 → 座舱）的显隐。"
+      },
+      {
+        "key": "showLegend",
+        "label": "图例",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLegend",
+        "desc": "环形图右侧图例列表的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、架构条、图表与高亮场景。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "archTitle": "「请输入标题」",
+      "arch": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "segments": [
+        {
+          "label": "「请输入标签」",
+          "value": 13,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 9,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 7,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "chartType": "「请输入内容」",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showArch": true,
+      "showLegend": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page038",
+    "themeKey": "theme13",
+    "pageNumber": 38,
+    "layout": "THEME13-038",
+    "slot": "safety-page",
+    "label": "安全页 38",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "layers",
+        "options": [
+          {
+            "value": "layers",
+            "label": "防线分层"
+          },
+          {
+            "value": "bars",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主图表样式：分层防线堆叠 / 资金占比条。"
+      },
+      {
+        "key": "layerCount",
+        "label": "分项数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "layerCount",
+        "desc": "安全防线分层 / 占比条的数量（2–4）。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "左侧指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showStrip",
+        "label": "示意条带",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showStrip",
+        "desc": "防线上方状态拦截示意条带的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、防线层级与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartTitle": "「请输入标题」",
+      "splitTitle": "「请输入标题」",
+      "stripTitle": "「请输入标题」",
+      "stripLeftLabel": "「请输入标签」",
+      "stripRightLabel": "「请输入标签」",
+      "splitShareLabel": "「请输入标签」",
+      "metrics": [
+        {
+          "lbl": "「请输入内容」",
+          "val": "16",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "8",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "6",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "5",
+          "unit": "「单位」"
+        }
+      ],
+      "layers": [
+        {
+          "tier": "「请输入数值」",
+          "name": "「请输入机构名称」",
+          "value": 6,
+          "note": "「请输入内容」"
+        },
+        {
+          "tier": "「请输入数值」",
+          "name": "「请输入机构名称」",
+          "value": 5,
+          "note": "「请输入内容」"
+        },
+        {
+          "tier": "「请输入数值」",
+          "name": "「请输入机构名称」",
+          "value": 5,
+          "note": "「请输入内容」"
+        },
+        {
+          "tier": "「请输入数值」",
+          "name": "「请输入机构名称」",
+          "value": 4,
+          "note": "「请输入内容」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "layerCount": 3,
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showStrip": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page039",
+    "themeKey": "theme13",
+    "pageNumber": 39,
+    "layout": "THEME13-039",
+    "slot": "content-gen-page",
+    "label": "内容页 39",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "landscape",
+        "options": [
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "媒介方向分布数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个媒介方向作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的媒介方向。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "分布行末端数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮媒介与分布条。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "segments": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 14,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 8,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 5,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 4,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "landscape",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page040",
+    "themeKey": "theme13",
+    "pageNumber": 40,
+    "layout": "THEME13-040",
+    "slot": "education-page",
+    "label": "教育页 40",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "学习路径阶段数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个学习阶段作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的学习阶段。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "阶段节点内数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮阶段与路径节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "stageWord": "「请输入标签」",
+      "segments": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 6,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 5,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 3,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page041",
+    "themeKey": "theme13",
+    "pageNumber": 41,
+    "layout": "THEME13-041",
+    "slot": "support-page",
+    "label": "服务页 41",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 4,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "表格展示的行数量（3–5）。"
+      },
+      {
+        "key": "showShare",
+        "label": "占比列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showShare",
+        "desc": "降本贡献列（迷你占比条）的显隐。"
+      },
+      {
+        "key": "showJudgment",
+        "label": "判断列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showJudgment",
+        "desc": "判断列的显隐；关闭后表格更紧凑。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于角色标记、高亮行与总额数字。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorUnit": "「单位」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "val": "「请输入数值」",
+        "share": "「请输入数值」",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "48",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "31",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "22",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "18",
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "tier": "「请输入数值」",
+          "val": "15",
+          "note": "「请输入内容」"
+        }
+      ],
+      "rowCount": 4,
+      "showShare": true,
+      "showJudgment": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page042",
+    "themeKey": "theme13",
+    "pageNumber": 42,
+    "layout": "THEME13-042",
+    "slot": "sales-page",
+    "label": "业务页 42",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "landscape",
+        "options": [
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "漏斗阶段数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个漏斗阶段作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的漏斗阶段。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "漏斗阶段内数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮阶段与漏斗。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "segments": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 8,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 7,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 6,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "landscape",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page043",
+    "themeKey": "theme13",
+    "pageNumber": 43,
+    "layout": "THEME13-043",
+    "slot": "low-code-page",
+    "label": "低代码页 43",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "stepCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "stepCount",
+        "desc": "流程编排节点数量（3–5）。"
+      },
+      {
+        "key": "metricCount",
+        "label": "指标数量",
+        "type": "slider",
+        "default": 2,
+        "min": 1,
+        "max": 2,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "客户与留存指标盘数量（1–2）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个流程节点作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 2,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          },
+          {
+            "value": 4,
+            "label": "第 5 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的流程节点。"
+      },
+      {
+        "key": "showMetrics",
+        "label": "留存面板",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showMetrics",
+        "desc": "底部客户与留存指标盘的显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "指标盘内数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮节点与指标盘。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "flowTitle": "「请输入标题」",
+      "metricTitle": "「请输入标题」",
+      "steps": [
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "118",
+          "unit": "「单位」",
+          "pct": 0.88,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "430",
+          "unit": "「单位」",
+          "pct": 0.62,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "stepCount": 4,
+      "metricCount": 2,
+      "focusEnabled": true,
+      "focusIndex": 2,
+      "showMetrics": true,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page044",
+    "themeKey": "theme13",
+    "pageNumber": 44,
+    "layout": "THEME13-044",
+    "slot": "open-source-page",
+    "label": "开源页 44",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "landscape",
+        "options": [
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "ring",
+        "options": [
+          {
+            "value": "ring",
+            "label": "环形"
+          },
+          {
+            "value": "bar",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "企业服务收入占比的呈现方式：环形图 / 占比条。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮转化路径的某一端作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 1,
+        "options": [
+          {
+            "value": 0,
+            "label": "社区影响力"
+          },
+          {
+            "value": 1,
+            "label": "企业服务"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的转化节点。"
+      },
+      {
+        "key": "showBridge",
+        "label": "转化连接",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBridge",
+        "desc": "两节点之间的渐缩转化连接带的显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "转化节点内数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮节点与转化连接带。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "bridgeTitle": "「请输入标题」",
+      "source": {
+        "kicker": "「请输入标题」",
+        "value": "2.8",
+        "unit": "「单位」",
+        "caption": "「请输入内容」",
+        "tag": "「请输入标签」"
+      },
+      "target": {
+        "kicker": "「请输入标题」",
+        "pct": 37,
+        "display": "「请输入内容」",
+        "unit": "「单位」",
+        "caption": "「请输入内容」",
+        "tag": "「请输入标签」"
+      },
+      "ribbonLabel": "「请输入标签」",
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "landscape",
+      "chartType": "「请输入内容」",
+      "focusEnabled": true,
+      "focusIndex": 1,
+      "showBridge": true,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page045",
+    "themeKey": "theme13",
+    "pageNumber": 45,
+    "layout": "THEME13-045",
+    "slot": "alignment-page",
+    "label": "对齐页 45",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "安全防线分项数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个防线分项作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的防线分项。"
+      },
+      {
+        "key": "showShield",
+        "label": "防线装饰",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showShield",
+        "desc": "防线上方的防护弧线装饰的显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "防线柱内数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮防线与防护弧线。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "shieldLabel": "「请输入标签」",
+      "segments": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 8,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 7,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 6,
+          "note": "「请输入内容」"
+        }
+      ],
+      "images": [],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showShield": true,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page046",
+    "themeKey": "theme13",
+    "pageNumber": 46,
+    "layout": "THEME13-046",
+    "slot": "capital-chapter-page",
+    "label": "章节页 46",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "backgroundVariant",
+        "label": "背景风格",
+        "type": "radio",
+        "default": "dark",
+        "options": [
+          {
+            "value": "dark",
+            "label": "深色"
+          },
+          {
+            "value": "paper",
+            "label": "浅色"
+          }
+        ],
+        "publicKey": "backgroundVariant",
+        "desc": "章节页背景：深色（强换气节奏）/ 浅色（与正文统一）。"
+      },
+      {
+        "key": "layout",
+        "label": "排版",
+        "type": "radio",
+        "default": "left",
+        "options": [
+          {
+            "value": "left",
+            "label": "左对齐"
+          },
+          {
+            "value": "center",
+            "label": "居中"
+          }
+        ],
+        "publicKey": "layout",
+        "desc": "标题与关键词的整体排布方式；居中时隐藏右侧集群图。"
+      },
+      {
+        "key": "showIndex",
+        "label": "章节序号",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showIndex",
+        "desc": "超大章节编号水印的显隐。"
+      },
+      {
+        "key": "showKeywords",
+        "label": "关键词",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showKeywords",
+        "desc": "本章关键词标签行的显隐。"
+      },
+      {
+        "key": "keywordCount",
+        "label": "关键词数量",
+        "type": "slider",
+        "default": 6,
+        "min": 3,
+        "max": 6,
+        "step": 1,
+        "publicKey": "keywordCount",
+        "desc": "展示的关键词数量（3–6）。"
+      },
+      {
+        "key": "showCluster",
+        "label": "地理集群图",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCluster",
+        "desc": "右侧地理集群气泡图的显隐（仅左对齐排版生效）。"
+      },
+      {
+        "key": "hubCount",
+        "label": "集群节点数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "hubCount",
+        "desc": "地理集群展示的城市节点数量（3–5）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "index": "04",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "keywords": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "clusterTitle": "「请输入标题」",
+      "hubs": [
+        {
+          "label": "「请输入标签」",
+          "en": "ENTER CONTENT",
+          "pct": 63.9,
+          "x": 36,
+          "y": 46,
+          "d": 60
+        },
+        {
+          "label": "「请输入标签」",
+          "en": "ENTER CONTENT",
+          "pct": 12.4,
+          "x": 74,
+          "y": 30,
+          "d": 31
+        },
+        {
+          "label": "「请输入标签」",
+          "en": "ENTER CONTENT",
+          "pct": 9.8,
+          "x": 78,
+          "y": 70,
+          "d": 27
+        },
+        {
+          "label": "「请输入标签」",
+          "en": "ENTER CONTENT",
+          "pct": 7.7,
+          "x": 24,
+          "y": 82,
+          "d": 23
+        },
+        {
+          "label": "「请输入标签」",
+          "en": "ENTER CONTENT",
+          "pct": 6.2,
+          "x": 56,
+          "y": 84,
+          "d": 19
+        }
+      ],
+      "backgroundVariant": "dark",
+      "layout": "left",
+      "showIndex": true,
+      "showKeywords": true,
+      "keywordCount": 6,
+      "showCluster": true,
+      "hubCount": 5,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    },
+    "numberBounds": {
+      "hubs[].d": {
+        "min": 0,
+        "max": 100,
+        "semantics": "percent"
+      }
+    }
+  },
+  {
+    "key": "theme13_page047",
+    "themeKey": "theme13",
+    "pageNumber": 47,
+    "layout": "THEME13-047",
+    "slot": "early-stage-page",
+    "label": "页面 47",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "表格展示的阶段行数量（2–4）。"
+      },
+      {
+        "key": "showBubble",
+        "label": "气泡列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBubble",
+        "desc": "平均单笔气泡列（气泡大小=平均单笔规模）的显隐。"
+      },
+      {
+        "key": "showThemes",
+        "label": "主题标签列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showThemes",
+        "desc": "萌芽主题标签列的显隐。"
+      },
+      {
+        "key": "showSignal",
+        "label": "信号列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSignal",
+        "desc": "信号判断列的显隐；关闭后表格更紧凑。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于阶段标记、气泡、高亮行与锚点数字。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "season": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "events": "「请输入数值」",
+        "amount": "「请输入数值」",
+        "bubble": "「请输入数值」",
+        "themes": "「请输入内容」",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "events": "「请输入数值」",
+          "amount": "1.2",
+          "avg": 0.15,
+          "themes": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "events": "「请输入数值」",
+          "amount": "1.8",
+          "avg": 0.15,
+          "themes": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "events": "「请输入数值」",
+          "amount": "3.4",
+          "avg": 0.57,
+          "themes": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "events": "「请输入数值」",
+          "amount": "2.1",
+          "avg": 0.53,
+          "themes": [
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "note": "「请输入内容」"
+        }
+      ],
+      "rowCount": 4,
+      "showBubble": true,
+      "showThemes": true,
+      "showSignal": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page048",
+    "themeKey": "theme13",
+    "pageNumber": 48,
+    "layout": "THEME13-048",
+    "slot": "deal-structure-page",
+    "label": "页面 48",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "componentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "componentCount",
+        "desc": "交易结构构成项数量（2–4）。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "stack",
+        "options": [
+          {
+            "value": "stack",
+            "label": "堆叠条"
+          },
+          {
+            "value": "donut",
+            "label": "环形图"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "构成占比图表样式：堆叠条 / 环形图。"
+      },
+      {
+        "key": "showStats",
+        "label": "锚点指标",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showStats",
+        "desc": "左侧事件数与平均单笔锚点指标的显隐。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个构成项作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的构成项。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于图表、锚点数字与高亮构成项。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "stats": [
+        {
+          "value": "22",
+          "unit": "「单位」",
+          "label": "「请输入标签」"
+        },
+        {
+          "value": "18.6",
+          "unit": "「单位」",
+          "label": "「请输入标签」"
+        }
+      ],
+      "components": [
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "pct": 39,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "pct": 31,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "pct": 18,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "pct": 12,
+          "note": "「请输入内容」"
+        }
+      ],
+      "componentCount": 4,
+      "chartType": "「请输入内容」",
+      "showStats": true,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page049",
+    "themeKey": "theme13",
+    "pageNumber": 49,
+    "layout": "THEME13-049",
+    "slot": "investor-mix-page",
+    "label": "页面 49",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "donut",
+        "options": [
+          {
+            "value": "donut",
+            "label": "环形图"
+          },
+          {
+            "value": "bars",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "分类占比图表样式：环形图 / 占比条。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "分类类型分段数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一类角色作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的分类类型。"
+      },
+      {
+        "key": "showLegend",
+        "label": "图例",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLegend",
+        "desc": "环形图右侧图例列表的显隐。"
+      },
+      {
+        "key": "showTimeline",
+        "label": "阶段时间轴",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTimeline",
+        "desc": "底部来源演进时间轴的显隐。"
+      },
+      {
+        "key": "nodeCount",
+        "label": "节点数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "step": 1,
+        "publicKey": "nodeCount",
+        "desc": "时间轴上的阶段节点数量（2–5）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于图表、高亮分类类型与时间轴节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "timelineLabel": "「请输入标签」",
+      "segments": [
+        {
+          "label": "「请输入标签」",
+          "value": 42,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 27,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 18,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 13,
+          "note": "「请输入内容」"
+        }
+      ],
+      "nodes": [
+        {
+          "year": "2020",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "year": "2021 — 22",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "year": "2023",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "year": "2024 H1",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        },
+        {
+          "year": "2024 H2",
+          "title": "「请输入标题」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "segmentCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showLegend": true,
+      "showTimeline": true,
+      "nodeCount": 3,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page050",
+    "themeKey": "theme13",
+    "pageNumber": 50,
+    "layout": "THEME13-050",
+    "slot": "resource-page",
+    "label": "页面 50",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "images",
+        "label": "图片",
+        "type": "images",
+        "countKey": "imageCount",
+        "publicKey": "images",
+        "desc": "主视觉区可替换图片。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "auto",
+        "options": [
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "cardCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "资源类型卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张资源卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的资源卡。"
+      },
+      {
+        "key": "showMeter",
+        "label": "强度条",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showMeter",
+        "desc": "资源卡底部资源强度示意条的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于资源标记、强度条与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "cards": [
+        {
+          "glyph": "「请输入内容」",
+          "label": "「请输入标签」",
+          "value": "118",
+          "unit": "「单位」",
+          "note": "「请输入内容」",
+          "w": 1
+        },
+        {
+          "glyph": "「请输入内容」",
+          "label": "「请输入标签」",
+          "value": "36",
+          "unit": "「单位」",
+          "note": "「请输入内容」",
+          "w": 0.62
+        },
+        {
+          "glyph": "「请输入内容」",
+          "label": "「请输入标签」",
+          "value": "22",
+          "unit": "「单位」",
+          "note": "「请输入内容」",
+          "w": 0.46
+        },
+        {
+          "glyph": "「请输入内容」",
+          "label": "「请输入标签」",
+          "value": "17",
+          "unit": "「单位」",
+          "note": "「请输入内容」",
+          "w": 0.38
+        }
+      ],
+      "imageCount": 1,
+      "images": [],
+      "imageRatio": "auto",
+      "cardCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showMeter": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page051",
+    "themeKey": "theme13",
+    "pageNumber": 51,
+    "layout": "THEME13-051",
+    "slot": "alliance-page",
+    "label": "页面 51",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "providerCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "providerCount",
+        "desc": "云厂商节点数量（2–4）。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "map",
+        "options": [
+          {
+            "value": "map",
+            "label": "关系图"
+          },
+          {
+            "value": "bars",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主图表样式：联盟关系图 / 投资占比条。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个云厂商作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的云厂商。"
+      },
+      {
+        "key": "showLoop",
+        "label": "回路标识",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLoop",
+        "desc": "算力消费回收的回路连接与闭环说明显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "节点 / 连接上的投资数值标签显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于厂商节点、投资连接与高亮节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "chartTitle": "「请输入标题」",
+      "barsTitle": "「请输入标题」",
+      "totalVal": "「请输入内容」",
+      "totalUnit": "「单位」",
+      "totalLbl": "「请输入内容」",
+      "hub": {
+        "lead": "「请输入内容」",
+        "sub": "「请输入内容」"
+      },
+      "cycle": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "legendInvest": "ENTER CONTENT",
+      "legendReturn": "ENTER CONTENT",
+      "providers": [
+        {
+          "label": "「请输入标签」",
+          "value": 88,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 74,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 69,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 21,
+          "note": "「请输入内容」"
+        }
+      ],
+      "providerCount": 4,
+      "chartType": "「请输入内容」",
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showLoop": true,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page052",
+    "themeKey": "theme13",
+    "pageNumber": 52,
+    "layout": "THEME13-052",
+    "slot": "ecosystem-page",
+    "label": "生态页 52",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "自适应"
+          },
+          {
+            "value": "normal",
+            "label": "正常比例"
+          },
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应裁剪填满版面，正常比例按上传媒体原始比例显示。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "生态环上的节点数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个生态节点作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的生态节点。"
+      },
+      {
+        "key": "showSpokes",
+        "label": "连接线",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSpokes",
+        "desc": "中心 GPU 节点到各生态节点的连接线显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "节点内数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于生态节点、连接线与高亮节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "hub": {
+        "lead": "「请输入内容」",
+        "sub": "「请输入内容」"
+      },
+      "legend": "ENTER CONTENT",
+      "nodes": [
+        {
+          "label": "「请输入标签」",
+          "value": 64
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 12
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 9
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 7
+        }
+      ],
+      "imageCount": 1,
+      "imageRatio": "auto",
+      "images": [],
+      "segmentCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showSpokes": true,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page053",
+    "themeKey": "theme13",
+    "pageNumber": 53,
+    "layout": "THEME13-053",
+    "slot": "geo-center-page",
+    "label": "页面 53",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "numberSlant",
+        "label": "数字倾斜",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "numberSlant",
+        "desc": "主数字是否应用品牌斜切（italic-slant）效果。"
+      },
+      {
+        "key": "auxCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "auxCount",
+        "desc": "辅助指标数量（0–3）；为 0 时只保留主数字。"
+      },
+      {
+        "key": "showCaption",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCaption",
+        "desc": "主数字下方解释性说明的显隐。"
+      },
+      {
+        "key": "showNote",
+        "label": "辅助注释",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showNote",
+        "desc": "底部补充注释的显隐。"
+      },
+      {
+        "key": "showLens",
+        "label": "品牌图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLens",
+        "desc": "品牌透镜图形（焦点圆盘）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于主数字点缀、品牌图形与高亮。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "numLead": "「请输入内容」",
+      "numTail": "「请输入内容」",
+      "numUnit": "「单位」",
+      "numCaption": "「请输入内容」",
+      "note": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "aux": [
+        {
+          "label": "「请输入标签」",
+          "value": "620",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "62",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "10.0",
+          "unit": "「单位」"
+        }
+      ],
+      "numberSlant": true,
+      "auxCount": 3,
+      "showCaption": true,
+      "showNote": true,
+      "showLens": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page054",
+    "themeKey": "theme13",
+    "pageNumber": 54,
+    "layout": "THEME13-054",
+    "slot": "region-cluster-page",
+    "label": "页面 54",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "region",
+        "label": "类别",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "纽约"
+          },
+          {
+            "value": 1,
+            "label": "西雅图"
+          },
+          {
+            "value": 2,
+            "label": "波士顿"
+          },
+          {
+            "value": 3,
+            "label": "其他地区"
+          }
+        ],
+        "publicKey": "region",
+        "desc": "切换展示的类别集群（纽约 / 西雅图 / 波士顿 / 其他地区），整页内容随之更新。"
+      },
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "showShare",
+        "label": "占比图表",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showShare",
+        "desc": "区域全美占比图表模块的显隐。"
+      },
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "bar",
+        "options": [
+          {
+            "value": "bar",
+            "label": "占比条"
+          },
+          {
+            "value": "donut",
+            "label": "环形图"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "占比图表样式：百分百堆叠占比条 / 环形图。"
+      },
+      {
+        "key": "tagCount",
+        "label": "标签数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 5,
+        "step": 1,
+        "publicKey": "tagCount",
+        "desc": "分类标签数量（2–5）。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标、排名标记与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于占比高亮、标签、强调卡与图形。"
+      }
+    ],
+    "defaultProps": {
+      "share": [
+        {
+          "k": "「请输入内容」",
+          "v": 63.9
+        },
+        {
+          "k": "「请输入内容」",
+          "v": 12.4
+        },
+        {
+          "k": "「请输入内容」",
+          "v": 9.8
+        },
+        {
+          "k": "「请输入内容」",
+          "v": 7.7
+        },
+        {
+          "k": "「请输入内容」",
+          "v": 6.2
+        }
+      ],
+      "regions": [
+        {
+          "eyebrow": "「请输入内容」",
+          "enName": "「请输入机构名称」",
+          "segment": "ENTER CONTENT",
+          "badge": "「请输入内容」",
+          "shareIdx": 1,
+          "rank": 2,
+          "title": "「请输入标题」",
+          "titleTail": "「请输入标题」",
+          "lead": "「请输入内容」",
+          "closing": "「请输入内容」",
+          "tags": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "metrics": [
+            {
+              "label": "「请输入标签」",
+              "value": "120",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "12.4",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "14",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "8.6",
+              "unit": "「单位」"
+            }
+          ]
+        },
+        {
+          "eyebrow": "「请输入内容」",
+          "enName": "「请输入机构名称」",
+          "segment": "ENTER CONTENT",
+          "badge": "「请输入内容」",
+          "shareIdx": 2,
+          "rank": 3,
+          "title": "「请输入标题」",
+          "titleTail": "「请输入标题」",
+          "lead": "「请输入内容」",
+          "closing": "「请输入内容」",
+          "tags": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "metrics": [
+            {
+              "label": "「请输入标签」",
+              "value": "95",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "9.8",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "10",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "9.5",
+              "unit": "「单位」"
+            }
+          ]
+        },
+        {
+          "eyebrow": "「请输入内容」",
+          "enName": "「请输入机构名称」",
+          "segment": "ENTER CONTENT",
+          "badge": "「请输入内容」",
+          "shareIdx": 3,
+          "rank": 4,
+          "title": "「请输入标题」",
+          "titleTail": "「请输入标题」",
+          "lead": "「请输入内容」",
+          "closing": "「请输入内容」",
+          "tags": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "metrics": [
+            {
+              "label": "「请输入标签」",
+              "value": "75",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "7.7",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "8",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "9.4",
+              "unit": "「单位」"
+            }
+          ]
+        },
+        {
+          "eyebrow": "「请输入内容」",
+          "enName": "「请输入机构名称」",
+          "segment": "ENTER CONTENT",
+          "badge": "「请输入内容」",
+          "shareIdx": 4,
+          "rank": 5,
+          "title": "「请输入标题」",
+          "titleTail": "「请输入标题」",
+          "lead": "「请输入内容」",
+          "closing": "「请输入内容」",
+          "tags": [
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」",
+            "「请输入内容」"
+          ],
+          "metrics": [
+            {
+              "label": "「请输入标签」",
+              "value": "60",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "6.2",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "11",
+              "unit": "「单位」"
+            },
+            {
+              "label": "「请输入标签」",
+              "value": "5.5",
+              "unit": "「单位」"
+            }
+          ]
+        }
+      ],
+      "rankTotal": 5,
+      "shareTitle": "「请输入标题」",
+      "rankLabel": "「请输入标签」",
+      "shareCaption": "「请输入内容」",
+      "region": 0,
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "images": [],
+      "showShare": true,
+      "chartType": "「请输入内容」",
+      "tagCount": 4,
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page055",
+    "themeKey": "theme13",
+    "pageNumber": 55,
+    "layout": "THEME13-055",
+    "slot": "resource-triad-page",
+    "label": "页面 55",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "align",
+        "label": "对齐方式",
+        "type": "radio",
+        "default": "center",
+        "options": [
+          {
+            "value": "center",
+            "label": "居中"
+          },
+          {
+            "value": "left",
+            "label": "左对齐"
+          }
+        ],
+        "publicKey": "align",
+        "desc": "金句与三角资源的整体对齐方式。"
+      },
+      {
+        "key": "showPillars",
+        "label": "辅助信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showPillars",
+        "desc": "底部三类关键资源支柱行的显隐。"
+      },
+      {
+        "key": "pillarCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "pillarCount",
+        "desc": "展示的资源支柱数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一类资源支柱作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的资源支柱。"
+      },
+      {
+        "key": "showQuoteMark",
+        "label": "引号装饰",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showQuoteMark",
+        "desc": "超大引号装饰符号的显隐。"
+      },
+      {
+        "key": "showSource",
+        "label": "数据来源",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showSource",
+        "desc": "底部数据来源说明行的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、镜头光斑与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于金句重点词与支柱高亮。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "quoteLead": "「请输入内容」",
+      "quoteEm": "「请输入内容」",
+      "quoteTail": "「请输入内容」",
+      "pillars": [
+        {
+          "glyph": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "glyph": "「请输入内容」",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "glyph": "square",
+          "zh": "「请输入内容」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        }
+      ],
+      "source": "「数据来源」",
+      "align": "center",
+      "showPillars": true,
+      "pillarCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showQuoteMark": true,
+      "showSource": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page056",
+    "themeKey": "theme13",
+    "pageNumber": 56,
+    "layout": "THEME13-056",
+    "slot": "open-aicase-page",
+    "label": "案例页 56",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "展示的指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showTags",
+        "label": "标签文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTags",
+        "desc": "定位标签行的显隐。"
+      },
+      {
+        "key": "tagCount",
+        "label": "标签数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "tagCount",
+        "desc": "定位标签数量（2–3）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标、公司名压底与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于强调卡、标签与图形。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "logic": "「请输入内容」",
+      "company": "「请输入机构名称」",
+      "enName": "「请输入机构名称」",
+      "badge": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "66",
+          "unit": "「单位」",
+          "num": true
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "9.4",
+          "unit": "「单位」",
+          "num": true
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "38",
+          "unit": "「单位」",
+          "num": true
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "通用大模型",
+          "num": false
+        }
+      ],
+      "tags": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "images": [],
+      "metricCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showTags": true,
+      "tagCount": 3,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page057",
+    "themeKey": "theme13",
+    "pageNumber": 57,
+    "layout": "THEME13-057",
+    "slot": "figure-case-page",
+    "label": "案例页 57",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "numberSlant",
+        "label": "数字倾斜",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "numberSlant",
+        "desc": "主数字是否应用品牌斜切（italic-slant）效果。"
+      },
+      {
+        "key": "auxCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "auxCount",
+        "desc": "辅助指标数量（0–3）；为 0 时只保留主数字。"
+      },
+      {
+        "key": "showCaption",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCaption",
+        "desc": "主数字下方解释性说明的显隐。"
+      },
+      {
+        "key": "showNote",
+        "label": "辅助注释",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showNote",
+        "desc": "底部补充注释的显隐。"
+      },
+      {
+        "key": "showGhost",
+        "label": "背景大字",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showGhost",
+        "desc": "主数字背后的超大描边数字水印的显隐。"
+      },
+      {
+        "key": "showLens",
+        "label": "品牌图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLens",
+        "desc": "品牌透镜图形（焦点圆盘）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于主数字点缀、品牌图形与高亮。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "numLead": "「请输入内容」",
+      "numTail": "「请输入内容」",
+      "numUnit": "「单位」",
+      "ghost": "「请输入内容」",
+      "numCaption": "「请输入内容」",
+      "note": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "aux": [
+        {
+          "label": "「请输入标签」",
+          "value": "26",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "B 轮",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "人形机器人",
+          "unit": "「单位」"
+        }
+      ],
+      "numberSlant": true,
+      "auxCount": 3,
+      "showCaption": true,
+      "showNote": true,
+      "showGhost": true,
+      "showLens": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page058",
+    "themeKey": "theme13",
+    "pageNumber": 58,
+    "layout": "THEME13-058",
+    "slot": "ssicase-page",
+    "label": "案例页 58",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 1,
+        "min": 0,
+        "max": 2,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–2）；为 0 时以品牌图形填充，构图保持完整。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "portrait",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例并自动居中排布。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "展示的指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showTags",
+        "label": "标签文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTags",
+        "desc": "定位标签行的显隐。"
+      },
+      {
+        "key": "tagCount",
+        "label": "标签数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "tagCount",
+        "desc": "定位标签数量（2–3）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标、公司名压底与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于强调卡、标签与图形。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "logic": "「请输入内容」",
+      "company": "「请输入机构名称」",
+      "enName": "「请输入机构名称」",
+      "badge": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": "10",
+          "unit": "「单位」",
+          "num": true
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "0",
+          "unit": "「单位」",
+          "num": true
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "85",
+          "unit": "「单位」",
+          "num": true
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "安全智能",
+          "num": false
+        }
+      ],
+      "tags": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "imageCount": 1,
+      "imageRatio": "portrait",
+      "images": [],
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showTags": true,
+      "tagCount": 3,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
+  },
+  {
+    "key": "theme13_page059",
+    "themeKey": "theme13",
+    "pageNumber": 59,
+    "layout": "THEME13-059",
+    "slot": "risk-chapter-page",
+    "label": "章节页 59",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "backgroundVariant",
+        "label": "背景风格",
+        "type": "radio",
+        "default": "dark",
+        "options": [
+          {
+            "value": "dark",
+            "label": "深色"
+          },
+          {
+            "value": "paper",
+            "label": "浅色"
+          }
+        ],
+        "publicKey": "backgroundVariant",
+        "desc": "章节页背景：深色（强换气节奏）/ 浅色（与正文统一）。"
+      },
+      {
+        "key": "layout",
+        "label": "排版",
+        "type": "radio",
+        "default": "left",
+        "options": [
+          {
+            "value": "left",
+            "label": "左对齐"
+          },
+          {
+            "value": "center",
+            "label": "居中"
+          }
+        ],
+        "publicKey": "layout",
+        "desc": "标题与关键词的整体排布方式。"
+      },
+      {
+        "key": "showIndex",
+        "label": "章节序号",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showIndex",
+        "desc": "超大章节编号水印的显隐。"
+      },
+      {
+        "key": "showKeywords",
+        "label": "关键词",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showKeywords",
+        "desc": "本章关键词标签行的显隐。"
+      },
+      {
+        "key": "keywordCount",
+        "label": "关键词数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "keywordCount",
+        "desc": "展示的关键词数量（3–5）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "镜头光斑、背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "index": "05",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "keywords": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "backgroundVariant": "dark",
+      "layout": "left",
+      "showIndex": true,
+      "showKeywords": true,
+      "keywordCount": 5,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page060",
+    "themeKey": "theme13",
+    "pageNumber": 60,
+    "layout": "THEME13-060",
+    "slot": "revenue-page",
+    "label": "页面 60",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "stageCount",
+        "label": "阶段数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "stageCount",
+        "desc": "转化漏斗的阶段数量（2–3）。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "底部指标卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张指标卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标卡。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "漏斗阶段数值与转化率标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于漏斗、转化率与高亮卡。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "funnelTitle": "「请输入标题」",
+      "stages": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 100,
+          "note": "「请输入内容」",
+          "conv": null
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 28,
+          "note": "「请输入内容」",
+          "conv": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 23,
+          "note": "「请输入内容」",
+          "conv": "「请输入内容」"
+        }
+      ],
+      "metrics": [
+        {
+          "lbl": "「请输入内容」",
+          "val": "28",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "17",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "54",
+          "unit": "「单位」"
+        },
+        {
+          "lbl": "「请输入内容」",
+          "val": "31",
+          "unit": "「单位」"
+        }
+      ],
+      "stageCount": 3,
+      "metricCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page061",
+    "themeKey": "theme13",
+    "pageNumber": 61,
+    "layout": "THEME13-061",
+    "slot": "compliance-page",
+    "label": "页面 61",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "状态表格展示的行数量（3–5）。"
+      },
+      {
+        "key": "showLevel",
+        "label": "强度列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showStatusLevel",
+        "desc": "状态强度列（强度条 + 数值）的显隐。"
+      },
+      {
+        "key": "showFlow",
+        "label": "流程图",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showFlow",
+        "desc": "底部横向状态流程条的显隐。"
+      },
+      {
+        "key": "flowStepCount",
+        "label": "流程数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "flowStepCount",
+        "desc": "流程节点数量（3–5）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、高亮行与流程节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "level": "风险强度",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "level": 88,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 76,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 70,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 58,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 44,
+          "note": "「请输入内容」"
+        }
+      ],
+      "flowTitle": "「请输入标题」",
+      "flow": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "rowCount": 5,
+      "showLevel": true,
+      "showFlow": true,
+      "flowStepCount": 5,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    },
+    "numberBounds": {
+      "rows[].level": {
+        "min": 0,
+        "max": 100,
+        "semantics": "percent"
+      }
+    }
+  },
+  {
+    "key": "theme13_page062",
+    "themeKey": "theme13",
+    "pageNumber": 62,
+    "layout": "THEME13-062",
+    "slot": "margin-page",
+    "label": "页面 62",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "numberSlant",
+        "label": "数字倾斜",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "numberSlant",
+        "desc": "主数字是否应用品牌斜切（italic-slant）效果。"
+      },
+      {
+        "key": "auxCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "auxCount",
+        "desc": "辅助指标数量（0–3）；为 0 时只保留主数字。"
+      },
+      {
+        "key": "showCaption",
+        "label": "说明文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showCaption",
+        "desc": "主数字下方解释性说明的显隐。"
+      },
+      {
+        "key": "showGauge",
+        "label": "示意图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showGauge",
+        "desc": "成本 / 毛利构成的天花板示意条的显隐。"
+      },
+      {
+        "key": "showNote",
+        "label": "辅助注释",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showNote",
+        "desc": "底部补充注释的显隐。"
+      },
+      {
+        "key": "showLens",
+        "label": "品牌图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showLens",
+        "desc": "品牌透镜图形（焦点圆盘）的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于主数字点缀、毛利段与品牌图形。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "numLead": "「请输入内容」",
+      "numTail": "「请输入内容」",
+      "numUnit": "「单位」",
+      "numCaption": "「请输入内容」",
+      "ceilingLabel": "「请输入标签」",
+      "gaugeCap": "「请输入内容」",
+      "gaugeAnnotation": "「请输入内容」",
+      "gauge": [
+        {
+          "label": "「请输入标签」",
+          "value": 31,
+          "tone": "neg"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 15,
+          "tone": "faint"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 54,
+          "tone": "accent"
+        }
+      ],
+      "note": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "aux": [
+        {
+          "label": "「请输入标签」",
+          "value": "31",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "54",
+          "unit": "「单位」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": "-19",
+          "unit": "「单位」"
+        }
+      ],
+      "numberSlant": true,
+      "auxCount": 3,
+      "showCaption": true,
+      "showGauge": true,
+      "showNote": true,
+      "showLens": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page063",
+    "themeKey": "theme13",
+    "pageNumber": 63,
+    "layout": "THEME13-063",
+    "slot": "moat-page",
+    "label": "页面 63",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "pressure",
+        "options": [
+          {
+            "value": "pressure",
+            "label": "压力计"
+          },
+          {
+            "value": "bars",
+            "label": "占比条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "主图表样式：逼近壁垒线的压力计 / 资金占比条。"
+      },
+      {
+        "key": "segmentCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 3,
+        "min": 2,
+        "max": 3,
+        "step": 1,
+        "publicKey": "segmentCount",
+        "desc": "竞争压力指标数量（2–3）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个压力指标作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的压力指标。"
+      },
+      {
+        "key": "showBand",
+        "label": "示意图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBand",
+        "desc": "上方“独立空间被压缩”示意带的显隐。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "压力指标数值标签的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于分类标记、剩余壁垒与高亮指标。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "bandTitle": "「请输入标题」",
+      "bandLeft": "「请输入内容」",
+      "bandRight": "「请输入内容」",
+      "bandCore": "「请输入内容」",
+      "bandCoreSub": "「请输入内容」",
+      "metersTitle": "「请输入标题」",
+      "threshold": 60,
+      "indicators": [
+        {
+          "name": "「请输入机构名称」",
+          "value": 86,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 72,
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "value": 34,
+          "note": "「请输入内容」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "segmentCount": 3,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showBand": true,
+      "showValues": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    },
+    "numberBounds": {
+      "indicators[].value": {
+        "min": 0,
+        "max": 100,
+        "semantics": "percent"
+      }
+    }
+  },
+  {
+    "key": "theme13_page064",
+    "themeKey": "theme13",
+    "pageNumber": 64,
+    "layout": "THEME13-064",
+    "slot": "strategy-infra-page",
+    "label": "策略页 64",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "cardCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "推荐方向卡数量（2–4）。"
+      },
+      {
+        "key": "columns",
+        "label": "每行列数",
+        "type": "radio",
+        "default": 2,
+        "options": [
+          {
+            "value": 1,
+            "label": "1 列"
+          },
+          {
+            "value": 2,
+            "label": "2 列"
+          }
+        ],
+        "publicKey": "columns",
+        "desc": "卡片网格每行的列数。"
+      },
+      {
+        "key": "criteriaCount",
+        "label": "清单条目",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "itemCount",
+        "desc": "左侧筛选指标清单的条目数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张推荐方向卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 张"
+          },
+          {
+            "value": 1,
+            "label": "第 2 张"
+          },
+          {
+            "value": 2,
+            "label": "第 3 张"
+          },
+          {
+            "value": 3,
+            "label": "第 4 张"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的方向卡。"
+      },
+      {
+        "key": "showMeter",
+        "label": "示意图形",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showMeter",
+        "desc": "卡片上的确定性强度条显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于强度条、高亮卡与序号。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "criteriaTitle": "「请输入标题」",
+      "criteria": [
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "cardsTitle": "「请输入标题」",
+      "cards": [
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」",
+          "certainty": 92
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」",
+          "certainty": 84
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」",
+          "certainty": 80
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」",
+          "certainty": 74
+        }
+      ],
+      "cardCount": 4,
+      "columns": 2,
+      "criteriaCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showMeter": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    },
+    "numberBounds": {
+      "cards[].certainty": {
+        "min": 0,
+        "max": 100,
+        "semantics": "percent"
+      }
+    }
+  },
+  {
+    "key": "theme13_page065",
+    "themeKey": "theme13",
+    "pageNumber": 65,
+    "layout": "THEME13-065",
+    "slot": "strategy-vertical-page",
+    "label": "策略页 65",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "stepCount",
+        "label": "流程节点",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "stepCount",
+        "desc": "工作流链路的节点数量（3–5）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮工作流中的 AI 嵌入节点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 2,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          },
+          {
+            "value": 4,
+            "label": "第 5 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的嵌入节点。"
+      },
+      {
+        "key": "cardCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "底部筛选维度卡数量（2–4）。"
+      },
+      {
+        "key": "showTags",
+        "label": "标签行",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTags",
+        "desc": "底部落地场景标签行的显隐。"
+      },
+      {
+        "key": "tagCount",
+        "label": "标签数量",
+        "type": "slider",
+        "default": 5,
+        "min": 2,
+        "max": 5,
+        "step": 1,
+        "publicKey": "tagCount",
+        "desc": "展示的场景标签数量（2–5）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于嵌入节点、连接线与标签。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "flowTitle": "「请输入标题」",
+      "steps": [
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」",
+          "embed": true
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        }
+      ],
+      "embedNodeTag": "「请输入标签」",
+      "cardsTitle": "「请输入标题」",
+      "cards": [
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "en": "ENTER CONTENT",
+          "note": "「请输入内容」"
+        }
+      ],
+      "tagsTitle": "「请输入标题」",
+      "tags": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "stepCount": 5,
+      "focusEnabled": true,
+      "focusIndex": 2,
+      "cardCount": 4,
+      "showTags": true,
+      "tagCount": 5,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page066",
+    "themeKey": "theme13",
+    "pageNumber": 66,
+    "layout": "THEME13-066",
+    "slot": "repricing-page",
+    "label": "页面 66",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "nodeCount",
+        "label": "节点数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "nodeCount",
+        "desc": "时间轴上的观察公司节点数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一家观察公司作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的观察公司。"
+      },
+      {
+        "key": "showMetrics",
+        "label": "指标行",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showMetrics",
+        "desc": "底部观察指标行的显隐。"
+      },
+      {
+        "key": "metricCount",
+        "label": "指标数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "展示的观察指标数量（2–4）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于时间轴节点与高亮公司。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "axisLabel": "「请输入标签」",
+      "nodes": [
+        {
+          "name": "「请输入机构名称」",
+          "sector": "「请输入内容」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "sector": "「请输入内容」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "sector": "「请输入内容」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "sector": "「请输入内容」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "metricsTitle": "「请输入标题」",
+      "metrics": [
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        },
+        {
+          "name": "「请输入机构名称」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "nodeCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showMetrics": true,
+      "metricCount": 4,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page067",
+    "themeKey": "theme13",
+    "pageNumber": 67,
+    "layout": "THEME13-067",
+    "slot": "closing-page",
+    "label": "结尾页 67",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "align",
+        "label": "对齐方式",
+        "type": "radio",
+        "default": "center",
+        "options": [
+          {
+            "value": "center",
+            "label": "居中"
+          },
+          {
+            "value": "left",
+            "label": "左对齐"
+          }
+        ],
+        "publicKey": "align",
+        "desc": "金句与辅助信息的整体对齐方式。"
+      },
+      {
+        "key": "backgroundVariant",
+        "label": "背景风格",
+        "type": "radio",
+        "default": "paper",
+        "options": [
+          {
+            "value": "paper",
+            "label": "浅色"
+          },
+          {
+            "value": "dark",
+            "label": "深色"
+          }
+        ],
+        "publicKey": "backgroundVariant",
+        "desc": "收尾背景：浅色统一 / 深色换气强调。"
+      },
+      {
+        "key": "showKicker",
+        "label": "标题标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showKicker",
+        "desc": "顶部“最终判断”标签行的显隐。"
+      },
+      {
+        "key": "showQuoteMark",
+        "label": "引号装饰",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showQuoteMark",
+        "desc": "超大引号装饰符号的显隐。"
+      },
+      {
+        "key": "showTagline",
+        "label": "辅助信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showTagline",
+        "desc": "金句下方单行收束语的显隐。"
+      },
+      {
+        "key": "showBrand",
+        "label": "品牌签名",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBrand",
+        "desc": "左下角品牌标识的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、镜头光斑与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于金句重点词与装饰。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "kicker": "「请输入标题」",
+      "quoteLead": "「请输入内容」",
+      "quoteEm": "「请输入内容」",
+      "quoteTail": "「请输入内容」",
+      "tagline": "「请输入标签」",
+      "brandLabel": "「请输入机构名称」",
+      "brandSub": "「请输入内容」",
+      "align": "center",
+      "backgroundVariant": "「请输入内容」",
+      "showKicker": true,
+      "showQuoteMark": true,
+      "showTagline": true,
+      "showBrand": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page068",
+    "themeKey": "theme13",
+    "pageNumber": 68,
+    "layout": "THEME13-068",
+    "slot": "appendix-chapter-page",
+    "label": "章节页 68",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "backgroundVariant",
+        "label": "背景风格",
+        "type": "radio",
+        "default": "dark",
+        "options": [
+          {
+            "value": "dark",
+            "label": "深色"
+          },
+          {
+            "value": "paper",
+            "label": "浅色"
+          }
+        ],
+        "publicKey": "backgroundVariant",
+        "desc": "章节页背景：深色（强换气节奏）/ 浅色（与正文统一）。"
+      },
+      {
+        "key": "layout",
+        "label": "排版",
+        "type": "radio",
+        "default": "left",
+        "options": [
+          {
+            "value": "left",
+            "label": "左对齐"
+          },
+          {
+            "value": "center",
+            "label": "居中"
+          }
+        ],
+        "publicKey": "layout",
+        "desc": "标题与关键词的整体排布方式。"
+      },
+      {
+        "key": "showIndex",
+        "label": "章节序号",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showIndex",
+        "desc": "超大章节编号水印的显隐。"
+      },
+      {
+        "key": "showKeywords",
+        "label": "关键词",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showKeywords",
+        "desc": "本章关键词标签行的显隐。"
+      },
+      {
+        "key": "keywordCount",
+        "label": "关键词数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "keywordCount",
+        "desc": "展示的关键词数量（2–4）。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "镜头光斑、背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "index": "06",
+      "title": "「请输入标题」",
+      "sub": "「请输入内容」",
+      "lead": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "keywords": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "backgroundVariant": "dark",
+      "layout": "left",
+      "showIndex": true,
+      "showKeywords": true,
+      "keywordCount": 4,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    }
+  },
+  {
+    "key": "theme13_page069",
+    "themeKey": "theme13",
+    "pageNumber": 69,
+    "layout": "THEME13-069",
+    "slot": "forward-page",
+    "label": "页面 69",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "chartType",
+        "label": "图表类型",
+        "type": "radio",
+        "default": "slope",
+        "options": [
+          {
+            "value": "slope",
+            "label": "推演线"
+          },
+          {
+            "value": "bars",
+            "label": "偏离条"
+          }
+        ],
+        "publicKey": "chartType",
+        "desc": "前瞻图表样式：2024→2025E 推演线（扇形）/ 围绕基线的偏离条。"
+      },
+      {
+        "key": "metricCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "metricCount",
+        "desc": "展示的前瞻指标数量（3–5）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一个指标作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          },
+          {
+            "value": 4,
+            "label": "第 5 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的指标。"
+      },
+      {
+        "key": "showValues",
+        "label": "数值标签",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showValueLabels",
+        "desc": "指标 2025E 指数与变化徽标的显隐。"
+      },
+      {
+        "key": "showBand",
+        "label": "情景区间",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showBand",
+        "desc": "推演线的情景区间扇形带的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于上行指标、推演线与高亮元素。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorLabel": "「请输入标签」",
+      "scenarioTag": "ENTER CONTENT",
+      "closing": "「请输入内容」",
+      "panelTitle": "「请输入标题」",
+      "baselineLabel": "「请输入标签」",
+      "axisFrom": "2024",
+      "axisTo": "「请输入内容」",
+      "metrics": [
+        {
+          "label": "「请输入标签」",
+          "value": 138,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 124,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 105,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 88,
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "value": 82,
+          "note": "「请输入内容」"
+        }
+      ],
+      "chartType": "「请输入内容」",
+      "metricCount": 5,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showValues": true,
+      "showBand": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    },
+    "numberBounds": {
+      "metrics[].value": {
+        "min": 78,
+        "max": 146,
+        "semantics": "coordinate"
+      }
+    }
+  },
+  {
+    "key": "theme13_page070",
+    "themeKey": "theme13",
+    "pageNumber": 70,
+    "layout": "THEME13-070",
+    "slot": "sources-page",
+    "label": "页面 70",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "rowCount",
+        "label": "行数量",
+        "type": "slider",
+        "default": 6,
+        "min": 4,
+        "max": 6,
+        "step": 1,
+        "publicKey": "rowCount",
+        "desc": "口径表格展示的行数量（4–6）。"
+      },
+      {
+        "key": "showLevel",
+        "label": "强度列",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showStatusLevel",
+        "desc": "可信度列（强度条 + 数值）的显隐。"
+      },
+      {
+        "key": "showFlow",
+        "label": "流程图",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showFlow",
+        "desc": "底部横向口径处理流程条的显隐。"
+      },
+      {
+        "key": "flowStepCount",
+        "label": "流程数量",
+        "type": "slider",
+        "default": 5,
+        "min": 3,
+        "max": 5,
+        "step": 1,
+        "publicKey": "flowStepCount",
+        "desc": "流程节点数量（3–5）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一行作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 行"
+          },
+          {
+            "value": 1,
+            "label": "第 2 行"
+          },
+          {
+            "value": 2,
+            "label": "第 3 行"
+          },
+          {
+            "value": 3,
+            "label": "第 4 行"
+          },
+          {
+            "value": 4,
+            "label": "第 5 行"
+          },
+          {
+            "value": 5,
+            "label": "第 6 行"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的行。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于维度标记、高亮行与流程节点。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "marker": "「请输入机构名称」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "anchorValue": "「请输入内容」",
+      "anchorLabel": "「请输入标签」",
+      "closing": "「请输入内容」",
+      "colHeads": {
+        "dim": "「请输入内容」",
+        "level": "可信度",
+        "note": "「请输入内容」"
+      },
+      "rows": [
+        {
+          "dim": "「请输入内容」",
+          "level": 95,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 92,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 90,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 85,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 88,
+          "note": "「请输入内容」"
+        },
+        {
+          "dim": "「请输入内容」",
+          "level": 78,
+          "note": "「请输入内容」"
+        }
+      ],
+      "flowTitle": "「请输入标题」",
+      "flow": [
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "rowCount": 6,
+      "showLevel": true,
+      "showFlow": true,
+      "flowStepCount": 5,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showDecorations": true,
+      "accentColor": "#005DA2"
+    },
+    "numberBounds": {
+      "rows[].level": {
+        "min": 0,
+        "max": 100,
+        "semantics": "percent"
+      }
+    }
+  },
+  {
+    "key": "theme13_page071",
+    "themeKey": "theme13",
+    "pageNumber": 71,
+    "layout": "THEME13-071",
+    "slot": "about-lab-page",
+    "label": "关于页 71",
+    "bgClass": "",
+    "controls": [
+      {
+        "key": "imageCount",
+        "label": "图片数量",
+        "type": "slider",
+        "default": 2,
+        "min": 0,
+        "max": 3,
+        "step": 1,
+        "publicKey": "imageCount",
+        "desc": "主视觉区图片槽数量（0–3）；为 0 时以品牌图形填充，1 张可跟随原图比例，多张自动排成画廊。"
+      },
+      {
+        "key": "imageRatio",
+        "label": "图片比例",
+        "type": "radio",
+        "default": "auto",
+        "options": [
+          {
+            "value": "portrait",
+            "label": "竖图"
+          },
+          {
+            "value": "landscape",
+            "label": "横图"
+          },
+          {
+            "value": "square",
+            "label": "方形"
+          },
+          {
+            "value": "auto",
+            "label": "自适应"
+          }
+        ],
+        "publicKey": "imageRatio",
+        "desc": "图片槽比例；自适应会跟随用户上传图片的原始比例（单图自然排布，多图统一为画廊墙）。"
+      },
+      {
+        "key": "cardCount",
+        "label": "卡片数量",
+        "type": "slider",
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "step": 1,
+        "publicKey": "cardCount",
+        "desc": "左侧能力说明卡数量（2–4）。"
+      },
+      {
+        "key": "focusEnabled",
+        "label": "重点信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "focusEnabled",
+        "desc": "是否高亮某一张能力卡作为视觉重点。"
+      },
+      {
+        "key": "focusIndex",
+        "label": "重点元素",
+        "type": "select",
+        "default": 0,
+        "options": [
+          {
+            "value": 0,
+            "label": "第 1 个"
+          },
+          {
+            "value": 1,
+            "label": "第 2 个"
+          },
+          {
+            "value": 2,
+            "label": "第 3 个"
+          },
+          {
+            "value": 3,
+            "label": "第 4 个"
+          }
+        ],
+        "publicKey": "focusIndex",
+        "desc": "选择被高亮的能力卡。"
+      },
+      {
+        "key": "showContact",
+        "label": "联系信息",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showContact",
+        "desc": "底部联系信息行的显隐。"
+      },
+      {
+        "key": "showDecorations",
+        "label": "装饰文案",
+        "type": "toggle",
+        "default": true,
+        "publicKey": "showDecorations",
+        "desc": "背景光晕、图片角标与条码等装饰的显隐。"
+      },
+      {
+        "key": "accentColor",
+        "label": "主题色",
+        "type": "color",
+        "default": "#005DA2",
+        "options": [
+          {
+            "value": "#005DA2",
+            "label": "颜色 1"
+          },
+          {
+            "value": "#23C76A",
+            "label": "颜色 2"
+          },
+          {
+            "value": "#2F7BFF",
+            "label": "颜色 3"
+          },
+          {
+            "value": "#F2A93B",
+            "label": "颜色 4"
+          },
+          {
+            "value": "#0E110B",
+            "label": "颜色 5"
+          }
+        ],
+        "publicKey": "accentColor",
+        "desc": "品牌强调色，作用于序号、高亮卡与装饰。"
+      }
+    ],
+    "defaultProps": {
+      "eyebrow": "「请输入内容」",
+      "segment": "ENTER CONTENT",
+      "title": "「请输入标题」",
+      "titleTail": "「请输入标题」",
+      "lead": "「请输入内容」",
+      "statLine": "「请输入内容」",
+      "closing": "「请输入内容」",
+      "badge": "「请输入内容」",
+      "listTitle": "「请输入标题」",
+      "cards": [
+        {
+          "label": "「请输入标签」",
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "note": "「请输入内容」"
+        },
+        {
+          "label": "「请输入标签」",
+          "note": "「请输入内容」"
+        }
+      ],
+      "contactTitle": "「请输入标题」",
+      "contacts": [
+        "「请输入内容」",
+        "「请输入内容」"
+      ],
+      "imageCount": 2,
+      "imageRatio": "auto",
+      "images": [],
+      "cardCount": 4,
+      "focusEnabled": true,
+      "focusIndex": 0,
+      "showContact": true,
+      "showDecorations": true,
+      "accentColor": "#005DA2",
+      "renderSlot": null
+    }
   }
+
 ];

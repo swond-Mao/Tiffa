@@ -174,3 +174,5 @@ electron/_tail_check.js
 # managed-skills 依赖（各技能 node_modules / 缓存）
 data/agent/managed-skills/*/node_modules/
 data/agent/managed-skills/*/.cache/
+# dashiai-ppt project 依赖
+data/agent/managed-skills/dashiai-ppt/project/node_modules/

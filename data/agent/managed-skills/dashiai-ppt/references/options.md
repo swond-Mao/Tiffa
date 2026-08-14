@@ -55,3 +55,30 @@
 需要调整卡片/条目数量时,用 `cardCount`、`itemCount`、`stepCount` 等 count 参数控制显示数量。数组字段是模板内容池;只覆盖当前显示的前 N 项。被 count/显隐控制隐藏的尾项可保留“请输入文本”占位。
 
 不要使用旧的 `theme`、`fontSet`、`fontWeight`、`typeScale`、`styleVariant`、token 或开发者模式字段。
+
+## 内容填充校验（交付门禁，必须执行）
+
+渲染完成后、交付前，**必须**运行占位符校验，确认没有模板残留/未填充内容：
+
+```bash
+node <skill-root>/project/scripts/check-placeholders.mjs --dir <输出ppt目录>
+```
+
+- 退出码 `0` = 内容填充完整，可交付。
+- 退出码 `1` = 存在占位符（「请输入…」）或模板残留词（教育 AI / 融资 / 供应链 等），**禁止交付**，必须补充内容后重新渲染、再次校验。
+- 校验逻辑：读取 `index.html` 的 deck-view-model（sourceProps）与每页 `data-prop-defaults`（defaultProps）合并后检查。
+
+**占位符约定**：主题默认 props 已清洗为 `「请输入内容」` 等占位符，未填字段会在渲染时显示占位符——这正是校验要拦截的。AI 填充 props 时确保覆盖所有可见字段，不得保留占位符。
+
+### 渲染 + 自动校验（推荐入口，替代 render:goal）
+
+```bash
+npm --prefix <skill-root>/project run render:goal:check -- <goal.json> <输出ppt目录>/index.html
+```
+
+渲染成功后**自动执行内容填充校验**（check-placeholders.mjs）：
+- 退出码 `0` = 渲染成功且填充完整，可交付。
+- 退出码 `1` = 存在占位符/模板残留，**禁止交付**，补充内容后重跑本命令。
+- 退出码 `2` = 渲染失败/参数错误。
+
+**铁律**：交付用户前必须用 `render:goal:check`（或单独 `check:placeholders -- --dir <ppt目录>`）跑出退出码 0。不允许跳过校验直接交付。
