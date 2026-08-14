@@ -41,10 +41,38 @@ triggers:
 
 其他澄清规则：主题缺失必问；受众/场合影响表达则轻问 1 次；页数默认 10-15 不问；演讲者备注默认不写不问。
 用户说"直接做/你决定/看着办"或信息完整 → 跳过反问。**禁止多轮追问**。沟通用「页/封面/目录/这一页」术语，不暴露内部实现。
+## 项目目录约定（必须遵守）
 
-## 标准流程
+所有产物**必须**放在项目目录下，禁止散到 /tmp 或其他位置。
+
+```
+<项目目录>/
+├── STORY.md                 # 叙事逻辑
+├── DESIGN.md                # 设计稿
+├── design.json              # 项目配置（色板/字体/主题）
+├── pages/                   # 页面定义（slide_XX_名称.js）
+├── resources/
+│   └── images/              # 配图素材
+└── output/                  # 生成产物
+    ├── preview.html         # 翻页预览
+    ├── editor.html          # 交互式编辑器
+    └── 最终.pptx            # 编译产物（用户确认后生成）
+```
+
+**产物纪律**：
+- 项目目录由用户指定或由 AI 在合理位置创建（如用户工作目录）
+- 所有命令用 `--project <项目目录>` 指向项目根
+- `preview.js` 输出到 `<项目目录>/output/preview.html`
+- `render-editor.js` 输出到 `<项目目录>/output/editor.html`
+- `build.js` 的 `-o` 指向 `<项目目录>/output/xxx.pptx`
+- **禁止**把产物放到 /tmp、C 盘、技能目录等用户不知道的位置
+
+## 标准流程（编辑优先，确认后导出）
+
+> **核心原则**：先让用户在编辑器里改到满意，**用户确认后才编译 .pptx**。
 
 ### Step 0：模板/材料预处理（可选）
+
 
 **用户上传了模板 PPTX 要模仿风格**：
 ```bash
@@ -71,20 +99,30 @@ node scripts/profile_template.js <模板.pptx> -o design.json
 - **配图前置**：先定版式（含图片位）再定文字；需生图的先走 `image-gen-router` 技能出图到 `resources/images/`，逐张核对后再引用；暂无图则用 image 元素占位（自动渲染灰色占位块，后放图重新编译）
 - 动笔自检 10 条硬约束（见 design-principle.md §7），任一不过返工
 
-### Step 4：编译
+### Step 4：生成编辑器与预览
 ```bash
-node scripts/build.js --project <项目目录> -o 输出.pptx
+node scripts/render-editor.js --project <项目目录>   # → output/editor.html
+node scripts/preview.js --project <项目目录>         # → output/preview.html
+```
+把 editor.html 给用户打开，让用户在编辑器里**改字/换主题/调布局/加删元素**。
+> 不要替用户编译 .pptx！用户还没改过，编译了也是废的。
+
+### Step 5：用户确认后编译
+**用户说"满意了/可以了/导出吧/生成 pptx"**，再执行：
+```bash
+node scripts/build.js --project <项目目录> -o <项目目录>/output/最终.pptx
 # 内部先 lint（配色/溢出/母版区/Hero 锚点）后渲染，lint 失败不输出
+# lint 报错须先修复页面定义再重跑，不可跳过
 ```
 
-### Step 5：预览
-```bash
-node scripts/preview.js --project <项目目录>
-# 生成 HTML 版式快照，同时 .pptx 可用 WPS/Office 打开
-```
+> **双引擎视觉**（v1.1+）：页面 DSL 支持增强元素 `gradientBar/glowOrb/decoBlock/kpiBlock`，
+> HTML 预览/编辑器用 CSS 完整呈现（渐变/光晕/网格纹理）；`build.js` 导出 .pptx 时降级映射
+> 为原生形状（渐变→双层矩形、光晕→多层半透明椭圆、装饰→透明圆角块）。
+> 主题由 `page.theme` 或 `design.json.theme` 引用，增强视觉语言来自 `scripts/visual/themes.js`。
 
 ### Step 6：交付
-用面向用户语言说明主题、页数、风格要点，提示预览与 .pptx 路径。
+用面向用户语言说明主题、页数、风格要点，提示 .pptx 与 editor.html 路径。
+告诉用户 editor.html 可反复修改后重新编译。
 
 ## 预设风格（references/designs/）
 
