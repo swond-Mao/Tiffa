@@ -1574,9 +1574,26 @@ function setupIpc() {
         const dirName = encodeSessionDirName(normalized);
         const projectPath = path.join(SESSIONS_DIR, dirName);
 
-        // 统计会话数（递归含分支子目录 *_<uuid>/，与 sessions:listSessions 口径一致）
+        // 会话附属目录判定（listProjects / listSessions 共用）：
+        // 子目录名与“顶层会话名”相同（或以其+_开头）→ bash 日志/压缩归档等附属内容，
+        // 内部 jsonl 不是独立会话（否则一个对话的归档会分裂成多个列表项）
+        let _topNames = null;
+        const isAttachmentDir = (dirName) => {
+          if (!_topNames) {
+            _topNames = new Set();
+            try {
+              for (const e of fs.readdirSync(projectPath, { withFileTypes: true })) {
+                if (e.isFile() && e.name.endsWith('.jsonl')) _topNames.add(e.name.slice(0, -'.jsonl'.length));
+              }
+            } catch { /* ignore */ }
+          }
+          for (const t of _topNames) if (dirName === t || dirName.startsWith(t + '_')) return true;
+          return false;
+        };
+
+        // 统计会话数（与 sessions:listSessions 口径一致：顶层会话 + 非附属子目录）
         let sessionCount = 0;
-        const countJsonl = (dir) => {
+        const countJsonl = (dir, isTop) => {
           let entries;
           try {
             entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -1585,11 +1602,15 @@ function setupIpc() {
           }
           for (const entry of entries) {
             const full = path.join(dir, entry.name);
-            if (entry.isDirectory()) countJsonl(full);
-            else if (entry.isFile() && entry.name.endsWith('.jsonl')) sessionCount++;
+            if (entry.isDirectory()) {
+              // 顶层以下目录名以“顶层会话名_”开头 → 会话附属目录（bash 日志/压缩归档），
+              // 内部 jsonl 不是独立会话（否则一个对话的归档会分裂成多个列表项）
+              if (isTop && isAttachmentDir(entry.name)) continue;
+              countJsonl(full, false);
+            } else if (entry.isFile() && entry.name.endsWith('.jsonl')) sessionCount++;
           }
         };
-        if (fs.existsSync(projectPath)) countJsonl(projectPath);
+        if (fs.existsSync(projectPath)) countJsonl(projectPath, true);
 
         result.push({
           dirName,
@@ -1647,9 +1668,22 @@ function setupIpc() {
       const projectPath = path.join(SESSIONS_DIR, projectDirName);
       if (!fs.existsSync(projectPath)) return [];
 
-      // 递归收集所有 .jsonl（含分支会话子目录 *_<uuid>/ 内的），修复分支会话丢失
+      // 顶层会话名（去 .jsonl）：子目录名与“顶层会话名”相同（或以其+_开头）→ 会话附属目录
+      // （bash 日志/压缩归档 P*.jsonl 等），内部 jsonl 不视为独立会话，
+      // 否则一个对话的归档会分裂成多个列表项（用户看到“一个对话变成好几个”）。
+      const isAttachmentDir = (dirName) => {
+        const topNames = new Set();
+        for (const e of fs.readdirSync(projectPath, { withFileTypes: true })) {
+          if (e.isFile() && e.name.endsWith('.jsonl')) topNames.add(e.name.slice(0, -'.jsonl'.length));
+        }
+        for (const t of topNames) if (dirName === t || dirName.startsWith(t + '_')) return true;
+        return false;
+      };
+
+      // 收集 .jsonl：顶层全部；子目录仅当不是会话附属目录时才递归
+      // （保留非附属子目录内的真会话文件，与旧“分支会话丢失”修复兼容）
       const files = [];
-      const walk = (dir) => {
+      const walk = (dir, isTop) => {
         let entries;
         try {
           entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -1659,13 +1693,14 @@ function setupIpc() {
         for (const entry of entries) {
           const full = path.join(dir, entry.name);
           if (entry.isDirectory()) {
-            walk(full);
+            if (isTop && isAttachmentDir(entry.name)) continue;
+            walk(full, false);
           } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
             files.push(full);
           }
         }
       };
-      walk(projectPath);
+      walk(projectPath, true);
       // 按文件名（ISO 时间戳前缀）正序，最旧在前；分支子目录与顶层混排时按 basename 比较保持时间序
       files.sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
 
