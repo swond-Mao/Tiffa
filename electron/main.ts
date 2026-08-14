@@ -1424,9 +1424,9 @@ function setupIpc() {
       for (const line of lines) {
         try {
           const obj = JSON.parse(line);
-          // title 事件格式: {"type":"title","v":1,"title":"实际标题","updatedAt":"..."}
-          // v 是版本号不是标题，只有 title 字段有值时才取
-          if (obj.type === 'title' && obj.title && !title) {
+          // title 事件取“最后一个”（覆盖语义）：手动重命名以追加 title 事件行实现，
+          // 新追加的（更新的）必须优先。
+          if (obj.type === 'title' && obj.title) {
             title = obj.title;
           }
           if (obj.id && !sessionId && obj.version) {
@@ -1450,6 +1450,26 @@ function setupIpc() {
             }
           }
         } catch {}
+      }
+
+      // 追加标题（手动重命名）在文件尾部：头部 64KB 读不到时，扫描文件尾部 4KB
+      // 取最新 title 事件（与 session-utils.parseSessionHeader 一致）
+      if (stat.size > headSize) {
+        const tailSize = Math.min(4096, stat.size);
+        const fd2 = fs.openSync(filePath, 'r');
+        try {
+          const buf2 = Buffer.alloc(tailSize);
+          fs.readSync(fd2, buf2, 0, tailSize, stat.size - tailSize);
+          const tailLines = buf2.toString('utf8').split('\n').filter((l) => l.trim());
+          for (const line of tailLines) {
+            try {
+              const obj = JSON.parse(line);
+              if (obj.type === 'title' && obj.title) title = obj.title;
+            } catch {}
+          }
+        } finally {
+          fs.closeSync(fd2);
+        }
       }
 
       return {
@@ -2014,29 +2034,28 @@ function setupIpc() {
     }
   });
 
-  // ── 重命名会话：修改 jsonl 文件中的 title ──
+  // ── 重命名会话：追加 title 事件行（不重写文件，避免与内核写盘竞态）──
   ipcMain.handle('sessions:rename', async (event, sessionPath, newTitle) => {
     try {
       const resolved = path.resolve(sessionPath);
       if (!resolved.endsWith('.jsonl') || !fs.existsSync(resolved)) {
         return { error: 'Session file not found' };
       }
-      const text = fs.readFileSync(resolved, 'utf8');
-      const firstNewline = text.indexOf('\n');
-      if (firstNewline < 0) {
-        return { error: 'Invalid session file' };
+      if (!newTitle || typeof newTitle !== 'string' || !String(newTitle).trim()) {
+        return { error: 'Invalid title' };
       }
-      const firstLine = text.substring(0, firstNewline);
-      let header;
-      try {
-        header = JSON.parse(firstLine);
-      } catch {
-        return { error: 'Invalid session header JSON' };
-      }
-      header.title = newTitle;
-      const newFirstLine = JSON.stringify(header) + '\n';
-      const newText = newFirstLine + text.substring(firstNewline + 1);
-      fs.writeFileSync(resolved, newText, 'utf8');
+      // 旧实现 readFileSync + writeFileSync 整文件重写：与内核实例的并发写盘
+      // （消息行/custom 心跳行）竞态，重写会覆盖内核尚未落盘/刚写入的内容 →
+      // 刷新页面读到缺尾部的会话文件（AI 重命名后刷新丢尾部对话，关闭重开才恢复）。
+      // 改为原子追加 title 事件行：不动已有内容，parseSessionHeader 取最新 title 事件。
+      const titleLine = JSON.stringify({
+        type: 'title',
+        v: 1,
+        title: String(newTitle).trim().slice(0, 60),
+        source: 'manual',
+        updatedAt: new Date().toISOString(),
+      }) + '\n';
+      fs.appendFileSync(resolved, titleLine, 'utf8');
       return { success: true };
     } catch (err) {
       return { error: err.message };

@@ -414,7 +414,9 @@ export function parseSessionHeader(filePath: string): SessionHeader {
     for (const line of lines) {
       try {
         const obj = JSON.parse(line) as JsonlLine;
-        if (obj.type === 'title' && obj.title && !title) {
+        // title 事件取“最后一个”（覆盖语义）：手动重命名以追加 title 事件行实现，
+        // 头部可能有多条旧 title 事件；新追加的（更新的）必须优先。
+        if (obj.type === 'title' && obj.title) {
           title = obj.title as string;
         }
         if (obj.id && !sessionId && obj.version) {
@@ -442,6 +444,28 @@ export function parseSessionHeader(filePath: string): SessionHeader {
         }
       } catch {
         // skip
+      }
+    }
+
+    // 追加标题（手动重命名）在文件尾部：头部 64KB 读不到时，扫描文件尾部 4KB
+    // 取最新 title 事件（旧实现只扫头部，追加的标题对长会话不生效）
+    if (stat.size > headSize) {
+      const tailSize = Math.min(4096, stat.size);
+      const fd2 = fs.openSync(filePath, 'r');
+      try {
+        const buf2 = Buffer.alloc(tailSize);
+        fs.readSync(fd2, buf2, 0, tailSize, stat.size - tailSize);
+        const tailLines = buf2.toString('utf8').split('\n').filter((l) => l.trim());
+        for (const line of tailLines) {
+          try {
+            const obj = JSON.parse(line) as JsonlLine;
+            if (obj.type === 'title' && obj.title) title = obj.title as string;
+          } catch {
+            // skip
+          }
+        }
+      } finally {
+        fs.closeSync(fd2);
       }
     }
 
