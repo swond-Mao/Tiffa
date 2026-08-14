@@ -134,6 +134,11 @@ async function main() {
       const { html, css, meta } = await mod.renderLayoutPage(page.layout, page.data || {});
       page._layoutHtml = html;
       page._layoutLabel = meta.label || page.layout;
+      try {
+        const c = await mod.describeLayout(page.layout);
+        page._layoutControls = (c && c.controls) || [];
+        page._layoutDefaults = (c && c.defaultProps) || {};
+      } catch(e2) { page._layoutControls = []; }
       if (css && !layoutCssList.includes(css)) layoutCssList.push(css);
     } catch (e) {
       console.warn('[layout] ' + page.layout + ' 渲染失败: ' + e.message);
@@ -147,6 +152,10 @@ async function main() {
   const deckData = JSON.stringify({ design, pages }).replace(/</g, '\\u003c');
   const layoutStyle = layoutCssList.length ? '<style>' + layoutCssList.join('\n') + '</style>' : '';
 
+  // 浏览器端导出组件（file:// 绝对路径，随技能目录走）
+  const vendorScriptTags = [
+    'html-to-image.js','pptxgen.bundle.js','editable-pptx-browser.js','pdf-lib.min.js','gsap.min.js'
+  ].map(f => '<script src="' + pathToFileURL(path.join(__dirname, '..', 'assets', 'vendor', f)).href + '"></script>').join('\n');
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -192,10 +201,34 @@ async function main() {
   #exportBanner .btn { padding:3px 12px; font-size:12px; background:#991B1B; color:#FECACA; }
   #exportBanner .btn:hover { background:#B91C1C; }
   #exportBanner.ok { background:#065F46; color:#A7F3D0; border-bottom-color:#047857; }
+  /* ---- 原创暗色 UI 升级 ---- */
+  #topbar { background:linear-gradient(180deg,#1E293B,#16202F); box-shadow:0 1px 0 rgba(255,255,255,.06), 0 4px 18px rgba(0,0,0,.35); position:relative; z-index:6; }
+  .title { letter-spacing:.4px; }
+  .tab { border-radius:8px; transition:all .15s; }
+  .tab:hover { background:#475569; color:#fff; }
+  .btn { border-radius:8px; transition:all .15s; box-shadow:0 1px 2px rgba(0,0,0,.3); }
+  .btn:hover { filter:brightness(1.12); transform:translateY(-1px); }
+  #stage { background:radial-gradient(ellipse 80% 60% at 50% 0%, #1E293B 0%, #0B1220 100%); }
+  #panel { background:#141D2E; border-left:1px solid #24334A; box-shadow:-4px 0 18px rgba(0,0,0,.25); }
+  #panel h3 { font-size:13px; color:#E2E8F0; border-bottom:1px solid #24334A; padding-bottom:8px; }
+  .field label { color:#94A3B8; }
+  .field input,.field select { border-radius:6px; background:#0F1A2E; border:1px solid #2A3B57; }
+  #rail { width:176px; background:#101A2B; border-right:1px solid #24334A; overflow-y:auto; padding:10px 0; flex:none; scrollbar-width:thin; scrollbar-color:#334155 transparent; }
+  .rail-item { position:relative; width:152px; height:86px; margin:0 auto 10px; border-radius:8px; overflow:hidden; cursor:pointer; border:2px solid transparent; background:#0B1524; transition:border-color .15s, box-shadow .15s; }
+  .rail-item:hover { border-color:#3D5A85; }
+  .rail-item.active { border-color:#3B82F6; box-shadow:0 0 0 1px #3B82F6, 0 4px 12px rgba(59,130,246,.25); }
+  .rail-mini { position:absolute; left:50%; top:50%; margin-left:-640px; margin-top:-360px; }
+  .rail-label { position:absolute; left:5px; bottom:3px; font-size:10px; color:#E2E8F0; background:rgba(11,21,36,.78); padding:1px 6px; border-radius:4px; }
+  #canvasWrap { position:relative; }
+  #pager { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:10px; background:rgba(20,29,46,.92); border:1px solid #2A3B57; border-radius:999px; padding:5px 14px; z-index:5; box-shadow:0 4px 16px rgba(0,0,0,.4); backdrop-filter:blur(6px); }
+  .pg { width:26px; height:26px; border-radius:50%; border:1px solid #334155; background:#1E293B; color:#E2E8F0; font-size:15px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; }
+  .pg:hover { background:#3B82F6; border-color:#3B82F6; color:#fff; }
+  #pgCount { color:#CBD5E1; font-size:12px; min-width:44px; text-align:center; font-variant-numeric:tabular-nums; }
 </style>
 ${layoutStyle}
 </head>
 <body>
+  ${vendorScriptTags}
   <div id="topbar">
     <span class="title">${esc(design.title || 'PPT 编辑器')}</span>
     <span id="tabs"></span>
@@ -210,14 +243,23 @@ ${layoutStyle}
     <button class="btn btn-primary" style="background:#059669" onclick="exportTo('pdf')">导出 PDF</button>
   </div>
   <div id="exportBanner">
-    <span>导出服务未启动，无法一键导出 PPTX/PDF。请先运行 <code>node scripts/serve-export.cjs</code></span>
+    <span>已启用浏览器端导出（无需服务）；如需服务端导出请运行 <code>node scripts/serve-export.cjs</code></span>
     <button class="btn" onclick="checkExportService(true)">重试</button>
   </div>
   <div id="stage">
-    <div id="canvasWrap"><div id="canvas"></div></div>
+    <aside id="rail"></aside>
+    <div id="canvasWrap">
+      <div id="canvas"></div>
+      <div id="pager">
+        <button class="pg" onclick="pg(-1)">&#8249;</button>
+        <span id="pgCount">1 / 1</span>
+        <button class="pg" onclick="pg(1)">&#8250;</button>
+      </div>
+    </div>
     <div id="panel"><div class="empty">点击画布中的元素进行编辑<br/><br/>拖动移动 · 右下角手柄缩放 · 双击改文字<br/>图表可在右侧增删系列 / 设置强调</div></div>
   </div>
   <div id="toast"></div>
+  <div id="deck" style="position:absolute;left:-20000px;top:0;width:1280px;height:720px;overflow:hidden;pointer-events:none"></div>
 <script>
 const DECK = ${deckData};
 // 主题库（16 套，供编辑器切主题/装饰/背景用）
@@ -251,7 +293,7 @@ function render(){
     canvas.style.background = bg;
     canvas.insertAdjacentHTML('beforeend', '<div style="position:absolute;inset:0">'+page._layoutHtml+'</div>');
     canvas.insertAdjacentHTML('beforeend', '<div style="position:absolute;right:10px;top:10px;background:rgba(124,58,237,.9);color:#fff;font-size:12px;padding:4px 10px;border-radius:999px;z-index:5">模板页 · '+esc(page._layoutLabel||page.layout||'')+'</div>');
-    renderTabs();
+    renderTabs(); renderRail(); updatePager();
     return;
   }
   // 主题背景（含径向光效纹理）
@@ -269,7 +311,7 @@ function render(){
     div.addEventListener('dblclick', e => editText(i, e));
     canvas.appendChild(div);
   });
-  renderTabs();
+  renderTabs(); renderRail(); updatePager();
 }
 // ---------- 页面装饰层（编辑器预览） ----------
 function decoHtml(page, th){
@@ -348,12 +390,51 @@ function elHtml(el, page){
 function rgbaOf(hex, a){ var h=String(hex||'').replace('#',''); if(!h) return hex; var full=h.length===3?h.split('').map(function(c){return c+c}).join(''):h; var n=parseInt(full,16); return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')'; }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// ---------- 左侧缩略图栏 ----------
+function renderRail(){
+  const rail = document.getElementById('rail');
+  if(!rail) return;
+  rail.innerHTML = '';
+  DECK.pages.forEach((page, i)=>{
+    const item = document.createElement('div');
+    item.className = 'rail-item' + (i === cur ? ' active' : '');
+    item.title = (i+1) + ' ' + (page.type || '');
+    item.onclick = function(){ goPage(i); };
+    const mini = document.createElement('div');
+    mini.className = 'rail-mini';
+    mini.style.cssText = 'width:1280px;height:720px;transform:scale(0.125);transform-origin:top left;background:' + (page.background || '#FFFFFF');
+    if(page._layoutHtml){
+      mini.innerHTML = '<div style="position:absolute;inset:0">' + page._layoutHtml + '</div>';
+    } else {
+      (page.elements||[]).forEach(el=>{ mini.innerHTML += elHtml(el, page); });
+    }
+    item.appendChild(mini);
+    const label = document.createElement('div');
+    label.className = 'rail-label';
+    label.textContent = (i+1) + ' ' + (page.type || '');
+    item.appendChild(label);
+    rail.appendChild(item);
+  });
+}
+function pg(d){
+  goPage(Math.max(0, Math.min(DECK.pages.length - 1, cur + d)));
+}
+function updatePager(){
+  const el = document.getElementById('pgCount');
+  if(el) el.textContent = (cur + 1) + ' / ' + DECK.pages.length;
+}
 // ---------- 页面 tabs ----------
 function renderTabs(){
   $('#tabs').innerHTML = DECK.pages.map((p,i)=>
     '<button class="tab'+(i===cur?' active':'')+'" onclick="goPage('+i+')">'+(i+1)+' '+(p.type||'')+'</button>').join('');
 }
-function goPage(i){ cur=i; selIdx=-1; render(); syncThemeSel(); $('#panel').innerHTML='<div class="empty">点击元素编辑</div>'; }
+function goPage(i){ cur=i; selIdx=-1; render(); syncThemeSel(); $('#panel').innerHTML='<div class="empty">点击元素编辑</div>'; animateIn(); }
+function animateIn(){
+  if(!window.gsap) return;
+  const els = canvas.querySelectorAll('.el');
+  if(!els.length) return;
+  gsap.fromTo(els, {opacity:0, y:12}, {opacity:1, y:0, duration:0.35, stagger:0.03, ease:'power2.out'});
+}
 
 // ---------- 选中 + 拖拽 ----------
 function select(i, e){
@@ -404,6 +485,11 @@ function editText(i, e){
 
 // ---------- 属性面板 ----------
 function renderPanel(){
+  const lpage = DECK.pages[cur];
+  if(lpage && lpage.layout && lpage._layoutControls && lpage._layoutControls.length){
+    renderLayoutPanel(lpage);
+    return;
+  }
   if(selIdx < 0){ panel.innerHTML = '<div class="empty">点击元素编辑</div>'; return; }
   const el = DECK.pages[cur].elements[selIdx];
   let h = '<h3>元素 #'+(selIdx+1)+' · '+el.type+'</h3>';
@@ -459,6 +545,35 @@ function renderPanel(){
   panel.innerHTML = h;
 }
 
+function renderLayoutPanel(page){
+  let h = '<h3>模板页字段 · ' + esc(page._layoutLabel || page.layout) + '</h3>';
+  h += '<div style="color:#94A3B8;font-size:12px;margin-bottom:10px">修改后导出立即生效；重新生成 editor.html 可预览最新效果</div>';
+  (page._layoutControls || []).forEach(c=>{
+    const val = (page.data && page.data[c.key] !== undefined) ? page.data[c.key] : c.default;
+    h += '<div class="field"><label>' + esc(c.label || c.key) + (c.unit ? '（' + esc(c.unit) + '）' : '') + '</label>';
+    if(c.type === 'number'){
+      h += '<input type="number" min="' + (c.min !== undefined ? c.min : '') + '" max="' + (c.max !== undefined ? c.max : '') + '" step="' + (c.step !== undefined ? c.step : 1) + '" value="' + (val !== undefined ? val : '') + '" onchange="setLayoutField(' + cur + ',\\'' + c.key + '\\',+this.value)">';
+    } else if(c.type === 'boolean'){
+      h += '<select onchange="setLayoutField(' + cur + ',\\'' + c.key + '\\',this.value===\\'true\\')"><option value="false"' + (val ? '' : ' selected') + '>否</option><option value="true"' + (val ? ' selected' : '') + '>是</option></select>';
+    } else if(c.type === 'color'){
+      const opts = (c.options && c.options.length) ? c.options.map(o=>'<option value="' + esc(o.value) + '"' + (String(val) === String(o.value) ? ' selected' : '') + '>' + esc(o.label || o.value) + '</option>').join('') : '';
+      h += opts ? '<select onchange="setLayoutField(' + cur + ',\\'' + c.key + '\\',this.value)">' + opts + '</select>' : '<input type="color" value="' + (val || '#000000') + '" onchange="setLayoutField(' + cur + ',\\'' + c.key + '\\',this.value)">';
+    } else if(c.type === 'select' && c.options && c.options.length){
+      h += '<select onchange="setLayoutField(' + cur + ',\\'' + c.key + '\\',this.value)">' + c.options.map(o=>'<option value="' + esc(o.value) + '"' + (String(val) === String(o.value) ? ' selected' : '') + '>' + esc(o.label || o.value) + '</option>').join('') + '</select>';
+    } else {
+      h += '<input type="text" value="' + esc(val !== undefined ? val : '') + '" onchange="setLayoutField(' + cur + ',\\'' + c.key + '\\',this.value)">';
+    }
+    if(c.desc) h += '<div style="color:#64748B;font-size:11px;margin-top:3px">' + esc(c.desc) + '</div>';
+    h += '</div>';
+  });
+  panel.innerHTML = h;
+}
+function setLayoutField(i, key, v){
+  const page = DECK.pages[cur];
+  if(!page.data) page.data = {};
+  page.data[key] = v;
+  toast('已更新：' + key + '（导出生效；重新生成 editor.html 预览）');
+}
 function chartPanel(el, idx){
   let h = '<div class="field"><label>图表类型</label><select onchange="setF('+idx+',\\'chartType\\',this.value)">';
   ['bar','line','pie','doughnut','area'].forEach(t=>{ h += '<option'+(el.chartType===t?' selected':'')+'>'+t+'</option>'; });
@@ -536,10 +651,9 @@ function exportDir(){
     return idx > 0 ? p.slice(0, idx) : ''; // editor.html 所在目录（项目 output/）
   }catch{ return ''; }
 }
-async function exportTo(format){
+async function exportToServer(format){
   const outDir = exportDir();
   if(!outDir){ toast('无法确定项目 output 目录'); return; }
-  if(!(await checkExportService())){ toast('导出服务未启动，请先运行 node scripts/serve-export.cjs'); return; }
   toast('正在导出 '+format.toUpperCase()+' …');
   try{
     const resp = await fetch(EXPORT_BASE+'/api/export', {
@@ -551,8 +665,90 @@ async function exportTo(format){
     if(data && data.ok){ toast('✅ 已导出: ' + data.file); }
     else { toast('导出失败: ' + ((data&&data.error)||'未知错误')); console.error('[export]', data); }
   }catch(e){
-    toast('导出服务未启动：请先运行 node scripts/serve-export.cjs');
-    console.error('[export]', e);
+    toast('服务端导出异常，改用浏览器端导出…');
+    console.error('[export-server]', e);
+  }
+}
+async function exportTo(format){
+  const serverOk = await checkExportService(false);
+  if(serverOk){ await exportToServer(format); return; }
+  if(format === 'pptx'){ await exportPptxBrowser(); return; }
+  if(format === 'pdf'){ await exportPdfBrowser(); return; }
+  toast('不支持的格式: ' + format);
+}
+// ---------- 浏览器端导出（无需 serve-export 服务） ----------
+function mirrorAllRender(){
+  const deck = document.getElementById('deck');
+  if(!deck) return;
+  deck.innerHTML = '';
+  DECK.pages.forEach((page, pi)=>{
+    const slide = document.createElement('div');
+    slide.className = 'slide' + (pi === 0 ? ' active' : '');
+    slide.style.cssText = 'position:absolute;left:0;top:0;width:1280px;height:720px;overflow:hidden;background:' + (page.background || '#FFFFFF');
+    if(page._layoutHtml){
+      slide.innerHTML = '<div style="position:absolute;inset:0">' + page._layoutHtml + '</div>';
+    } else {
+      (page.elements||[]).forEach(el=>{
+        const node = document.createElement('div');
+        if(el.type === 'text') node.setAttribute('data-editable-pptx-required-text','');
+        node.innerHTML = elHtml(el, page);
+        slide.appendChild(node);
+      });
+    }
+    deck.appendChild(slide);
+  });
+}
+window.go = function(i){
+  const slides = document.querySelectorAll('#deck > .slide');
+  slides.forEach((s, idx)=>{ s.classList.toggle('active', idx === i); });
+};
+window.__getVisibleSlides = function(){
+  return [...document.querySelectorAll('#deck > .slide:not([hidden])')];
+};
+async function exportPptxBrowser(){
+  if(!window.__editablePptxBrowser){ toast('导出引擎未加载（请刷新页面重试）'); return; }
+  if(!window.PptxGenJS || !window.htmlToImage){ toast('导出组件未加载'); return; }
+  mirrorAllRender();
+  toast('正在导出 PPTX…');
+  try{
+    const { blob, report } = await window.__editablePptxBrowser.exportEditablePptxInBrowser({
+      title: (DECK.design && DECK.design.title) || 'Presentation',
+      onProgress: function(up){ if(up && up.detail) toast('导出中 · ' + up.detail); },
+    });
+    download(blob, 'deck.pptx');
+    toast('✅ PPTX 已导出（' + ((report && report.slideCount) || DECK.pages.length) + ' 页）');
+  }catch(e){
+    console.error('[export-pptx-browser]', e);
+    toast('浏览器端导出失败：' + (e && e.message || e));
+  }
+}
+async function exportPdfBrowser(){
+  if(!window.htmlToImage || !window.PDFLib){ toast('PDF 组件未加载'); return; }
+  const saved = cur;
+  toast('正在导出 PDF…');
+  const pages = [];
+  try{
+    for(let i=0;i<DECK.pages.length;i++){
+      cur = i; render();
+      await new Promise(r=>setTimeout(r,60));
+      const dataUrl = await htmlToImage.toPng(document.getElementById('canvas'), { width:1280, height:720, pixelRatio:2, cacheBust:true });
+      pages.push(dataUrl);
+      if(i % 5 === 4) toast('截图 ' + (i+1) + '/' + DECK.pages.length);
+    }
+    const pdf = await window.PDFLib.PDFDocument.create();
+    for(const du of pages){
+      const img = await pdf.embedPng(du);
+      const page = pdf.addPage([960, 540]);
+      page.drawImage(img, { x:0, y:0, width:960, height:540 });
+    }
+    const bytes = await pdf.save();
+    download(new Blob([bytes], {type:'application/pdf'}), 'deck.pdf');
+    toast('✅ PDF 已导出（' + pages.length + ' 页）');
+  }catch(e){
+    console.error('[export-pdf-browser]', e);
+    toast('PDF 导出失败：' + (e && e.message || e));
+  }finally{
+    cur = saved; render();
   }
 }
 function setImagePath(i,v){

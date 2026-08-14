@@ -24,7 +24,7 @@ triggers:
 
 ## 首次使用准备（新机器/新 clone 必须执行）
 
-技能依赖（react/react-dom/playwright-core/pptxgenjs/pdf-lib/pngjs）不入库，新机器 clone 后须先安装：
+技能依赖（react/react-dom/playwright-core/pptxgenjs/pdf-lib/pngjs/html-to-image/gsap）不入库，新机器 clone 后须先安装：
 
 ```bash
 cd data/agent/managed-skills/pptx-designer
@@ -153,12 +153,12 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 ### Step 6：生成编辑器与预览 + 导出服务
 
 ```bash
-node scripts/render-editor.js --project <项目目录>   # → output/editor.html
+node scripts/render-editor.js --project <项目目录>   # → output/editor.html（左侧缩略图/翻页器/浏览器端导出/layout 字段面板）
 node scripts/preview.js --project <项目目录>         # → output/preview.html
-node scripts/serve-export.cjs   # 导出服务，后台运行勿关
+node scripts/serve-export.cjs   # 可选：服务端导出（浏览器端已可直接导出，服务在线时自动优先）
 ```
 把 editor.html 给用户打开，让用户在编辑器里**改字/换主题/调布局/加删元素**。
-> 编辑器顶栏「导出 PPTX/PDF」直接产出到 output/（服务未启动时编辑器顶部显示红条提示）。
+> 编辑器「导出 PPTX/PDF」**浏览器端直接完成**（内置 editable-pptx-browser 引擎），无需启动服务；serve-export.cjs 在线时自动走服务端路径。layout 模板页右侧有字段面板（改重点/条块数/图片数/主题色）。
 > 不要替用户编译 .pptx！用户还没改过，编译了也是废的。
 
 > 导出引擎：`vendor/html-deck-to-pptx`（逐节点保真回退链——可映射的 DOM 转成可编辑形状，

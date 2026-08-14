@@ -103,7 +103,7 @@ export async function describeLayout(layoutKey) {
   const pages = await loadThemeRuntime(themeId);
   const page = pages[String(pageNum - 1)];
   if (!page) return null;
-  return { key: page.key, themeId, label: page.label, slot: page.slot, layout: page.layout };
+  return { key: page.key, themeId, label: page.label, slot: page.slot, layout: page.layout, controls: page.controls || [], defaultProps: page.defaultProps || {}, numberBounds: page.numberBounds || {} };
 }
 
 /** CLI：node layout-render.mjs theme01_page006 -d data.json -o out.html */
