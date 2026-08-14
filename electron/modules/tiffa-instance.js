@@ -344,6 +344,12 @@ class TiffaInstance {
         // session_switch——必须迁移，否则实例 key/sessionId 停留在 temp，前端按 real id
         // 路由时查不到实例 → spawn 新进程 → 对话分裂/漂移。
         if (event.type === 'session_switch' && event.sessionPath && !this._restoringContext) {
+            // 记录迁移前 id（新建对话实例 = 前端临时 UUID），透传给渲染层做归属校验：
+            // 只有 prevId === 前端临时 id 的 session_switch 才是本实例自己的迁移；
+            // 后台实例（已迁移旧会话）的 prevId 是真实 id，会被渲染层过滤。
+            // 注意不能直接透传 this.sessionId：转发前它已被更新为真实 id（见下），
+            // 渲染层拿它比临时 id 永远不相等 → __new__ 永不迁移 → AI 重命名/切走卡"准备中"。
+            const prevSessionId = this.sessionId;
             this.sessionFilePath = event.sessionPath;
             const realSessionId = (0, session_utils_1.extractSessionIdFromPath)(event.sessionPath);
             if (realSessionId && realSessionId !== this.sessionId) {
@@ -351,6 +357,7 @@ class TiffaInstance {
                     _migrateSessionId(this.cwd, this.sessionId, realSessionId);
                 this.sessionId = realSessionId;
             }
+            event._sessionIdPrev = prevSessionId;
         }
         // ask 记账
         if (event.type === 'extension_ui_request') {

@@ -579,9 +579,13 @@ function handleEvent(event: TiffaEventFrame): void {
         // 会把当前 __new__ tab 错迁到别的会话路径——sessionModelMap 随之迁移覆盖，
         // 后续在错迁 tab 里切模型会写进别人的路径，切回原对话时模型被"继承"污染
         // （表现为：切回原对话模型跟着变，旧模型连接未释放 + 新模型进程 → 双模型卡死）
+        // ⚠️ 必须比 _sessionIdPrev（main 转发前的旧 id，新建对话时 = 前端临时 UUID）：
+        // 比 event._sessionId 会恒不相等——main 进程转发前已把它更新为真实 id，
+        // 导致所有新建对话的迁移被误杀（tab 永远 __new__，AI 重命名/切走卡"准备中"）。
         const activeNewObj = useSessionsStore.getState().sessions.find((s) => s.path === sessions.activeSessionPath);
         const expectedTempId = (activeNewObj && activeNewObj.sessionId) || sessions.activeSessionId;
-        if (event._sessionId && expectedTempId && event._sessionId !== expectedTempId) break;
+        const prevSessionId = event._sessionIdPrev;
+        if (prevSessionId && expectedTempId && prevSessionId !== expectedTempId) break;
         const newPath = String(event.sessionPath);
         const oldPath = sessions.activeSessionPath;
         if (oldPath.startsWith('__new__')) {
