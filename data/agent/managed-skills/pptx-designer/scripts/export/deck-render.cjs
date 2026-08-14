@@ -14,8 +14,19 @@
 
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { elHtml, decorationHtml, esc } = require(path.join(__dirname, '..', 'visual', 'elHtml.js'));
 const { THEMES, CANVAS_W, CANVAS_H, themeCSS } = require(path.join(__dirname, '..', 'visual', 'themes.js'));
+
+// layout 渲染器（dashiai 主题运行时，ESM）——懒加载
+let layoutRenderMod = null;
+const layoutCssCache = new Map(); // 主题 → CSS（跨页去重）
+async function getLayoutRenderer() {
+  if (!layoutRenderMod) {
+    layoutRenderMod = await import(pathToFileURL(path.join(__dirname, 'layout-render.mjs')).href);
+  }
+  return layoutRenderMod;
+}
 
 /** 图片元素 → base64 data URL（读取失败回退占位） */
 function imageDataUrl(el) {
@@ -46,8 +57,8 @@ function renderEl(el, page, theme) {
   return elHtml(el, page, theme);
 }
 
-/** 单页渲染（背景 + 装饰层 + 元素层） */
-function renderSlide(page, index, design) {
+/** 单页渲染（背景 + 装饰层 + 元素层；layout 页走 dashiai 模板渲染） */
+async function renderSlide(page, index, design) {
   const themeId = page.theme || (design && design.theme) || 'generic';
   const theme = THEMES[themeId] || THEMES.generic;
   // 背景：页面显式背景优先，否则主题背景 + 纹理（与编辑器渲染一致）
@@ -58,21 +69,36 @@ function renderSlide(page, index, design) {
     bgCss = `background:${themeCSS(themeId)};`;
   }
   const deco = decorationHtml(page, theme);
-  const els = (page.elements || []).map(el => renderEl(el, page, theme)).join('');
   const active = index === 0 ? ' data-deck-active="true"' : '';
+
+  // ── layout 页：dashiai 主题模板渲染 ──
+  if (page.layout) {
+    const renderer = await getLayoutRenderer();
+    const { html, css, meta } = await renderer.renderLayoutPage(page.layout, page.data || {});
+    if (css) layoutCssCache.set(meta.themeId, css);
+    return `<div class="slide"${active} style="width:${CANVAS_W}px;height:${CANVAS_H}px;position:relative;overflow:hidden;${bgCss}box-sizing:border-box">${html}</div>`;
+  }
+
+  const els = (page.elements || []).map(el => renderEl(el, page, theme)).join('');
   return `<div class="slide"${active} style="width:${CANVAS_W}px;height:${CANVAS_H}px;position:relative;overflow:hidden;${bgCss}box-sizing:border-box;font-family:'微软雅黑',sans-serif">${deco}${els}</div>`;
 }
 
 /**
  * 渲染完整 deck HTML。
  * @param {{design?:object, pages?:Array}} deck 与编辑器 DECK 同构
- * @returns {string} 满足 #deck > .slide 契约的完整 HTML
+ * @returns {Promise<string>} 满足 #deck > .slide 契约的完整 HTML
  */
-function renderDeckHtml(deck) {
+async function renderDeckHtml(deck) {
   const design = (deck && deck.design) || {};
   const pages = (deck && deck.pages) || [];
   const title = esc(design.title || 'PPT');
-  const slides = pages.map((p, i) => renderSlide(p, i, design)).join('\n');
+  layoutCssCache.clear();
+  const slides = [];
+  for (let i = 0; i < pages.length; i++) {
+    slides.push(await renderSlide(pages[i], i, design));
+  }
+  const layoutCss = [...layoutCssCache.values()].join('\n');
+  const styleTag = layoutCss ? `\n<style>${layoutCss}</style>` : '';
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -84,11 +110,11 @@ function renderDeckHtml(deck) {
   #deck { width: ${CANVAS_W}px; }
   .slide { position: relative; width: ${CANVAS_W}px; height: ${CANVAS_H}px; overflow: hidden; }
   .slide img { display: block; }
-</style>
+</style>${styleTag}
 </head>
 <body>
 <div id="deck">
-${slides}
+${slides.join('\n')}
 </div>
 <script>
   // html-deck-to-pptx 引擎翻页运行时：window.go(index) 切换 active 页
@@ -117,6 +143,8 @@ if (require.main === module) {
   const out = get('-o') || 'deck-export.html';
   if (!input) { console.error('用法: node deck-render.cjs <deck.json> -o <out.html>'); process.exit(2); }
   const deck = JSON.parse(fs.readFileSync(path.resolve(input), 'utf8'));
-  fs.writeFileSync(path.resolve(out), renderDeckHtml(deck), 'utf8');
-  console.log('✅ deck HTML 已生成: ' + path.resolve(out));
+  renderDeckHtml(deck).then(html => {
+    fs.writeFileSync(path.resolve(out), html, 'utf8');
+    console.log('✅ deck HTML 已生成: ' + path.resolve(out));
+  }).catch(e => { console.error('❌ 渲染失败:', e.message); process.exit(1); });
 }

@@ -57,3 +57,27 @@
 4. **hero 页**：封面/章节/计划页用 L-cover/L-banner/L-duel 等冲击力版式
 5. **非对称优先**：左图右文/右图左文/上图下文/左标题右内容 ≥40%
 6. **图片位**：有图先定图位（L-photo*/L-grid/L-portrait），文字围绕图组织——禁止文字塞满再找地方放图
+
+## 从布局到页级模板（大纲 → 设计稿的衔接）
+
+> L-* 布局模式是大纲阶段的**内容-版式契约**；设计稿阶段（Step 4）用它在
+> `layout-catalog.md` 中找**具体页级模板**（themeXX_pageNNN）或决定手搓。
+
+| 布局模式 | 去 catalog 查的类别 | 典型 slot |
+| --- | --- | --- |
+| L-cover | 封面 | cover* |
+| L-toc | 目录/议程 | contents/agenda |
+| L-section | 章节过渡 | chapter/section |
+| L-metrics / L-duel | 大数字/KPI | bignum/statgrid/scorecard |
+| L-trend | 图表·趋势 / 图表·时间/排期 | trend/timeline |
+| L-ranking | 排行/表格 | ranking/top10/table |
+| L-compare | 对比/对决 | versus/split |
+| L-process | 流程/路线/链 | roadmap/process/chain |
+| L-network | 流程/路线/链 | network/ecosystem/orgchart |
+| L-conclusion/L-quote/L-statement | 观点/结论/金句 | quote/statement/conclusion |
+| L-photo-* | 图片/画廊 | photo*/gallery |
+| L-grid | 图片/画廊 | gridwall/mosaic |
+| L-portrait | 图片/画廊 / 观点/结论 | voices/quote |
+| L-case | 案例/特写 | case*/profile |
+
+**匹配原则**：catalog 里 label 与页面内容语义一致才算命中；不一致 → 手搓 DSL，绝不硬套。

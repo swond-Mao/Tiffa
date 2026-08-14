@@ -26,20 +26,22 @@ triggers:
 
 | 任务 | 执行路径 |
 | --- | --- |
-| 从零创建 PPT | 下方标准流程（Step 1-8） |
-| 上传模板模仿风格 | Step 0 模板分析 → 标准流程 |
+| 从零创建 PPT（有文字稿） | 标准流程 Step 1 起 |
+| 从零创建 PPT（只有主题） | Step 0 文字稿 → 标准流程 |
+| 上传模板模仿风格 | Step 2 主题逆向 → 标准流程 |
 | 上传材料（docx/pdf/pptx）生成 | Step 0 材料提取 → 标准流程 |
 
 ## 需求澄清（钩子模式，必须执行）
 
-**制作前必须用 ask 工具询问以下两项，不得跳过**（用户已明确指定的除外）：
+**制作前必须用 ask 工具确认以下事项，不得跳过**（用户已明确指定的除外）：
 
 | 必问项 | 选项 | 默认 |
 | --- | --- | --- |
-| **① 选哪个模板/风格** | dashiai 12 套风格 / 领域预设 3 套（学术/咨询/红金）/ 自定义模板（用户上传 PPTX 分析）/ 默认商务浅色 | 默认商务浅色 |
+| **① 文字稿有没有** | 已有文字稿直接给 / 只有主题要 AI 先出文字稿 / 上传材料 | 先出文字稿 |
 | **② 图片怎么来** | 用户提供素材 / AI 生图（image-gen-router）/ 先用占位（后补图）/ 纯图表不用图 | 先用占位 |
 
-其他澄清规则：主题缺失必问；受众/场合影响表达则轻问 1 次；页数默认 10-15 不问；演讲者备注默认不写不问。
+其他澄清规则：受众/场合影响表达则轻问 1 次；页数在**大纲确认**时由用户定（默认 10-15 页不问）；演讲者备注默认不写不问。
+主题选择**不在制作前问**，在大纲确认后（Step 2）问。
 用户说"直接做/你决定/看着办"或信息完整 → 跳过反问。**禁止多轮追问**。沟通用「页/封面/目录/这一页」术语，不暴露内部实现。
 ## 项目目录约定（必须遵守）
 
@@ -47,8 +49,9 @@ triggers:
 
 ```
 <项目目录>/
-├── STORY.md                 # 叙事逻辑
-├── DESIGN.md                # 设计稿
+├── OUTLINE.md               # 大纲（每页含布局类型，用户确认后定稿）
+├── STORY.md                 # 叙事逻辑（大纲前置分析，可并入 OUTLINE.md）
+├── DESIGN.md                # 细化设计稿（每页文字内容/分布/卡片/图片数）
 ├── design.json              # 项目配置（色板/字体/主题）
 ├── pages/                   # 页面定义（slide_XX_名称.js）
 ├── resources/
@@ -69,64 +72,89 @@ triggers:
 - `build.js` 的 `-o` 指向 `<项目目录>/output/xxx.pptx`
 - **禁止**把产物放到 /tmp、C 盘、技能目录等用户不知道的位置
 
-## 标准流程（编辑优先，确认后导出）
+## 标准流程（内容优先，用户确认制）
 
-> **核心原则**：先让用户在编辑器里改到满意，**用户确认后才编译 .pptx**。
+> **第一原则（不可违背）——内容优先**：内容是汇报材料，绝不妥协。
+> 模板只是加强视觉的手段：按内容选模板，没有合适模板就手搓。
+> **禁止为了套模板删减、扭曲、拼接内容**——手搓是正常路径，不是降级。
+> **第二原则**：关键节点用户确认制——**大纲确认 → 主题确认 → 导出确认**，三步缺一不可。
 
-### Step 0：模板/材料预处理（可选）
+### Step 0：文字稿（可跳过——用户已给文字稿或内容已明确）
 
+**用户只有主题、没有文字稿**：
+- 用内容生成能力（如 deep-research 等技能）检索资料产出文字稿，或 ask 用户是否先出文字稿
+- 文字稿是后续一切的基础，**不允许在没有文字稿的情况下直接进入大纲**
 
-**用户上传了模板 PPTX 要模仿风格**：
-```bash
-node scripts/profile_template.js <模板.pptx> -o design.json
-# 分析结果：色板/字体/字号范围/元素类型 → 直接作为 DESIGN.md 风格基线
-```
-
-**用户上传了材料（docx/pdf/pptx）要提取内容**：
-- docx/pptx/xlsx 提取图片：`node scripts/extract_assets.js <材料.docx> -o resources/images`
+**用户上传了材料（docx/pdf/pptx）**：
+- 图片提取：`node scripts/extract_assets.js <材料.docx> -o resources/images`
 - 文本内容用 read 工具直接读取文档，不反复提取
 
-### Step 1：构建 STORY.md（叙事逻辑）
-阅读 `references/story-principle.md`，按三步骤（意图对齐 → 页面骨架 → 页面大纲）生成 STORY.md。
+### Step 1：大纲（OUTLINE.md，每页含布局类型）→ 用户确认
 
-### Step 2：构建 DESIGN.md（设计稿）
-1. 风格路由：用户场景是否明确属于学术（高校/科研/医学汇报）、咨询（行研/投行/高管）、红金政务（党政/国企/党课）→ 读对应 `references/designs/*.md`，否则读通用 `references/design-principle.md`
-2. **按方法论设计每页**：读 `references/methodology.md`——每页声明六要素（内容类型 → 布局模式 → 页面模板 → 色调 → 图位 → 视觉锚点），布局模式从 `references/layout-library.md` 选，色调从风格库（dashiai-styles.md 或模板分析）选
-3. 若走了模板分析（Step 0）→ 以分析出的色板/字体为基线
-4. DESIGN.md 必须写：画布母版、色板（≤4 hex）+ 面积分配、字号阶梯、**每页六要素映射表**、配图清单
+阅读 `references/story-principle.md` 组织叙事，生成 OUTLINE.md，**每一页必须标注**：
+- 页面定位（封面/目录/章节/内容/结束）
+- 内容类型（KPI/对比/流程/图片/观点/列表…）
+- 布局类型（L-*，从 `references/layout-library.md` 选）
+- 一页装不下 → 标记拆页（如 5a/5b）
+- 本页要传达的结论（一句话）
 
-### Step 3：逐页生成页面定义
-- 每页一个 `pages/slide_XX_desc.js`，对照 STORY.md + DESIGN.md 逐页写
+**生成后必须 ask 用户确认**：页数是否合适（可增删，如 14 页调到 39 页）、结构是否合理。
+**用户确认前不得进入下一步**。
+
+### Step 2：主题选择 → 用户确认
+
+按顺序：
+1. **用户已指定主题** → 直接用
+2. **上传了模板 PPTX** → `node scripts/profile_template.js <模板.pptx> -o design.json` 逆向色板/字体/风格，作为基线
+3. **未指定** → 按场景推荐（`references/designs/dashiai-styles.md` 12 套 / 领域预设 academic/consulting/redgold），ask 用户确认
+
+主题确定后写 design.json（色板 ≤4 hex、字体 ≤2、主题 ID）。
+**风格统一纪律**：全篇一套色板 + ≤2 字体；风格只约束视觉语言，**不约束布局**（布局永远由内容决定）。
+
+### Step 3：细化设计稿（DESIGN.md）
+
+读 `references/methodology.md` §四 决策矩阵 + `references/design-principle.md`，每页声明：
+- **本页结论**（一句话，说不清这页不过）
+- **文字内容与分布**：标题/正文/数字，哪些字放哪块区域
+- **卡片格式**：几块卡片/色块/列表/表格，内容怎么装
+- **图片张数与图位**：0-4 张，先定图位再组织文字
+- **强调用法**：全局色调下强调色用在哪（某数字/某系列/某色块）
+- **拆页落实**：Step 1 标记拆页的页在此展开为两页，各写清内容
+- 配图清单：需生图的先走 image-gen-router 出图到 resources/images/
+
+### Step 4：页级模板匹配（目录查模板，无合适就手搓）
+
+按每页「内容类型 + 布局类型 + 文字量 + 图量」查 `references/layout-catalog.md`（1020 个页级模板，19 类）：
+- **命中合适模板** → 页面定义引用 `layout: 'themeXX_pageNNN'` + 填对应数据
+- **没有合适模板** → 手搓 DSL（正常路径）
+- **红线**：模板与内容冲突时，改模板或手搓，**绝不改内容**
+- 优先在所选主题内选；同 slot 多主题成套（theme01_page006 ↔ theme02_page006）
+
+### Step 5：逐页生成页面定义
+
+- 引用模板的页：`{ layout: 'themeXX_pageNNN', data: {...} }`，按模板字段要求填内容
+- 手搓页：对照 DESIGN.md 写 DSL（元素：text/rect/roundRect/ellipse/line/image/chart/table + 增强元素）
 - 动笔前读 `references/component-guide.md`（API 速查）+ `references/layout-patterns.md`（配图版式库）
-- **配图前置**：先定版式（含图片位）再定文字；需生图的先走 `image-gen-router` 技能出图到 `resources/images/`，逐张核对后再引用；暂无图则用 image 元素占位（自动渲染灰色占位块，后放图重新编译）
-- 动笔自检 10 条硬约束（见 design-principle.md §7），任一不过返工
+- 动笔自检 10 条硬约束（design-principle.md §7），任一不过返工
 
-### Step 4：生成编辑器与预览
+### Step 6：生成编辑器与预览 + 导出服务
+
 ```bash
 node scripts/render-editor.js --project <项目目录>   # → output/editor.html
 node scripts/preview.js --project <项目目录>         # → output/preview.html
-```
-**必须同时启动导出服务**（一次性，保持运行）：
-```bash
-node scripts/serve-export.cjs   # 后台运行，勿关
+node scripts/serve-export.cjs   # 导出服务，后台运行勿关
 ```
 把 editor.html 给用户打开，让用户在编辑器里**改字/换主题/调布局/加删元素**。
+> 编辑器顶栏「导出 PPTX/PDF」直接产出到 output/（服务未启动时编辑器顶部显示红条提示）。
 > 不要替用户编译 .pptx！用户还没改过，编译了也是废的。
-> 编辑器打开时若服务未启动会显示红条提示，点「重试」或检查服务进程。
-
-### Step 4.5：一键导出（编辑器内直接出可编辑 PPTX/PDF）
-**编辑器顶栏的「导出 PPTX」「导出 PDF」按钮**可直接产出文件，无需回到命令行：
-
-1. 导出服务已在 Step 4 启动（`node scripts/serve-export.cjs`）；若服务未启动，编辑器顶部显示红条提示
-2. 用户在编辑器里点「导出 PPTX/PDF」→ 产物写到 `<项目目录>/output/deck.pptx` / `deck.pdf`
-3. 服务端口冲突时用 `editor.html?port=<端口>` 覆盖（服务端同样 `--port <端口>`）
 
 > 导出引擎：`vendor/html-deck-to-pptx`（逐节点保真回退链——可映射的 DOM 转成可编辑形状，
 > 映射不了的区域截图但文字从实时 DOM 抽回保持可编辑）。图片内联 base64，成品不依赖素材路径。
 > 与 build.js 的区别：build.js 产出**原生全形状** .pptx（渐变/装饰降级为形状），
 > 一键导出产出**高保真视觉** .pptx（复杂视觉截图保真，文字可编辑）。两种路径互补，按需选用。
 
-### Step 5：用户确认后编译
+### Step 7：用户确认后编译
+
 **用户说"满意了/可以了/导出吧/生成 pptx"**，再执行：
 ```bash
 node scripts/build.js --project <项目目录> -o <项目目录>/output/最终.pptx
@@ -139,7 +167,8 @@ node scripts/build.js --project <项目目录> -o <项目目录>/output/最终.p
 > 为原生形状（渐变→双层矩形、光晕→多层半透明椭圆、装饰→透明圆角块）。
 > 主题由 `page.theme` 或 `design.json.theme` 引用，增强视觉语言来自 `scripts/visual/themes.js`。
 
-### Step 6：交付
+### Step 8：交付
+
 用面向用户语言说明主题、页数、风格要点，提示 .pptx 与 editor.html 路径。
 告诉用户 editor.html 可反复修改后重新编译。
 
@@ -173,6 +202,31 @@ module.exports = {
 元素：text（runs 富文本）/ rect / roundRect（radius）/ ellipse / line / image / chart（bar/line/pie/doughnut/area，barDirection/grouping）/ table（zebra 斑马纹）。
 坐标系 1280×720 逻辑 px，自动映射真实幻灯片；字号自动 shrink 防溢出。
 
+### 模板页（layout）DSL
+
+```js
+// 引用页级模板（从 references/layout-catalog.md 选）——无需 elements，按模板字段填 data
+module.exports = {
+  id: 'slide_02_bignum', type: 'content', role: 'content',
+  layout: 'theme01_page006',   // themeXX_pageNNN，同 slot 多主题成套
+  data: {                        // 字段参考主题默认内容（layout-catalog.md 每项含字段清单）
+    kicker: '2025 全年 · 中国市场 AI 融资',
+    value: '1820', unit: '亿元',
+    sub: '连续三年高速增长，占全市场融资四分之一。',
+    highlightWord: '四分之一',
+    secondaries: [
+      { value: '210', unit: ' 笔', label: '单笔 ≥ 10 亿元事件' },
+      { value: '8.7', unit: ' 亿', label: '平均单笔融资额' },
+    ],
+    caption: '大数字 · 市场体量一览',
+  },
+};
+```
+
+- layout 页由 dashiai 主题运行时（`vendor/theme-runtime/`）服务端渲染，编辑器/预览/导出一致呈现
+- `data` 覆盖模板默认内容（defaultProps），未填字段用模板默认值；数据字段必须取自 layout-catalog 字段清单
+- 导出行为：模板页高保真呈现，核心文本（标题/主数字/说明）可编辑，其余视觉区域以图片保真
+
 ## 命令速查
 
 ```bash
@@ -181,7 +235,8 @@ node scripts/build.js --project <目录> --lint-only       # 只校验
 node scripts/preview.js --project <目录>                 # 翻页式 HTML 预览
 node scripts/render-editor.js --project <目录>           # 交互式编辑器（拖拽/改字/图表强调/一键导出）
 node scripts/serve-export.cjs [--port 47832]             # 一键导出服务（编辑器导出按钮的后端）
-node scripts/profile_template.js <模板.pptx> -o design.json  # 模板风格分析
+node scripts/build-layout-catalog.cjs                     # 重新生成页级模板目录（layout-catalog.md）
+node scripts/profile_template.js <模板.pptx> -o design.json  # 模板风格逆向
 node scripts/extract_assets.js <材料.docx> -o resources/images # 材料图片提取
 ```
 
@@ -196,8 +251,9 @@ node scripts/extract_assets.js <材料.docx> -o resources/images # 材料图片�
 
 ## 参考文档
 
-- `references/methodology.md` — **PPT 制作方法论**（五步流程 + 每页六要素 + 决策矩阵）
-- `references/layout-library.md` — 布局模式库（17 种，AI 按内容选版式）
+- `references/methodology.md` — **PPT 制作方法论**（内容优先五要素 + 决策矩阵 + 模板匹配原则）
+- `references/layout-library.md` — 布局模式库（L-* 模式，大纲阶段选）
+- `references/layout-catalog.md` — **页级模板目录**（1020 个布局，设计阶段按内容选模板）
 - `references/design-principle.md` — 通用设计法则（母版/色彩/字号/密度/配图/自检）
 - `references/story-principle.md` — 叙事原则（意图对齐/骨架/大纲/版式速查）
 - `references/component-guide.md` — 元素 API 速查

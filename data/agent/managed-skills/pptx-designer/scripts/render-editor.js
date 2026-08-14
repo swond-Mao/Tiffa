@@ -14,6 +14,7 @@
  */
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 const { THEMES, CANVAS_W, CANVAS_H, themeCSS, themeVars } = require(path.join(__dirname, 'visual', 'themes.js'));
 const { shrinkFactor } = require('./shrink');
@@ -103,7 +104,7 @@ function elHtml(el, page) {
   }
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const get = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined; };
   const projectDir = get('--project') || process.cwd();
@@ -124,8 +125,27 @@ function main() {
   }
   pages.forEach(preprocessImages);
 
+  // 模板页预处理：layout 页用 dashiai 主题运行时渲染为静态 HTML（编辑器内只读预览）
+  const layoutCssList = [];
+  async function preprocessLayouts(page) {
+    if (!page.layout) return;
+    try {
+      const mod = await import(pathToFileURL(path.join(__dirname, 'export', 'layout-render.mjs')).href);
+      const { html, css, meta } = await mod.renderLayoutPage(page.layout, page.data || {});
+      page._layoutHtml = html;
+      page._layoutLabel = meta.label || page.layout;
+      if (css && !layoutCssList.includes(css)) layoutCssList.push(css);
+    } catch (e) {
+      console.warn('[layout] ' + page.layout + ' 渲染失败: ' + e.message);
+      page._layoutHtml = '<div style="padding:40px;color:#F87171;font-size:18px">模板渲染失败: ' + esc(page.layout) + '<br>' + esc(e.message) + '</div>';
+      page._layoutLabel = '模板渲染失败';
+    }
+  }
+  await Promise.all(pages.map(preprocessLayouts));
+
   // 注入页面数据（编辑器 JS 使用）
   const deckData = JSON.stringify({ design, pages }).replace(/</g, '\\u003c');
+  const layoutStyle = layoutCssList.length ? '<style>' + layoutCssList.join('\n') + '</style>' : '';
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -173,6 +193,7 @@ function main() {
   #exportBanner .btn:hover { background:#B91C1C; }
   #exportBanner.ok { background:#065F46; color:#A7F3D0; border-bottom-color:#047857; }
 </style>
+${layoutStyle}
 </head>
 <body>
   <div id="topbar">
@@ -223,6 +244,16 @@ function render(){
   const themeId = page.theme || (DECK.design&&DECK.design.theme) || 'generic';
   const th = themeMap[themeId] || themeMap.generic;
   canvas.innerHTML = '';
+  // 模板页（layout）：只读展示预渲染 HTML
+  if(page._layoutHtml){
+    let bg = page.background || th.bg;
+    if(th.texture==='radial') bg += '; background-image: radial-gradient(ellipse 60% 45% at 82% 12%, '+rgbaOf(th.palette.primary,0.2)+' 0%, transparent 55%), radial-gradient(ellipse 50% 50% at 8% 88%, '+rgbaOf(th.palette.accent,0.18)+' 0%, transparent 50%)';
+    canvas.style.background = bg;
+    canvas.insertAdjacentHTML('beforeend', '<div style="position:absolute;inset:0">'+page._layoutHtml+'</div>');
+    canvas.insertAdjacentHTML('beforeend', '<div style="position:absolute;right:10px;top:10px;background:rgba(124,58,237,.9);color:#fff;font-size:12px;padding:4px 10px;border-radius:999px;z-index:5">模板页 · '+esc(page._layoutLabel||page.layout||'')+'</div>');
+    renderTabs();
+    return;
+  }
   // 主题背景（含径向光效纹理）
   let bg = page.background || th.bg;
   if(th.texture==='radial') bg += '; background-image: radial-gradient(ellipse 60% 45% at 82% 12%, '+rgbaOf(th.palette.primary,0.2)+' 0%, transparent 55%), radial-gradient(ellipse 50% 50% at 8% 88%, '+rgbaOf(th.palette.accent,0.18)+' 0%, transparent 50%)';
@@ -609,4 +640,4 @@ checkExportService(false);
   console.log(`✅ 编辑器已生成: ${path.resolve(outFile)}`);
 }
 
-main();
+main().catch(e => { console.error('❌ 编辑器生成失败:', e); process.exit(1); });

@@ -64,8 +64,8 @@ async function doExport(deck, format, outDir) {
   const exportTmp = path.join(outDirResolved, '.export');
   fs.mkdirSync(exportTmp, { recursive: true });
 
-  // 1. 渲染纯 deck HTML（图片已内联 base64，自包含）
-  const html = renderDeckHtml(deck);
+  // 1. 渲染纯 deck HTML（图片已内联 base64，自包含；layout 页走主题运行时）
+  const html = await renderDeckHtml(deck);
   const deckHtml = path.join(exportTmp, 'deck-export.html');
   fs.writeFileSync(deckHtml, html, 'utf8');
   const deckUrl = 'file:///' + deckHtml.replace(/\\/g, '/');
