@@ -72,6 +72,28 @@ try {
 } catch (e) {
   console.warn('[portable] setPath(userData) 失败，回退系统默认:', e.message);
 }
+// ── 确保 config.yml 存在（git clone 后 config.yml 被 gitignore，需从 example 恢复） ──
+try {
+  const CONFIG_YML = path.join(PORTABLE_ROOT, 'data', 'agent', 'config.yml');
+  const CONFIG_EXAMPLE = path.join(PORTABLE_ROOT, 'data', 'agent', 'config.yml.example');
+  if (!fs.existsSync(CONFIG_YML) && fs.existsSync(CONFIG_EXAMPLE)) {
+    fs.copyFileSync(CONFIG_EXAMPLE, CONFIG_YML);
+    console.log('[config] 已自动从 config.yml.example 恢复 config.yml');
+  }
+} catch (e) {
+  console.warn('[config] 恢复 config.yml 失败:', e.message);
+}
+// ── 确保 models.yml 存在（git clone 后同样被 gitignore，需从 example 恢复） ──
+try {
+  const MODELS_YML = path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml');
+  const MODELS_EXAMPLE = path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml.example');
+  if (!fs.existsSync(MODELS_YML) && fs.existsSync(MODELS_EXAMPLE)) {
+    fs.copyFileSync(MODELS_EXAMPLE, MODELS_YML);
+    console.log('[config] 已自动从 models.yml.example 恢复 models.yml');
+  }
+} catch (e) {
+  console.warn('[config] 恢复 models.yml 失败:', e.message);
+}
 
 // ── Global State（模块化：实例管理器从 tiffa-manager 导入） ──
 let mainWindow = null;
@@ -2109,7 +2131,8 @@ function setupIpc() {
       const ref = (roles && roles.default) || (roles && roles.slow) || null;
       if (!ref || typeof ref !== 'string' || !ref.includes('/')) return null;
       const [provider, model] = ref.split('/');
-      return { provider, model };
+      // `localmodel` 是 config.yml 模板占位名，不是真实模型 ID，视为空交给 provider 第一个模型兜底
+      return { provider, model: model && model !== 'localmodel' ? model : '' };
     } catch {
       return null;
     }
@@ -2131,6 +2154,15 @@ function setupIpc() {
     } catch {
       return null;
     }
+  }
+
+  // 模型回显宽容匹配：归一化（去 /models/ 前缀、去首斜杠、小写）后相等或互相包含即视为匹配
+  function modelEchoMatches(reqModel, respModel) {
+    const norm = (s) => String(s).toLowerCase().replace(/^\/models\//, '').replace(/^[\\/]/, '').trim();
+    const a = norm(reqModel);
+    const b = norm(respModel);
+    if (!a || !b) return true;
+    return a === b || a.includes(b) || b.includes(a);
   }
 
   // 单次 completion 调用（带 20s 超时）
@@ -2162,7 +2194,14 @@ function setupIpc() {
         return { error: `HTTP ${resp.status}: ${bodyText.slice(0, 200)}` };
       }
       const data = await resp.json();
-      const text = (data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+      const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+      // 模型回显校验：sglang 等服务器对未知 model 会回显占位/错乱 model（如 "????"）并输出垃圾回复，
+      // 必须判失败继续降级链，避免把乱码当标题返回；回显缺失时放行（兼容旧服务）
+      const respModel = data && data.model;
+      if (respModel && model && !modelEchoMatches(String(model), String(respModel))) {
+        return { error: `模型回显不匹配（请求 ${model}，返回 ${respModel}）` };
+      }
+      const text = (msg && msg.content) || '';
       return text.trim() ? { text: String(text).trim() } : { error: '空响应' };
     } finally {
       clearTimeout(timer);
@@ -2194,7 +2233,8 @@ function setupIpc() {
     try {
       const cfgPath = path.join(PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
       const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-      if (cfg && cfg.api_base && cfg.model && cfg.api_key) {
+      // enabled 字段存在（如 "0"/false）时视为未启用，跳过（占位 apiKey 只会白等一次 401）
+      if (cfg && cfg.api_base && cfg.model && cfg.api_key && cfg.enabled !== false && cfg.enabled !== '0') {
         push({ name: 'doubao', baseUrl: cfg.api_base, model: cfg.model, apiKey: cfg.api_key });
       }
     } catch {}

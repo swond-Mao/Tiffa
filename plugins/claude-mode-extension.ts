@@ -313,10 +313,14 @@ export default async function (pi: any) {
       if (!existsSync(modelsPath)) return
       let yml = readFileSync(modelsPath, "utf8")
       const key = !bypass.apiKey || bypass.apiKey === "EMPTY" ? "none" : bypass.apiKey
+      // 防双 /v1：bypass.baseUrl 可能已含 /v1（设置面板里用户填完整路径），不再重复拼接
+      const apiBase = bypass.baseUrl.replace(/\/+$/, "").endsWith("/v1")
+        ? bypass.baseUrl.replace(/\/+$/, "")
+        : `${bypass.baseUrl.replace(/\/+$/, "")}/v1`
       const block =
         `  bypass-dynamic:\n` +
         `    # 动态旁路模型：claude-mode-extension.ts 在 session_start 时按降级链(bypass→fallback)自动更新\n` +
-        `    baseUrl: "${bypass.baseUrl}/v1"\n` +
+        `    baseUrl: "${apiBase}"\n` +
         `    api: "openai-completions"\n` +
         `    apiKey: "${key}"\n` +
         `    models:\n` +
