@@ -15,6 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { shrinkFactor } = require(path.join(__dirname, '..', 'shrink'));
+const { chartHTML } = require(path.join(__dirname, 'chartHtml'));
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -92,13 +93,8 @@ function elHtml(el, page, theme) {
       return `<img src="${rel}" style="position:absolute;${style}object-fit:${fit}"/>`;
     }
     case 'chart': {
-      const labels = el.labels || [];
-      const series = el.series || [];
-      const rows = labels.map((lb, i) =>
-        `<tr><td>${esc(lb)}</td>${series.map(s => `<td>${esc(s.values[i])}</td>`).join('')}</tr>`).join('');
-      const head = `<tr><th></th>${series.map(s => `<th>${esc(s.name || '')}</th>`).join('')}</tr>`;
-      const labelColor = t.sub || '#64748B';
-      return `<div style="position:absolute;${style};border:1px dashed ${rgba(t.primary || '#94A3B8', 0.5)};border-radius:8px;padding:12px;box-sizing:border-box;overflow:auto;background:${(el.fill || (t.dark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.6)'))}"><div style="font-size:12px;color:${labelColor};margin-bottom:6px">[${el.chartType} 图表 · 以 .pptx 为准]</div><table style="border-collapse:collapse;font-size:12px;color:${t.text || '#1A1A1A'}">${head}${rows}</table></div>`;
+      // 真实图表：bar/line/area/pie/doughnut → 共享 chartHtml 模块（视觉与编辑器一致）
+      return chartHTML(el, theme);
     }
     case 'table': {
       const rows = (el.rows || []).map(r =>

@@ -17,6 +17,7 @@ const fs = require('fs');
 const { pathToFileURL } = require('url');
 
 const { THEMES, CANVAS_W, CANVAS_H, themeCSS, themeVars } = require(path.join(__dirname, 'visual', 'themes.js'));
+const { chartHTML } = require(path.join(__dirname, 'visual', 'chartHtml'));
 const { shrinkFactor } = require('./shrink');
 
 function loadProject(projectDir) {
@@ -37,7 +38,7 @@ function esc(s) {
 }
 
 // 与 preview.js 相同的元素渲染（编辑器画布用）
-function elHtml(el, page) {
+function elHtml(el, page, theme) {
   const style = `left:${el.x || 0}px;top:${el.y || 0}px;width:${el.w || 0}px;height:${el.h || 0}px;`;
   switch (el.type) {
     case 'text': {
@@ -87,12 +88,8 @@ function elHtml(el, page) {
       return `<img src="${rel}" style="position:absolute;${style}object-fit:${fit}"/>`;
     }
     case 'chart': {
-      const labels = el.labels || [];
-      const series = el.series || [];
-      const rows = labels.map((lb, i) =>
-        `<tr><td>${esc(lb)}</td>${series.map(s => `<td>${esc(s.values[i])}</td>`).join('')}</tr>`).join('');
-      const head = `<tr><th></th>${series.map(s => `<th>${esc(s.name || '')}</th>`).join('')}</tr>`;
-      return `<div style="position:absolute;${style};border:1px dashed #94A3B8;border-radius:8px;padding:12px;box-sizing:border-box;overflow:auto;background:rgba(255,255,255,0.6)"><div style="font-size:12px;color:#64748B;margin-bottom:6px">[${el.chartType} 图表占位 · 编辑器可改系列]</div><table style="border-collapse:collapse;font-size:12px">${head}${rows}</table></div>`;
+      // 真实图表：bar/line/area/pie/doughnut → 共享 chartHtml 模块（视觉与 preview 一致）
+      return chartHTML(el, theme);
     }
     case 'table': {
       const rows = (el.rows || []).map(r =>
@@ -224,6 +221,65 @@ async function main() {
   .pg { width:26px; height:26px; border-radius:50%; border:1px solid #334155; background:#1E293B; color:#E2E8F0; font-size:15px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; }
   .pg:hover { background:#3B82F6; border-color:#3B82F6; color:#fff; }
   #pgCount { color:#CBD5E1; font-size:12px; min-width:44px; text-align:center; font-variant-numeric:tabular-nums; }
+  /* ---- HospAI 设计语言增强（借鉴 MedReview/SmartReview：渐变+光晕+焦点环） ---- */
+  :root {
+    --hosp-primary:#1890FF; --hosp-primary-hover:#40A9FF; --hosp-primary-glow:rgba(24,144,255,.35);
+    --hosp-success:#52C41A; --hosp-success-glow:rgba(82,196,26,.32);
+    --hosp-danger:#FF4D4F; --hosp-warning:#FA8C16;
+    --hosp-text:#E2E8F0; --hosp-sub:#94A3B8;
+  }
+  /* 顶栏：深蓝渐变 + 底部彩色光晕分隔线 */
+  #topbar { background:linear-gradient(135deg,#16213E 0%,#1E293B 60%,#16202F 100%); }
+  #topbar::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:1px; background:linear-gradient(90deg,transparent, rgba(24,144,255,.5), rgba(82,196,26,.4), transparent); }
+  /* 按钮：渐变主按钮 + 内高光 + hover 光晕浮起 */
+  .btn { font-weight:600; letter-spacing:.3px; }
+  .btn-primary { background:linear-gradient(135deg,#1890FF,#40A9FF); box-shadow:0 2px 10px rgba(24,144,255,.28), inset 0 1px 0 rgba(255,255,255,.28); }
+  .btn-primary:hover { filter:brightness(1.08); transform:translateY(-1px); box-shadow:0 5px 16px rgba(24,144,255,.45), inset 0 1px 0 rgba(255,255,255,.28); }
+  .btn-primary:active { transform:translateY(0); box-shadow:0 2px 6px rgba(24,144,255,.3); }
+  .btn-ghost { background:rgba(148,163,184,.08); border:1px solid rgba(148,163,184,.18); color:#CBD5E1; }
+  .btn-ghost:hover { background:rgba(148,163,184,.16); border-color:rgba(24,144,255,.5); color:#fff; transform:translateY(-1px); box-shadow:0 2px 10px rgba(24,144,255,.18); }
+  /* 导出按钮统一渐变（顶栏已精简，导出收进底部下拉） */
+  /* tab：active 渐变发光 */
+  .tab { border:1px solid rgba(148,163,184,.16); background:rgba(148,163,184,.06); }
+  .tab.active { background:linear-gradient(135deg,#1890FF,#40A9FF); border-color:transparent; box-shadow:0 2px 10px rgba(24,144,255,.38), inset 0 1px 0 rgba(255,255,255,.28); }
+  /* 输入控件：focus 焦点环（SmartReview ring 风格） */
+  .field input:focus,.field select:focus,.series-item input[type=text]:focus { outline:none; border-color:#1890FF; box-shadow:0 0 0 3px rgba(24,144,255,.16); }
+  /* 画布选中态：统一 HospAI 蓝 */
+  .el.selected { outline-color:#1890FF; }
+  .el .handle { background:#1890FF; box-shadow:0 0 0 2px rgba(24,144,255,.25); }
+  /* 缩略图 active 发光 */
+  .rail-item.active { border-color:#1890FF; box-shadow:0 0 0 1px #1890FF, 0 6px 18px rgba(24,144,255,.35); }
+  /* 翻页 pill：发光 + 内高光 */
+  #pager { box-shadow:0 4px 20px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07); }
+  .pg:hover { background:linear-gradient(135deg,#1890FF,#40A9FF); border-color:transparent; }
+  /* 底部工具栏：分隔线 + 主题下拉 + 导出下拉菜单（顶栏按钮已精简下沉） */
+  .toolbar-sep { width:1px; height:18px; background:#2A3B57; margin:0 4px; }
+  #themeSel { background:#0F1A2E; border:1px solid #2A3B57; color:#CBD5E1; border-radius:6px; padding:3px 8px; font-size:12px; cursor:pointer; }
+  #themeSel:focus { outline:none; border-color:#1890FF; box-shadow:0 0 0 3px rgba(24,144,255,.16); }
+  .export-menu-wrap { position:relative; }
+  .btn-export { background:linear-gradient(135deg,#1890FF,#40A9FF); color:#fff; border:none; border-radius:8px; padding:5px 14px; font-size:12px; font-weight:600; letter-spacing:.3px; cursor:pointer; box-shadow:0 2px 8px rgba(24,144,255,.3), inset 0 1px 0 rgba(255,255,255,.25); transition:all .15s; }
+  .btn-export:hover { filter:brightness(1.1); transform:translateY(-1px); box-shadow:0 4px 14px rgba(24,144,255,.45), inset 0 1px 0 rgba(255,255,255,.25); }
+  .export-menu { position:absolute; bottom:calc(100% + 10px); right:0; min-width:220px; background:#141D2E; border:1px solid #2A3B57; border-radius:10px; box-shadow:0 10px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(24,144,255,.08); padding:6px; display:none; z-index:60; }
+  .export-menu.open { display:block; }
+  .export-menu-title { font-size:11px; color:#94A3B8; padding:4px 10px 6px; }
+  .export-menu-item { padding:8px 10px; font-size:13px; color:#E2E8F0; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:8px; transition:background .12s; }
+  .export-menu-item:hover { background:rgba(24,144,255,.14); color:#fff; }
+  .export-menu-divider { height:1px; background:#24334A; margin:4px 6px; }
+  /* 顶栏页码导航（替代 tabs：多页不溢出，点击页码输入跳转） */
+  #topnav { display:flex; align-items:center; gap:6px; background:rgba(20,29,46,.85); border:1px solid #2A3B57; border-radius:999px; padding:3px 10px; box-shadow:0 2px 10px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06); }
+  #topnav .pg { width:22px; height:22px; font-size:13px; background:transparent; border-color:#334155; }
+  #topnav .pg:hover { background:linear-gradient(135deg,#1890FF,#40A9FF); border-color:transparent; }
+  #topPg { color:#CBD5E1; font-size:12px; min-width:52px; text-align:center; cursor:pointer; font-variant-numeric:tabular-nums; padding:3px 8px; border-radius:6px; transition:background .12s; }
+  #topPg:hover { background:rgba(24,144,255,.15); color:#fff; }
+  /* 添加系列按钮 hover 强化 */
+  .add:hover { border-color:#1890FF; color:#40A9FF; background:rgba(24,144,255,.08); }
+  /* 删除按钮 hover 微动效 */
+  .series-item .del:hover { transform:scale(1.2); }
+  /* toast：厚重投影 + 字重 */
+  #toast { box-shadow:0 6px 24px rgba(0,0,0,.5); font-weight:600; letter-spacing:.3px; }
+  /* 主题下拉微调 */
+  #themeSel { background:#0F1A2E; border:1px solid #2A3B57; color:#CBD5E1; }
+  #themeSel:focus { outline:none; border-color:#1890FF; box-shadow:0 0 0 3px rgba(24,144,255,.16); }
 </style>
 ${layoutStyle}
 </head>
@@ -231,16 +287,12 @@ ${layoutStyle}
   ${vendorScriptTags}
   <div id="topbar">
     <span class="title">${esc(design.title || 'PPT 编辑器')}</span>
-    <span id="tabs"></span>
     <div class="spacer"></div>
-    <label class="theme-label" style="color:#94A3B8;font-size:12px;margin-right:4px">主题</label>
-    <select id="themeSel" style="background:#0F172A;border:1px solid #334155;color:#CBD5E1;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer">
-      ${Object.entries(THEMES).map(([id,t])=>`<option value="${id}">${t.name}</option>`).join('')}
-    </select>
-    <button class="btn btn-ghost" onclick="exportDeck()">导出 deck.json</button>
-    <button class="btn btn-ghost" onclick="exportPages()">导出 pages/*.js</button>
-    <button class="btn btn-primary" style="background:#7C3AED" onclick="exportTo('pptx')">导出 PPTX</button>
-    <button class="btn btn-primary" style="background:#059669" onclick="exportTo('pdf')">导出 PDF</button>
+    <div id="topnav" title="点击页码可输入跳转">
+      <button class="pg" onclick="pg(-1)" title="上一页">&#8249;</button>
+      <span id="topPg" onclick="jumpPage()">1 / 1</span>
+      <button class="pg" onclick="pg(1)" title="下一页">&#8250;</button>
+    </div>
   </div>
   <div id="exportBanner">
     <span>已启用浏览器端导出（无需服务）；如需服务端导出请运行 <code>node scripts/serve-export.cjs</code></span>
@@ -254,6 +306,21 @@ ${layoutStyle}
         <button class="pg" onclick="pg(-1)">&#8249;</button>
         <span id="pgCount">1 / 1</span>
         <button class="pg" onclick="pg(1)">&#8250;</button>
+        <div class="toolbar-sep"></div>
+        <select id="themeSel" title="切换主题">
+          ${Object.entries(THEMES).map(([id,t])=>`<option value="${id}">${t.name}</option>`).join('')}
+        </select>
+        <div class="export-menu-wrap">
+          <button class="btn-export" onclick="toggleExportMenu(event)">导出 ▾</button>
+          <div class="export-menu" id="exportMenu">
+            <div class="export-menu-title">导出文件</div>
+            <div class="export-menu-item" onclick="toggleExportMenu(event); exportTo('pptx')">📊 导出 PPTX 演示文稿</div>
+            <div class="export-menu-item" onclick="toggleExportMenu(event); exportTo('pdf')">📄 导出 PDF 文档</div>
+            <div class="export-menu-divider"></div>
+            <div class="export-menu-item" onclick="toggleExportMenu(event); exportDeck()">导出 deck.json（页面定义）</div>
+            <div class="export-menu-item" onclick="toggleExportMenu(event); exportPages()">导出 pages/*.js 源码</div>
+          </div>
+        </div>
       </div>
     </div>
     <div id="panel"><div class="empty">点击画布中的元素进行编辑<br/><br/>拖动移动 · 右下角手柄缩放 · 双击改文字<br/>图表可在右侧增删系列 / 设置强调</div></div>
@@ -261,6 +328,8 @@ ${layoutStyle}
   <div id="toast"></div>
   <div id="deck" style="position:absolute;left:-20000px;top:0;width:1280px;height:720px;overflow:hidden;pointer-events:none"></div>
 <script>
+// ── 图表渲染模块（visual/chartHtml.js 内联：画布/缩略图/导出镜像三处共用真实图表） ──
+${fs.readFileSync(path.join(__dirname, 'visual', 'chartHtml.js'), 'utf8')}
 const DECK = ${deckData};
 // 主题库（16 套，供编辑器切主题/装饰/背景用）
 const themeMap = ${JSON.stringify(Object.fromEntries(Object.entries(THEMES).map(([k,t])=>
@@ -305,7 +374,7 @@ function render(){
   page.elements.forEach((el,i)=>{
     const div = document.createElement('div');
     div.className = 'el' + (i===selIdx ? ' selected' : '');
-    div.innerHTML = elHtml(el, page) + '<div class="handle"></div>';
+    div.innerHTML = elHtml(el, page, th) + '<div class="handle"></div>';
     // 交互绑定
     div.addEventListener('mousedown', e => select(i, e));
     div.addEventListener('dblclick', e => editText(i, e));
@@ -331,7 +400,7 @@ function decoHtml(page, th){
   return h;
 }
 
-function elHtml(el, page){
+function elHtml(el, page, theme){
   const style = 'left:'+(el.x||0)+'px;top:'+(el.y||0)+'px;width:'+(el.w||0)+'px;height:'+(el.h||0)+'px;';
   switch(el.type){
     case 'text': {
@@ -360,10 +429,8 @@ function elHtml(el, page){
       return '<div style="position:absolute;'+style+';background:#E2E8F0;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#64748B;font-size:14px">'+esc(cap)+'</div>';
     }
     case 'chart': {
-      const labels = el.labels||[]; const series = el.series||[];
-      const rows = labels.map((lb,i)=>'<tr><td>'+esc(lb)+'</td>'+series.map(s=>'<td>'+(s.emphasis?'<b style="color:#E11D48">':'')+esc(s.values[i])+(s.emphasis?'</b>':'')+'</td>').join('')+'</tr>').join('');
-      const head = '<tr><th></th>'+series.map(s=>'<th style="color:'+(s.emphasis?'#E11D48':s.color||'#333')+'">'+esc(s.name||'')+'</th>').join('')+'</tr>';
-      return '<div style="position:absolute;'+style+';border:1px dashed #94A3B8;border-radius:8px;padding:10px;overflow:auto;background:rgba(255,255,255,0.6)"><table style="border-collapse:collapse;font-size:12px">'+head+rows+'</table></div>';
+      // 真实图表：与 preview 一致的 chartHtml 模块（主题由调用方传入）
+      return chartHTML(el, theme);
     }
     case 'table': {
       const rows = (el.rows||[]).map(r=>'<tr>'+r.map(c=>'<td style="border:1px solid '+(el.borderColor||'#E2E8F0')+';padding:4px 8px;font-weight:'+(c.bold?'bold':'normal')+';color:'+(c.color||el.color||'#333')+'">'+esc(c.text)+'</td>').join('')+'</tr>').join('');
@@ -403,10 +470,11 @@ function renderRail(){
     const mini = document.createElement('div');
     mini.className = 'rail-mini';
     mini.style.cssText = 'width:1280px;height:720px;transform:scale(0.125);transform-origin:top left;background:' + (page.background || '#FFFFFF');
+    const th = themeMap[page.theme||(DECK.design&&DECK.design.theme)||'generic']||themeMap.generic;
     if(page._layoutHtml){
       mini.innerHTML = '<div style="position:absolute;inset:0">' + page._layoutHtml + '</div>';
     } else {
-      (page.elements||[]).forEach(el=>{ mini.innerHTML += elHtml(el, page); });
+      (page.elements||[]).forEach(el=>{ mini.innerHTML += elHtml(el, page, th); });
     }
     item.appendChild(mini);
     const label = document.createElement('div');
@@ -423,10 +491,15 @@ function updatePager(){
   const el = document.getElementById('pgCount');
   if(el) el.textContent = (cur + 1) + ' / ' + DECK.pages.length;
 }
-// ---------- 页面 tabs ----------
+// ---------- 顶部页码导航（替代页面 tabs：多页不溢出） ----------
 function renderTabs(){
-  $('#tabs').innerHTML = DECK.pages.map((p,i)=>
-    '<button class="tab'+(i===cur?' active':'')+'" onclick="goPage('+i+')">'+(i+1)+' '+(p.type||'')+'</button>').join('');
+  const el = document.getElementById('topPg');
+  if(el) el.textContent = (cur + 1) + ' / ' + DECK.pages.length;
+}
+function jumpPage(){
+  const v = prompt('跳转到页码（1-' + DECK.pages.length + '）', String(cur + 1));
+  const n = parseInt(v, 10);
+  if(!isNaN(n) && n >= 1 && n <= DECK.pages.length) goPage(n - 1);
 }
 function goPage(i){ cur=i; selIdx=-1; render(); syncThemeSel(); $('#panel').innerHTML='<div class="empty">点击元素编辑</div>'; animateIn(); }
 function animateIn(){
@@ -685,13 +758,14 @@ function mirrorAllRender(){
     const slide = document.createElement('div');
     slide.className = 'slide' + (pi === 0 ? ' active' : '');
     slide.style.cssText = 'position:absolute;left:0;top:0;width:1280px;height:720px;overflow:hidden;background:' + (page.background || '#FFFFFF');
+    const th = themeMap[page.theme||(DECK.design&&DECK.design.theme)||'generic']||themeMap.generic;
     if(page._layoutHtml){
       slide.innerHTML = '<div style="position:absolute;inset:0">' + page._layoutHtml + '</div>';
     } else {
       (page.elements||[]).forEach(el=>{
         const node = document.createElement('div');
         if(el.type === 'text') node.setAttribute('data-editable-pptx-required-text','');
-        node.innerHTML = elHtml(el, page);
+        node.innerHTML = elHtml(el, page, th);
         slide.appendChild(node);
       });
     }
@@ -825,6 +899,16 @@ function applyThemeToPage(tid){
   toast('主题已切换：' + (THEMES_MAP[tid] || tid));
 }
 themeSel.addEventListener('change', e => applyThemeToPage(e.target.value));
+// 导出下拉菜单：切换显示 + 点击外部关闭（菜单项 onclick 已带 toggle 自关）
+function toggleExportMenu(e){
+  if(e) e.stopPropagation();
+  const m = document.getElementById('exportMenu');
+  if(m) m.classList.toggle('open');
+}
+document.addEventListener('click', e=>{
+  const m = document.getElementById('exportMenu');
+  if(m && m.classList.contains('open') && !m.contains(e.target) && e.target.id !== 'exportBtn') m.classList.remove('open');
+});
 render(); syncThemeSel(); fitCanvas();
 checkExportService(false);
 </script>
