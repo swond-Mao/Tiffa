@@ -38,7 +38,9 @@ export async function loadAndRenderHistory(sessionPath: string): Promise<boolean
     const hist = chat.history[sessionPath];
     const cached = hist?.cache;
     if (cached) {
-      chat.setHistory(sessionPath, { cache: null });
+      // 预载缓存命中：同时推进游标（=已渲染尾部条数），否则后续「加载更早」
+      // 会以 skip=0 重复读取已显示的尾部并前插——表现为消息重复/拼接错乱。
+      chat.setHistory(sessionPath, { cache: null, cursor: cached.messages.length, hasMore: !!cached.hasMore });
       raw = cached.messages;
       hasMore = !!cached.hasMore;
       dbgLog('hist', `命中预载缓存 ${raw.length} 条`);
@@ -192,6 +194,7 @@ export async function autoRenameWithLightModel(session: { path: string; title?: 
   if (sessions.autoNamedSessions[sessPath]) return;
   if (autoRenameInFlight.has(sessPath)) return;
   autoRenameInFlight.add(sessPath);
+  dbgLog('rename', `自动重命名开始 ${sessPath.slice(-40)}`);
   try {
     let context = '';
     try {
@@ -225,7 +228,10 @@ export async function autoRenameWithLightModel(session: { path: string; title?: 
         }
         sessions.markAutoNamed(sessPath);
         sessions.saveOpenTabs();
+        dbgLog('rename', `自动重命名完成 ${sessPath.slice(-40)} → ${title}`);
       }
+    } else {
+      dbgLog('rename', `自动重命名无结果 ${sessPath.slice(-40)}`);
     }
   } catch {
     /* ignore */

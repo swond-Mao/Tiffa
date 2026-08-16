@@ -9,7 +9,7 @@ import { useSessionsStore, makeNewSessionPath } from '../stores/useSessionsStore
 import { useProjectsStore } from '../stores/useProjectsStore';
 import { useChatStore } from '../stores/useChatStore';
 import { useProcStore, renameProcKey } from '../stores/useProcStore';
-import { useUiStore, type AskItem } from '../stores/useUiStore';
+import { useUiStore, type AskItem, type ThinkingLevel } from '../stores/useUiStore';
 import type { TiffaProjectSummary, TiffaModelInfo, TiffaModelsConfig } from '../types/tiffaDesktop';
 import {
   startStallCheck, stopStallCheck,
@@ -31,6 +31,31 @@ let modelListSeq = 0;
 let lastSwitchTime = 0;
 /** 切换序号：每次 switchToSession +1；await 后检查仍是最新才继续（并发切换时旧流程自动放弃） */
 let switchSeq = 0;
+/** per-session 模型物化互斥：切换会话的后台模型恢复与发送前物化并发时只执行一次 setModel，
+ *  避免重复 set_model 命令排队（内核串行处理）导致发送流程长时间阻塞（双对话卡死） */
+const restoreModelInFlight = new Set<string>();
+
+/** IPC 调用超时包装：模型命令（get_state/set_model/get_available_models）在实例冷启动、
+ *  后台模型发现（awaitBackgroundRefresh）或本地模型加载期间可能长时间无响应（主进程命令
+ *  超时长达 5 分钟），超时后放弃等待、不阻塞发送流程（命令本身仍会在内核后台完成） */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => {
+      dbgLog('model', `${label} 超时(${Math.round(ms / 1000)}s)，不再等待（内核将在后台完成）`);
+      reject(new Error(`${label} timeout`));
+    }, ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
 
 /** 仅当本流程仍持有切换锁（seq 仍是最新）时才解锁——被更新的点击覆盖时锁由新流程接管 */
 function unlockSwitchIfLatest(seq: number): void {
@@ -173,9 +198,16 @@ export async function fetchCurrentModel(): Promise<void> {
   // 优先用内核真实当前模型（get_state.model），避免拿"可用列表第一个"当当前模型显示
   try {
     const st = await window.tiffaDesktop.getState(sessionId);
-    const sm = (st as { model?: { id?: string; name?: string; provider?: string } } | null)?.model;
+    const sm = (st as { model?: { id?: string; name?: string; provider?: string; thinking?: { mode?: string; efforts?: string[] } } } | null)?.model;
     if (sm && sm.id) {
       useUiStore.getState().setCurrentModel(sm.name || sm.id, sm.provider || '');
+    }
+    // 同步模型思考档位支持列表（内核实测 state.model.thinking.efforts，UI 据此过滤可选档位）
+    const efforts = (sm && sm.thinking && Array.isArray(sm.thinking.efforts) ? sm.thinking.efforts : null) as ThinkingLevel[] | null;
+    useUiStore.getState().setThinkingEfforts(efforts);
+    const stLevel = (st as { thinkingLevel?: string } | null)?.thinkingLevel;
+    if (stLevel && THINKING_LEVELS.includes(stLevel as ThinkingLevel)) {
+      useUiStore.getState().setThinkingLevelState(stLevel as ThinkingLevel);
     }
   } catch {
     /* ignore */
@@ -198,39 +230,64 @@ export async function fetchCurrentModel(): Promise<void> {
   }
 }
 
-/** 恢复模型（校验可用性 + 竞态防护） */
+/** 恢复模型（校验可用性 + 竞态防护 + 超时保护） */
 export async function restoreModelIfAvailable(
   provider: string,
   modelId: string,
   sessionId: string | null,
   expectedSessionPath: string,
 ): Promise<boolean> {
-  const availableSet = await getAvailableModelSet();
-  if (availableSet && !availableSet.has(`${provider}/${modelId}`)) {
-    dbgLog('model', `模型 "${provider}/${modelId}" 不在可用列表中，跳过恢复`);
-    return false;
+  if (sessionId) {
+    // 同一实例只允许一次模型物化在途：switchToSession 后台恢复与 sendMessage 发送前
+    // 物化并发时跳过重复 setModel，避免双 set_model 排队把发送流程拖死
+    if (restoreModelInFlight.has(sessionId)) {
+      dbgLog('model', `模型恢复已在途（${sessionId}），跳过重复物化`);
+      return false;
+    }
+    restoreModelInFlight.add(sessionId);
   }
   try {
-    // 防御：实例当前已是目标模型时跳过 set_model。避免"切换会话时重复下发模型命令"
-    // 触发内核重复切换模型（旧模型连接未释放 + 新模型进程 → 双模型同跑卡死）
-    if (sessionId) {
-      try {
-        const st = (await window.tiffaDesktop.getState(sessionId)) as { model?: { id?: string; name?: string; provider?: string } } | null | undefined;
-        const cur = st && st.model;
-        if (cur && (cur.id === modelId || cur.name === modelId) && (cur.provider || '') === provider) {
-          dbgLog('model', `实例已运行 ${provider}/${modelId}，跳过重复设置`);
-          return true;
-        }
-      } catch {
-        /* 拿不到当前模型状态则继续下发 */
-      }
+    // 可用列表校验本身也可能卡（实例冷启动/后台模型发现中）→ 10s 超时，超时视为
+    // “未知”不校验直接下发（内核 set_model 自带可用性检查）
+    const availableSet = await withTimeout(getAvailableModelSet(), 10000, 'getAvailableModelSet').catch(() => null);
+    if (availableSet && !availableSet.has(`${provider}/${modelId}`)) {
+      dbgLog('model', `模型 "${provider}/${modelId}" 不在可用列表中，跳过恢复`);
+      return false;
     }
-    await window.tiffaDesktop.setModel(provider, modelId, sessionId);
-    if (useSessionsStore.getState().activeSessionPath !== expectedSessionPath) return true;
-    useUiStore.getState().setCurrentModel(modelId, provider);
-    return true;
-  } catch {
-    return false;
+    try {
+      // 防御：实例当前已是目标模型时跳过 set_model。避免“切换会话时重复下发模型命令”
+      // 触发内核重复切换模型（旧模型连接未释放 + 新模型进程 → 双模型同跑卡死）
+      if (sessionId) {
+        try {
+          const st = (await withTimeout(
+            window.tiffaDesktop.getState(sessionId) as Promise<unknown>,
+            15000,
+            'getState',
+          )) as { model?: { id?: string; name?: string; provider?: string } } | null | undefined;
+          const cur = st && st.model;
+          if (cur && (cur.id === modelId || cur.name === modelId) && (cur.provider || '') === provider) {
+            dbgLog('model', `实例已运行 ${provider}/${modelId}，跳过重复设置`);
+            return true;
+          }
+        } catch {
+          /* 拿不到当前模型状态则继续下发 */
+        }
+      }
+      // set_model 等待内核响应（本地模型加载/后台模型发现可能很慢）→ 25s 超时兜底：
+      // 超时不报错中断发送，模型切换继续在后台进行，下次发送前物化会再次校正
+      await withTimeout(
+        window.tiffaDesktop.setModel(provider, modelId, sessionId) as Promise<unknown>,
+        25000,
+        'setModel',
+      );
+      if (useSessionsStore.getState().activeSessionPath !== expectedSessionPath) return true;
+      useUiStore.getState().setCurrentModel(modelId, provider);
+      return true;
+    } catch {
+      return false;
+    }
+  } finally {
+    if (sessionId) restoreModelInFlight.delete(sessionId);
   }
 }
 
@@ -534,7 +591,9 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
   const projects = useProjectsStore.getState();
   const sessions = useSessionsStore.getState();
   if (!projects.activeProjectDirName) return map;
-  const newTabsToMigrate = sessions.sessions.filter((s) => s.path.startsWith('__new__') && s.sessionId);
+  const newTabsToMigrate = Object.entries(sessions.activeTabMeta)
+    .filter(([p, m]) => p.startsWith('__new__') && m.sessionId)
+    .map(([path, m]) => ({ path, sessionId: m.sessionId as string, dirName: m.dirName || '' }));
   if (newTabsToMigrate.length === 0) return map;
   let instances: Array<{ sessionId?: string; cwd?: string; sessionFilePath?: string }> = [];
   try {
@@ -544,22 +603,39 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
     /* ignore */
   }
   if (instances.length === 0) return map;
-  let disk = diskSessions as Array<Record<string, unknown>> | null;
-  if (!disk) {
+  // 磁盘会话列表按 tab 所属项目分别拉取：跨项目后 sessions.sessions 只含当前项目，
+  // 旧项目的 __new__ 必须查旧项目的磁盘列表才能找到真实路径（否则永不迁移）。
+  const diskCache: Record<string, Array<Record<string, unknown>>> = {};
+  const diskForDir = async (dirName: string): Promise<Array<Record<string, unknown>>> => {
+    if (diskCache[dirName]) return diskCache[dirName];
+    let list: Array<Record<string, unknown>> = [];
     try {
-      const r = (await window.tiffaDesktop.listSessions(projects.activeProjectDirName)) as Array<Record<string, unknown>> & { sessions?: unknown };
-      disk = r && r.sessions ? (r.sessions as Array<Record<string, unknown>>) : Array.isArray(r) ? r : null;
+      if (dirName === projects.activeProjectDirName && diskSessions) {
+        list = Array.isArray(diskSessions) ? diskSessions : [];
+      } else {
+        const r = (await window.tiffaDesktop.listSessions(dirName)) as unknown;
+        const rr = r as { error?: string; sessions?: unknown } | null | undefined;
+        if (!rr || rr.error) {
+          list = [];
+        } else if (Array.isArray(r)) {
+          list = r as Array<Record<string, unknown>>;
+        } else if (Array.isArray(rr.sessions)) {
+          list = rr.sessions as Array<Record<string, unknown>>;
+        }
+      }
     } catch {
       /* ignore */
     }
-  }
-  if (!disk) return map;
+    diskCache[dirName] = list;
+    return list;
+  };
   for (const nt of newTabsToMigrate) {
     // 仅按 sessionId 精确匹配实例。曾有的兜底 find（cwd 匹配 + 有 sessionFilePath +
     // tab 未打开）会错配到任意后台实例（如 tab 被上限关闭但仍存活的旧会话），
     // 把 __new__ 会话迁移到别人的真实路径，模型记忆 sessionModelMap 随之串味。
     const inst = instances.find((i) => i.sessionId === nt.sessionId);
     if (inst && inst.sessionFilePath) {
+      const disk = await diskForDir(nt.dirName);
       const realSession = disk.find((rs) => {
         const norm = (s: unknown) => (s ? String(s).replace(/\//g, '\\').toLowerCase() : '');
         return norm(rs.path) === norm(inst.sessionFilePath);
@@ -680,8 +756,11 @@ export async function switchToSession(sessionPath: string): Promise<void> {
   // 提取目标 sessionId（__new__ 用临时 UUID）
   let targetSessionId = extractSessionId(sessionPath);
   if (!targetSessionId && sessionPath.startsWith('__new__')) {
-    const sessObj = sessions.sessions.find((s) => s.path === sessionPath);
-    targetSessionId = (sessObj && sessObj.sessionId) || null;
+    // 优先 tab meta：跨项目后 sessions.sessions 只含当前项目，旧项目的 __new__
+    // 对象已不在列表里，但 tab meta 仍保留临时 sessionId——用它才能命中旧实例，
+    // 否则 activeSessionId 退化成路径字符串，发送时会 spawn 全新实例丢失上下文。
+    const tabMeta = sessions.activeTabMeta[sessionPath];
+    targetSessionId = (tabMeta && tabMeta.sessionId) || (sessions.sessions.find((s) => s.path === sessionPath)?.sessionId) || null;
   }
   useSessionsStore.setState({ activeSessionId: targetSessionId || sessionPath });
 
@@ -742,13 +821,22 @@ export async function switchToSession(sessionPath: string): Promise<void> {
     // 只有 agent 运行中或 agent_end flush 过（新鲜）时快照才是最新的；
     // 快照缺失/陈旧时从 JSONL 重新读取最新窗口（复用 messagesMap 里可能过期的旧快照
     // 会导致 agent 在后台已把新内容写盘后，切回来仍显示旧尾部——「尾部消失」根因）。
-    const agentWasRunning = proc.procStateMap[sessionPath]?.agentRunning;
     const cacheFresh = chat.sessionCacheFresh[sessionPath];
     const cached = chat.sessionMessageCache[sessionPath];
     if (cached && cached.messages.length > 0) {
       chat.setMessages(sessionPath, cached.messages);
-      // 快照陈旧（agent 已停止且未 flush）：立即显示后后台刷新校正，不等 IPC 往返
-      if (!agentWasRunning && !cacheFresh) {
+      // 快照陈旧（未 flush）：立即显示后后台刷新校正。
+      // agent 运行中且有流式消息时跳过刷新——流式事件会追平，而刷新替换消息数组会
+      // 破坏 streaming.messageIndex 导致输出丢失；agentRunning 残留（后台 agent_end
+      // 丢失：tab 被关/LRU 淘汰）或卡住无流式时刷新——从 JSONL 重读最新尾部，
+      // 修「切回对话后尾部不见、重启后才可见」。
+      const st = chat.streaming[sessionPath];
+      const hasLiveStream = !!(st && st.messageIndex >= 0);
+      if (!cacheFresh && !hasLiveStream) {
+        // 先重置历史游标再重读：切走期间若生成了新消息，带旧 cursor 增量读取
+        // （skip=cursor）只会返回新增的几条并覆盖整个界面——表现为切回后
+        // 「尾部消息消失/从中间截断」。重置后从尾部全量重读 200 条。
+        chat.resetHistory(sessionPath);
         void loadAndRenderHistory(sessionPath).catch(() => {});
       }
     } else {
@@ -1217,6 +1305,56 @@ export async function compactMessage(): Promise<void> {
       /* ignore */
     }
   }
+}
+
+// ── 思考档位（内核 set_thinking_level / cycle_thinking_level，与 oh-my-pi UI 同协议）──
+
+/** 合法档位列表（思考档位校验用） */
+export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/** 会话激活语义（指针模式）：档位命令前先确保实例在线（未就绪时轻量拉起），返回是否就绪 */
+async function ensureOnlineForCommand(): Promise<boolean> {
+  const sessions = useSessionsStore.getState();
+  const projects = useProjectsStore.getState();
+  const proc = useProcStore.getState();
+  if (proc.tiffaReady && sessions.activeSessionId) return true;
+  if (!sessions.activeSessionId || !projects.workspacePath) return false;
+  try {
+    const result = (await window.tiffaDesktop.activateSession(projects.workspacePath, sessions.activeSessionId)) as { error?: string; ready?: boolean } | undefined;
+    if (result && result.error) return false;
+    proc.setReady(!result || result.ready !== false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 设置当前会话思考档位（off=关闭思考；minimal~max=推理深度） */
+export async function sendThinkingLevel(level: ThinkingLevel): Promise<void> {
+  if (!THINKING_LEVELS.includes(level)) return;
+  const ok = await ensureOnlineForCommand();
+  if (!ok) {
+    useUiStore.getState().addToast('warning', '引擎未就绪，无法切换思考档位');
+    return;
+  }
+  try {
+    await window.tiffaDesktop.command('set_thinking_level', { level }, useSessionsStore.getState().activeSessionId);
+    useUiStore.getState().setThinkingLevelState(level);
+  } catch (err) {
+    useUiStore.getState().addToast('error', `切换思考档位失败: ${(err as Error).message}`);
+  }
+}
+
+/** 循环切换思考档位（Ctrl+T；依次遍历合法档位，跳过当前模型不支持的） */
+export async function cycleThinkingLevel(): Promise<void> {
+  const ui = useUiStore.getState();
+  const efforts = ui.thinkingEfforts;
+  const pool = efforts && efforts.length > 0 ? (THINKING_LEVELS as readonly string[]).filter((l) => efforts.includes(l as ThinkingLevel)) : THINKING_LEVELS;
+  if (pool.length === 0) return;
+  const cur = ui.thinkingLevel;
+  const idx = cur ? pool.indexOf(cur) : -1;
+  const next = (pool[(idx + 1) % pool.length]) as ThinkingLevel;
+  await sendThinkingLevel(next);
 }
 
 // ── 手动压缩 ──

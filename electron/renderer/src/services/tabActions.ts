@@ -12,7 +12,7 @@ import { useProcStore } from '../stores/useProcStore';
 import { useUiStore } from '../stores/useUiStore';
 import { switchToSession, loadSessions, showModalInput } from './sessionController';
 import { extractRecentMessages, buildRenamePrompt } from './historyService';
-import { dirNameFromSessionPath, extractSessionId, escapeHtml } from './utils';
+import { dirNameFromSessionPath, extractSessionId, escapeHtml, dbgLog } from './utils';
 
 /** 右键菜单 / 分支等动作使用的会话摘要（TabMeta 兼容） */
 export interface TabSession extends TabMeta {
@@ -320,6 +320,7 @@ export async function aiRenameTabSession(session: TabSession): Promise<void> {
   sessions.saveOpenTabs();
   const dir = dirNameFromSessionPath(session.path);
   if (dir) void loadSessions(dir);
+  dbgLog('rename', `AI 重命名完成 ${session.path.slice(-40)} → ${title}`);
   ui.addToast('success', `已重命名：${title}（${(result && result.model) || '当前模型'}）`);
 }
 

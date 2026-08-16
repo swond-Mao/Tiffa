@@ -14,6 +14,7 @@ import { useProcStore } from '../stores/useProcStore';
 import { useUiStore } from '../stores/useUiStore';
 import { abortMessage, sendMessage, sendSteer, compactMessage } from '../services/sessionController';
 import ModelPicker from './ModelPicker';
+import ThinkingPicker from './ThinkingPicker';
 import type { MessageImage } from '../types/messages';
 
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -306,6 +307,7 @@ export default function InputBox() {
           onPaste={onPaste}
         />
         <div className="input-actions">
+          <ThinkingPicker />
           <ModelPicker className="input-btn model-picker-btn" />
           <button
             type="button"

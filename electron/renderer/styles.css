@@ -1781,6 +1781,107 @@ body {
   border-color: hsl(var(--accent-main-000) / 0.2);
 }
 
+/* ── 思考档位切换（ThinkingPicker，借鉴 oh-my-pi-UI）── */
+.thinking-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-btn.thinking-btn {
+  background: hsl(var(--accent-main-000) / 0.1);
+  border: 1px solid hsl(var(--accent-main-000) / 0.28);
+  color: hsl(var(--accent-main-000));
+  padding: 5px 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 96px;
+}
+
+.input-btn.thinking-btn:hover {
+  background: hsl(var(--accent-main-000) / 0.18);
+  border-color: hsl(var(--accent-main-000));
+}
+
+.thinking-btn-label {
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinking-btn-caret {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.thinking-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 210px;
+  background: hsl(var(--bg-200));
+  border: 1px solid hsl(var(--border-200));
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px hsl(var(--always-black) / 0.4);
+  padding: 6px;
+  z-index: 1100;
+}
+
+.thinking-menu-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--text-400));
+  padding: 4px 10px 6px;
+  text-transform: uppercase;
+}
+
+.thinking-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: hsl(var(--text-100));
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.thinking-item:hover {
+  background: hsl(var(--accent-main-000) / 0.12);
+}
+
+.thinking-item.current {
+  color: hsl(var(--accent-main-000));
+  font-weight: 600;
+}
+
+.thinking-item-desc {
+  font-size: 11px;
+  color: hsl(var(--text-400));
+  flex: 1;
+}
+
+.thinking-item-check {
+  color: hsl(var(--accent-main-000));
+  font-weight: 700;
+}
+
+.thinking-menu-hint {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: hsl(var(--text-400));
+  cursor: pointer;
+  border-top: 1px solid hsl(var(--border-200));
+  margin-top: 4px;
+}
+
+.thinking-menu-hint:hover {
+  color: hsl(var(--accent-main-000));
+}
+
 .input-btn.send {
   background: hsl(var(--accent-main-000));
   color: white;

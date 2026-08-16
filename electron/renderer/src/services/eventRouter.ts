@@ -45,6 +45,29 @@ function extractToolCallFromPartial(partial: unknown, contentIndex: number): Str
   return info;
 }
 
+/** 从 sessionId 解析会话路径：优先 tab 匹配，回退会话列表扫描（tab 被关/LRU 淘汰后，
+ *  后台 agent_end 仍能复位 agentRunning，避免切回时误判“agent 运行中”而跳过刷新 */
+function resolveBgPath(
+  sessionId: string,
+  sessions: ReturnType<typeof useSessionsStore.getState>,
+): string | null {
+  const fromTabs = findSessionPathById(
+    sessionId,
+    sessions.activeSessionId,
+    sessions.activeSessionPath,
+    sessions.activeSessionPaths,
+  );
+  if (fromTabs) return fromTabs;
+  // __new__ tab 的 path 提取不出 sessionId，但 tab meta 里存了临时 sessionId——
+  // 跨项目/新建对话切走时，后台 agent_end 靠它才能复位 agentRunning 并标记缓存不新鲜
+  // （否则发送按钮卡“运行中”、切回后跳过磁盘校正显示旧尾部）。
+  for (const [p, m] of Object.entries(sessions.activeTabMeta)) {
+    if (m.sessionId === sessionId) return p;
+  }
+  const sess = sessions.sessions.find((s) => s.sessionId === sessionId);
+  return sess ? sess.path : null;
+}
+
 function routeBackgroundEvent(event: TiffaEventFrame): boolean {
   const sessions = useSessionsStore.getState();
   const projects = useProjectsStore.getState();
@@ -59,22 +82,12 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
     ) {
       if (event._sessionId != null) {
         if (event.type === 'agent_start' || event.type === 'prompt_result') {
-          const bgPath = findSessionPathById(
-            event._sessionId,
-            sessions.activeSessionId,
-            sessions.activeSessionPath,
-            sessions.activeSessionPaths,
-          );
+          const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, true);
           }
         } else if (event.type === 'agent_end') {
-          const bgPath = findSessionPathById(
-            event._sessionId,
-            sessions.activeSessionId,
-            sessions.activeSessionPath,
-            sessions.activeSessionPaths,
-          );
+          const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, false);
             // 后台对话结束也触发自动重命名
@@ -82,6 +95,10 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
             if (bgSess && !bgPath.startsWith('__new__') && !useSessionsStore.getState().autoNamedSessions[bgPath]) {
               autoRenameWithLightModel(bgSess).catch(() => {});
             }
+            // 后台结束：内存快照停留在切走时的旧内容（后台期间 message_update 被路由
+            // 拦截不入库），标记不新鲜 → 切回时 switchToSession 走 loadAndRenderHistory
+            // 从 JSONL 重读最新尾部（若标记新鲜会跳过重读，显示旧尾部=丢后台新内容）
+            useChatStore.getState().markCacheFresh(bgPath, false);
           }
         }
       }
@@ -493,6 +510,15 @@ function handleEvent(event: TiffaEventFrame): void {
         .then((sc) => sc.fetchCurrentModel())
         .catch(() => {});
       break;
+    case 'thinking_level_changed': {
+      // 内核思考档位已改变（set_thinking_level/cycle_thinking_level/自动降级后），同步 UI
+      if (event._sessionId && sessions.activeSessionId && event._sessionId !== sessions.activeSessionId) break;
+      const lv = (event as { thinkingLevel?: string }).thinkingLevel || (event as { level?: string }).level;
+      if (lv && ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(lv)) {
+        ui.setThinkingLevelState(lv as never);
+      }
+      break;
+    }
     case 'session_info_update': {
       if (event.title) {
         const sid = event._sessionId;
@@ -617,9 +643,10 @@ function handleEvent(event: TiffaEventFrame): void {
   }
 }
 
-/** 定向树刷新（带重试：JSONL 写盘可能晚于 session_switch 事件） */
+/** 定向树刷新（带重试：JSONL 写盘可能晚于 session_switch 事件；新建会话后内核
+ *  异步写盘，首轮可能找不到文件，需要更长窗口的重试，否则左侧树延迟出现） */
 async function refreshSessionTreeWithRetry(dirName: string, expectPath: string, attempt = 0): Promise<void> {
-  const RETRY_DELAYS = [300, 800, 1500, 3000];
+  const RETRY_DELAYS = [300, 800, 1500, 3000, 5000, 8000, 12000];
   try {
     const result = (await window.tiffaDesktop.listSessions(dirName)) as Array<Record<string, unknown>> & { error?: string };
     if (!result.error && Array.isArray(result)) {

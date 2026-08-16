@@ -12,6 +12,9 @@ import { cwdKey, lsGet, lsSet } from '../services/utils';
 
 export type ApprovalMode = 'auto' | 'yolo' | 'normal';
 
+/** 思考档位（内核协议 set_thinking_level，与 oh-my-pi UI 一致） */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface AskItem extends TiffaEventFrame {
   id: string;
   method: string;
@@ -65,6 +68,10 @@ export interface UiState {
   settingsOpen: boolean;
   /** 正在 AI 重命名的 session（非 null 时抑制渲染） */
   aiRenameSession: unknown;
+  /** 当前会话思考档位（null=未设置，跟随内核/模型默认）；由 thinking_level_changed 事件驱动 */
+  thinkingLevel: ThinkingLevel | null;
+  /** 当前模型实际支持的档位（内核 state.model.thinking.efforts；null=未知不过滤） */
+  thinkingEfforts: ThinkingLevel[] | null;
 
   // ── actions ──
   enqueueAsk: (req: AskItem) => void;
@@ -90,6 +97,8 @@ export interface UiState {
   setComputerUseEnabled: (v: boolean) => void;
   setFileViewMode: (v: string) => void;
   setAiRenameSession: (v: unknown) => void;
+  setThinkingLevelState: (v: ThinkingLevel | null) => void;
+  setThinkingEfforts: (v: ThinkingLevel[] | null) => void;
   toggleSidebar: () => void;
   toggleSettings: () => void;
 }
@@ -118,6 +127,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   sidebarOpen: false,
   settingsOpen: false,
   aiRenameSession: null,
+  thinkingLevel: null,
+  thinkingEfforts: null,
 
   enqueueAsk: (req) => {
     const s = get();
@@ -176,6 +187,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ fileViewMode: v });
   },
   setAiRenameSession: (v) => set({ aiRenameSession: v }),
+  setThinkingLevelState: (v) => set({ thinkingLevel: v }),
+  setThinkingEfforts: (v) => set({ thinkingEfforts: v }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
 }));

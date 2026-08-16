@@ -66,6 +66,11 @@ export default function ChatView() {
   const lastDiagRef = useRef(0); // 诊断日志节流时间戳
   const isStreamingRef = useRef(false); // 当前会话是否有流式消息（tick 闭包内读取）
   const prevStreamingRef = useRef(false); // 上一帧是否在流式（finalize 瞬间补钉底）
+  // 当前会话最近的真实滚动位置（onScroll/跳底时更新；切走时写回缓存，
+  // 修复 sessionController.cacheSnapshot 恒传 0 → 切回会话停在顶部/中间看不到尾部）
+  const scrollPosRef = useRef(0);
+  // 上一个活跃会话路径（切走时用它把真实滚动位置写回缓存）
+  const prevSessionPathRef = useRef<string | null>(null);
 
   // 同步流式状态到 ref（mount effect 的闭包固化，不能直接读渲染期变量；
   // 直接查 streaming map（O(1)），避免每 delta 对全量 messages 做 some 遍历）
@@ -78,6 +83,13 @@ export default function ChatView() {
   // ── 固定窗口虚拟化（对标 dim）：只渲染最近 WINDOW_SIZE 条，窗口前移替换 ──
   const total = messages.length;
   const [windowStart, setWindowStart] = useState(() => Math.max(0, total - WINDOW_SIZE));
+  // 会话切换：重置窗口起点到最新。否则 windowStart 沿用旧会话的滚动位置，
+  // 切到新会话（≥300 条）时从中间段开始显示——「从中间截断，尾部在窗口外」。
+  useEffect(() => {
+    const len = (useChatStore.getState().messagesMap[activeSessionPath || ''] || []).length;
+    setWindowStart(Math.max(0, len - WINDOW_SIZE));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionPath]);
   const windowed = total > WINDOW_THRESHOLD;
   const maxStart = Math.max(0, total - WINDOW_SIZE);
   // 流式中窗口钉最新：startIdx 强制为 maxStart（无视用户上滚的 windowStart），
@@ -133,6 +145,7 @@ export default function ChatView() {
     const prev = el.style.scrollBehavior;
     el.style.scrollBehavior = 'auto';
     el.scrollTop = el.scrollHeight;
+    scrollPosRef.current = el.scrollTop;
     el.style.scrollBehavior = prev;
   };
 
@@ -201,7 +214,16 @@ export default function ChatView() {
 
     const onScroll = () => {
       markUserScroll();
-      if (distance() <= RESUME_EPS) followRef.current = true;
+      const el0 = messagesRef.current;
+      if (el0) scrollPosRef.current = el0.scrollTop;
+      if (distance() <= RESUME_EPS) {
+        followRef.current = true;
+        // 窗口化：用户滚到底部时窗口前移到最新，让尾部消息进入窗口。
+        // 否则窗口停在旧位置，最新消息永远在窗口外——「下滚看不到对话尾部」
+        if (windowedRef.current && windowHasMoreRef.current) {
+          setWindowStart(Math.max(0, maxStartRef.current));
+        }
+      }
       updateBtn();
       // 顶部懒加载：先窗口前移（store 里还有更早消息未渲染），窗口到起点后走文件懒加载
       if (el.scrollTop > TOP_LAZY_SCROLL) return;
@@ -284,10 +306,21 @@ export default function ChatView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── 会话切换：恢复滚动位置 / 复位跟随 ──
+  // ── 会话切换：保存旧会话滚动位置 / 恢复滚动位置 / 复位跟随 ──
 
   useEffect(() => {
     const el = messagesRef.current;
+    // 切走：把真实滚动位置写回缓存（此前 cacheSnapshot 恒传 0，切回时恢复 0 →
+    // 停在顶部/中间、看不到尾部——「游标不在对话尾端」根因）。用 scrollPosRef
+    // 记录的值，避免 useEffect 在 DOM 更新后才执行、直接读 el.scrollTop 被 clamp。
+    const prevPath = prevSessionPathRef.current;
+    prevSessionPathRef.current = activeSessionPath;
+    if (prevPath && prevPath !== activeSessionPath) {
+      const prevMsgs = useChatStore.getState().messagesMap[prevPath];
+      if (prevMsgs && prevMsgs.length > 0) {
+        useChatStore.getState().cacheSnapshot(prevPath, scrollPosRef.current);
+      }
+    }
     if (!el || !activeSessionPath) return;
     // 窗口虚拟化：切到新会话先钉到最新窗口（窗口化后精确 scrollPos 恢复不可靠）
     const sessTotal = (useChatStore.getState().messagesMap[activeSessionPath] || []).length;
@@ -297,25 +330,37 @@ export default function ChatView() {
       followRef.current = true;
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
+        scrollPosRef.current = el.scrollTop;
         syncPos();
         updateBtn();
       });
       return;
     }
     const cached = useChatStore.getState().sessionMessageCache[activeSessionPath];
-    if (cached) {
+    if (cached && cached.messages.length > 0) {
       // 缓存命中：恢复历史位置，停在底部才继续跟随
       const pos = cached.scrollPos;
+      // 无效缓存位置（历史 bug：cacheSnapshot 恒写 0）→ 直接贴底跟随，
+      // 避免恢复 0 后停在顶部/中间看不到尾部
+      const posInvalid = pos <= 0;
       requestAnimationFrame(() => {
-        el.scrollTop = pos;
-        followRef.current = distance() <= RESUME_EPS;
+        el.scrollTop = posInvalid ? el.scrollHeight : pos;
+        scrollPosRef.current = el.scrollTop;
+        followRef.current = posInvalid || distance() <= RESUME_EPS;
         syncPos();
         updateBtn();
+        dbgLog(
+          'scroll',
+          `switch-restore pos=${pos}${posInvalid ? '(无效→贴底)' : ''} follow=${followRef.current} dist=${Math.round(distance())} n=${useChatStore.getState().messagesMap[activeSessionPath]?.length || 0}`,
+        );
       });
     } else {
-      // 无缓存：无条件跟随，历史加载完成后自动贴底
+      // 无缓存：无条件跟随并直接贴底（不能只置 followRef 等 DOM 变化触发 tick——
+      // 消息已渲染完成时没有 DOM 变化，tick 不跑，永远不跳底）
       followRef.current = true;
       requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+        scrollPosRef.current = el.scrollTop;
         syncPos();
         updateBtn();
       });
@@ -356,11 +401,13 @@ export default function ChatView() {
       prevStreamingRef.current = true;
       if (dist > AUTO_FOLLOW_GAP && !followRef.current) return;
       el.scrollTop = el.scrollHeight;
+      scrollPosRef.current = el.scrollTop;
       // 二次校正：不 cancel，保证执行（markdown 测量补全后补到真实底部）
       const raf = requestAnimationFrame(() => {
         const e2 = messagesRef.current;
         if (e2) {
           e2.scrollTop = e2.scrollHeight;
+          scrollPosRef.current = e2.scrollTop;
           updateBtn();
         }
       });
@@ -368,8 +415,15 @@ export default function ChatView() {
       // 流式结束瞬间（streaming-plain → Markdown 切换，高度可能变化）：补一次钉底，
       // 防止“输出完了但视口停在半路”（isStreaming=false 时上方分支不再执行）
       prevStreamingRef.current = false;
+      // 窗口化：流式期间 effectiveStart 被强制钉最新（无视用户上滚），结束时若回退到
+      // 旧 windowStart，视口会从尾部跳回中间——「光标飘到中间、下滚看不到尾部」根因。
+      // 结束瞬间把窗口钉到最新，保持流式期间的连续视觉。
+      if (windowed) {
+        setWindowStart(Math.max(0, total - WINDOW_SIZE));
+      }
       if (followRef.current) {
         el.scrollTop = el.scrollHeight;
+        scrollPosRef.current = el.scrollTop;
         dbgLog('scroll', `finalize-stick st=${el.scrollTop} sh=${el.scrollHeight}`);
       }
     }
