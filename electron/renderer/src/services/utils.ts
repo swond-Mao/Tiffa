@@ -9,15 +9,11 @@ export function extractSessionId(sessionPath?: string | null): string | null {
   return match ? match[1] : null;
 }
 
-/** 反查：通过 sessionId 找到对应 sessionPath（后台事件路由用） */
-export function findSessionPathById(
-  sessionId: string,
-  activeSessionId: string | null,
-  activeSessionPath: string | null,
-  activeSessionPaths: string[],
-): string | null {
+/** 反查：通过 sessionId 在活跃 tab 中找 sessionPath（后台事件路由用）。
+ *  注意：不做 activeSessionId 短路——activeSessionPath 可能因切换中断/竞态与
+ *  activeSessionId 不一致（残留），短路会把事件归属到错误视图（跨会话流出根因）。 */
+export function findSessionPathById(sessionId: string, activeSessionPaths: string[]): string | null {
   if (!sessionId) return null;
-  if (activeSessionId === sessionId) return activeSessionPath;
   for (const p of activeSessionPaths) {
     if (extractSessionId(p) === sessionId) return p;
   }

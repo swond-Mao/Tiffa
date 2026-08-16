@@ -593,11 +593,16 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
   if (!projects.activeProjectDirName) return map;
   const newTabsToMigrate = Object.entries(sessions.activeTabMeta)
     .filter(([p, m]) => p.startsWith('__new__') && m.sessionId)
-    .map(([path, m]) => ({ path, sessionId: m.sessionId as string, dirName: m.dirName || '' }));
+    .map(([path, m]) => ({ path, sessionId: m.sessionId as string, dirName: m.dirName || '', firstMessage: m.firstMessage || '' }));
   if (newTabsToMigrate.length === 0) return map;
-  let instances: Array<{ sessionId?: string; cwd?: string; sessionFilePath?: string }> = [];
+  let instances: Array<{ sessionId?: string; cwd?: string; sessionFilePath?: string; prevSessionIds?: string[] }> = [];
   try {
-    const insts = (await window.tiffaDesktop.getInstances()) as Array<{ sessionId?: string; cwd?: string; sessionFilePath?: string }> | undefined;
+    const insts = (await window.tiffaDesktop.getInstances()) as Array<{
+      sessionId?: string;
+      cwd?: string;
+      sessionFilePath?: string;
+      prevSessionIds?: string[];
+    }> | undefined;
     instances = insts || [];
   } catch {
     /* ignore */
@@ -633,7 +638,11 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
     // 仅按 sessionId 精确匹配实例。曾有的兜底 find（cwd 匹配 + 有 sessionFilePath +
     // tab 未打开）会错配到任意后台实例（如 tab 被上限关闭但仍存活的旧会话），
     // 把 __new__ 会话迁移到别人的真实路径，模型记忆 sessionModelMap 随之串味。
-    const inst = instances.find((i) => i.sessionId === nt.sessionId);
+    // prevSessionIds：主进程探测迁移（_probeSessionFile）后 sessionId 已是真实 id，
+    // 但 tab meta 仍持临时 UUID——按迁移前的旧 id 也能命中同一实例。
+    const inst = instances.find(
+      (i) => i.sessionId === nt.sessionId || (i.prevSessionIds || []).includes(nt.sessionId),
+    );
     if (inst && inst.sessionFilePath) {
       const disk = await diskForDir(nt.dirName);
       const realSession = disk.find((rs) => {
@@ -643,6 +652,22 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
       if (realSession) {
         const oldPath = nt.path;
         const newPath = String(realSession.path);
+        map[oldPath] = newPath;
+        const realSid = extractSessionId(newPath);
+        applySessionMigration(oldPath, newPath, realSid);
+      }
+    } else if (nt.firstMessage) {
+      // 兜底：实例已退出或 sessionFilePath 缺失（无 session_switch 且探测未命中）——
+      // 用 tab 的 firstMessage 在磁盘列表里精确匹配（重复发送同一句首条消息时
+      // 会有多条命中，此时不迁移，避免错配）。
+      const disk = await diskForDir(nt.dirName);
+      const fm = String(nt.firstMessage).trim().toLowerCase();
+      const matches = disk.filter(
+        (rs) => rs.firstMessage && String(rs.firstMessage).trim().toLowerCase() === fm,
+      );
+      if (matches.length === 1) {
+        const oldPath = nt.path;
+        const newPath = String(matches[0].path);
         map[oldPath] = newPath;
         const realSid = extractSessionId(newPath);
         applySessionMigration(oldPath, newPath, realSid);
@@ -658,6 +683,19 @@ export function applySessionMigration(oldPath: string, newPath: string, realSess
   sessions.migrateTabPath(oldPath, newPath, realSessionId);
   useChatStore.getState().migrateChatKey(oldPath, newPath);
   renameProcKey(oldPath, newPath);
+  // 迁移的是当前活跃 tab：迁移前 __new__ 显示的是内存快照（切走时的旧内容），
+  // 后台回复已写盘但前台看不到——迁移后必须从磁盘重读最新尾部，否则仍显示旧内容。
+  // agent 运行中且有流式时跳过（事件会追平，避免破坏 streaming.messageIndex）。
+  if (useSessionsStore.getState().activeSessionPath === newPath) {
+    const chat = useChatStore.getState();
+    const st = chat.streaming[newPath];
+    const hasLiveStream = !!(st && st.messageIndex >= 0);
+    if (!hasLiveStream) {
+      chat.resetHistory(newPath);
+      chat.markCacheFresh(newPath, false);
+      void loadAndRenderHistory(newPath).catch(() => {});
+    }
+  }
 }
 
 // ── 会话切换 ──
@@ -670,7 +708,19 @@ export async function switchToSession(sessionPath: string): Promise<void> {
   const ui = useUiStore.getState();
   // 相同路径：已有消息才跳过——启动恢复场景 activeSessionPath 已由 restoreOpenTabsFlow
   // 预置但消息尚未加载，此时必须继续走加载流程（否则启动后活跃会话历史空白）。
-  if (sessions.activeSessionPath === sessionPath && (chat.messagesMap[sessionPath]?.length || 0) > 0) return;
+  if (sessions.activeSessionPath === sessionPath && (chat.messagesMap[sessionPath]?.length || 0) > 0) {
+    // 切换中断残留：activeSessionId 与路径归属不一致（如 activeSessionId 已指向新会话而
+    // 路径仍是旧的）→ 校正 activeSessionId，避免后续事件按错误归属写入当前视图。
+    const pathSid =
+      extractSessionId(sessionPath) ||
+      (sessionPath.startsWith('__new__')
+        ? sessions.activeTabMeta[sessionPath]?.sessionId || null
+        : null);
+    if (!pathSid || !sessions.activeSessionId || pathSid !== sessions.activeSessionId) {
+      useSessionsStore.setState({ activeSessionId: pathSid || sessionPath });
+    }
+    return;
+  }
 
   // 准备阶段锁：活跃 tab 是未迁移 __new__ 时禁止切走
   if (sessions.preparingNewSessions[sessions.activeSessionPath || ''] && !sessions.preparingNewSessions[sessionPath]) {

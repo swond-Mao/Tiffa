@@ -14,6 +14,7 @@ import { useProcStore } from '../stores/useProcStore';
 import { switchModel, invalidateModelListCache } from '../services/sessionController';
 import { showModalConfirm } from '../services/tabActions';
 import { escapeHtml } from '../services/utils';
+import { PERSONA_KEYWORDS, buildFallbackPersona, buildPersonaPrompt } from '../services/personaTemplate';
 import type { TiffaModelsConfig, TiffaProviderConfig } from '../types/tiffaDesktop';
 
 // ── 工具 ──
@@ -935,21 +936,74 @@ function IdentitySection() {
   const addToast = useUiStore((s) => s.addToast);
   const aiName = useUiStore((s) => s.aiName);
   const userName = useUiStore((s) => s.userName);
+  const gender = useUiStore((s) => s.gender);
+  const persona = useUiStore((s) => s.persona);
+  const currentProvider = useUiStore((s) => s.currentProvider);
+  const currentModel = useUiStore((s) => s.currentModel);
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState('');
   const [uname, setUname] = useState('');
+  const [genderSel, setGenderSel] = useState('');
+  const [personaCard, setPersonaCard] = useState('');
+  const [selKeywords, setSelKeywords] = useState<string[]>([]);
+  const [customKeyword, setCustomKeyword] = useState('');
+  const [generating, setGenerating] = useState(false);
 
   const open = () => {
     setName(aiName === '助手' ? '' : aiName);
     setUname(userName);
+    setGenderSel(gender);
+    setPersonaCard(persona);
+    setSelKeywords([]);
+    setCustomKeyword('');
     setShowModal(true);
+  };
+
+  const toggleKeyword = (kw: string) => {
+    setSelKeywords((prev) => (prev.includes(kw) ? prev.filter((k) => k !== kw) : [...prev, kw]));
+  };
+
+  const addCustomKeyword = () => {
+    const kw = customKeyword.trim();
+    if (!kw) return;
+    setSelKeywords((prev) => (prev.includes(kw) ? prev : [...prev, kw]));
+    setCustomKeyword('');
+  };
+
+  const generate = async () => {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const prompt = buildPersonaPrompt(name.trim() || '助手', genderSel, selKeywords);
+      const res = (await window.tiffaDesktop.completeWithLightModel(
+        prompt,
+        400,
+        currentProvider || null,
+        currentModel || null,
+      )) as { text?: string; error?: string } | undefined;
+      if (res && res.text) {
+        setPersonaCard(res.text.trim());
+        addToast('success', '角色卡已生成');
+      } else if (res && res.error && res.error.includes('无可用模型')) {
+        setPersonaCard(buildFallbackPersona(name.trim() || '助手', genderSel, selKeywords));
+        addToast('info', '已用模板生成，可配置模型后重新扩写');
+      } else {
+        addToast('error', `扩写失败：${(res && res.error) || '未知错误'}`);
+      }
+    } catch (err) {
+      addToast('error', `扩写失败：${(err as Error).message}`);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const save = async () => {
     try {
-      await window.tiffaDesktop.saveIdentity(name.trim() || '助手', uname.trim());
+      await window.tiffaDesktop.saveIdentity(name.trim() || '助手', uname.trim(), genderSel, personaCard.trim());
       useUiStore.getState().setAiName(name.trim() || '助手');
       useUiStore.getState().setUserName(uname.trim());
+      useUiStore.getState().setGender(genderSel);
+      useUiStore.getState().setPersona(personaCard.trim());
       addToast('success', '身份已保存');
     } catch (err) {
       addToast('error', `保存失败: ${(err as Error).message}`);
@@ -960,8 +1014,12 @@ function IdentitySection() {
   return (
     <div className="settings-section">
       <div className="settings-section-title">AI 身份</div>
-      <div className="settings-section-desc">配置 AI 的名字与对你的称呼（记忆系统 AI.md / USER.md）</div>
-      <div className="constraints-preview">AI 名字：{aiName || '助手'}{userName ? `　·　对你的称呼：${userName}` : ''}</div>
+      <div className="settings-section-desc">配置 AI 的名字、称呼与角色卡（记忆系统 AI.md / USER.md）</div>
+      <div className="constraints-preview">
+        AI 名字：{aiName || '助手'}
+        {userName ? `　·　对你的称呼：${userName}` : ''}
+        {gender ? `　·　性别：${gender}` : ''}
+      </div>
       <button type="button" className="settings-btn" onClick={open}>
         设置 AI 身份
       </button>
@@ -976,7 +1034,7 @@ function IdentitySection() {
                 </button>
               </div>
               <div className="settings-body">
-                <div className="settings-section-desc">给 AI 起个名字，并告诉它怎么称呼你。信息会写入记忆系统（AI.md / USER.md），可随时在「设置 → AI 身份」修改。</div>
+                <div className="settings-section-desc">给 AI 起个名字、设定性别与性格，可一键扩写为结构化角色卡并注入人设。信息写入记忆系统（AI.md / USER.md）。</div>
                 <div className="bypass-field">
                   <label>AI 的名字</label>
                   <input type="text" value={name} placeholder="如：小巴 / Tiffa" autoComplete="off" spellCheck={false} onChange={(e) => setName(e.target.value)} />
@@ -985,11 +1043,78 @@ function IdentitySection() {
                   <label>对我的称呼</label>
                   <input type="text" value={uname} placeholder="如：swond / 朋友" autoComplete="off" spellCheck={false} onChange={(e) => setUname(e.target.value)} />
                 </div>
+                <div className="bypass-field">
+                  <label>性别</label>
+                  <div className="persona-gender-row">
+                    {['男', '女', '其他', '不强调'].map((g) => (
+                      <label key={g} className="persona-gender-item">
+                        <input type="radio" name="persona-gender" checked={genderSel === g} onChange={() => setGenderSel(g)} />
+                        <span>{g}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="bypass-field">
+                  <label>性格关键词（可多选，可手填）</label>
+                  <div className="persona-chips">
+                    {PERSONA_KEYWORDS.map((kw) => (
+                      <button
+                        key={kw}
+                        type="button"
+                        className={`persona-chip${selKeywords.includes(kw) ? ' selected' : ''}`}
+                        onClick={() => toggleKeyword(kw)}
+                      >
+                        {kw}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="persona-custom-row">
+                    <input
+                      type="text"
+                      value={customKeyword}
+                      placeholder="自定义性格词，回车添加"
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(e) => setCustomKeyword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addCustomKeyword();
+                        }
+                      }}
+                    />
+                    <button type="button" className="settings-btn" onClick={addCustomKeyword}>
+                      添加
+                    </button>
+                  </div>
+                  {selKeywords.length > 0 && <div className="persona-selected">已选：{selKeywords.join('、')}</div>}
+                </div>
+                <div className="bypass-field">
+                  <label>角色卡（AI 扩写或手动编辑）</label>
+                  <div className="persona-generate-row">
+                    <button type="button" className="settings-btn" onClick={() => void generate()} disabled={generating}>
+                      {generating ? '生成中…' : personaCard ? '重新生成' : '生成角色卡'}
+                    </button>
+                    <span className="persona-hint">优先使用旁路模型扩写，失败时本地模板兜底</span>
+                  </div>
+                  <textarea
+                    className="persona-textarea"
+                    value={personaCard}
+                    rows={8}
+                    placeholder={'【身份】…\n【性格】…\n【语气】…\n【说话方式】…\n【行为习惯】…\n【禁忌】…'}
+                    onChange={(e) => setPersonaCard(e.target.value)}
+                  />
+                </div>
                 <div className="ext-modal-actions">
                   <button type="button" className="settings-btn" onClick={() => setShowModal(false)}>
                     取消
                   </button>
-                  <button type="button" className="settings-btn" style={{ background: 'var(--accent)', color: 'white', borderColor: 'var(--accent)' }} onClick={() => void save()}>
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    style={{ background: 'var(--accent)', color: 'white', borderColor: 'var(--accent)' }}
+                    onClick={() => void save()}
+                  >
                     保存
                   </button>
                 </div>

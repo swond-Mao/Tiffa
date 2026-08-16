@@ -16,7 +16,7 @@ import {
   startFirstResponseCheck, stopFirstResponseCheck,
   markFirstResponseReceived, currentModelLabel,
 } from './generationGuard';
-import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, invalidateModelListCache } from './sessionController';
+import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache } from './sessionController';
 import { autoRenameWithLightModel } from './historyService';
 import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
 import { normalizeUserContent } from './messageBuilders';
@@ -51,12 +51,7 @@ function resolveBgPath(
   sessionId: string,
   sessions: ReturnType<typeof useSessionsStore.getState>,
 ): string | null {
-  const fromTabs = findSessionPathById(
-    sessionId,
-    sessions.activeSessionId,
-    sessions.activeSessionPath,
-    sessions.activeSessionPaths,
-  );
+  const fromTabs = findSessionPathById(sessionId, sessions.activeSessionPaths);
   if (fromTabs) return fromTabs;
   // __new__ tab 的 path 提取不出 sessionId，但 tab meta 里存了临时 sessionId——
   // 跨项目/新建对话切走时，后台 agent_end 靠它才能复位 agentRunning 并标记缓存不新鲜
@@ -66,6 +61,49 @@ function resolveBgPath(
   }
   const sess = sessions.sessions.find((s) => s.sessionId === sessionId);
   return sess ? sess.path : null;
+}
+
+/** 消息事件的归属写入路径：_sessionId 匹配当前活跃会话 → activeSessionPath；
+ *  否则解析到归属 tab（含 __new__ 临时 tab）→ 写入其缓冲——后台/临时会话回复期间
+ *  内容照常积累（对齐 oh-my-pi-UI 的 __sessionPath 路由），agent_end 迁移后不丢；
+ *  找不到归属（不属于任何已知会话）→ null（丢弃）。 */
+function resolveEventWritePath(
+  event: TiffaEventFrame,
+  sessions: ReturnType<typeof useSessionsStore.getState>,
+): string | null {
+  const evSid = (event as { _sessionId?: string | null })._sessionId;
+  if (!evSid || !sessions.activeSessionId || evSid === sessions.activeSessionId) {
+    // activeSessionPath 可能因切换中断/竞态停留在上一个会话（activeSessionId 已更新）——
+    // 仅凭 evSid===activeSessionId 会把当前会话内容写进错误视图（跨会话流出的根因）。
+    // 校验路径归属：不一致时按 evSid 解析真实归属。
+    const ap = sessions.activeSessionPath;
+    if (evSid && ap) {
+      const pathSid =
+        extractSessionId(ap) ||
+        (ap.startsWith('__new__') ? (sessions.activeTabMeta[ap]?.sessionId ?? null) : null);
+      if (pathSid !== evSid) {
+        const bg = resolveBgPath(evSid, sessions);
+        if (bg) return bg;
+      }
+    }
+    return ap;
+  }
+  return resolveBgPath(evSid, sessions);
+}
+
+/** 主动兜底迁移 __new__ tab，迁移成功后补发自动重命名（幂等：已迁移的 tab 不会
+ *  再出现在 migrateStuckNewTabs 的待迁列表；autoRenameWithLightModel 有防重） */
+async function migrateAndRenameNewTab(tempPath: string): Promise<void> {
+  try {
+    const map = await migrateStuckNewTabs();
+    const newPath = map[tempPath];
+    if (newPath && !useSessionsStore.getState().autoNamedSessions[newPath]) {
+      const s2 = useSessionsStore.getState().sessions.find((x) => x.path === newPath);
+      autoRenameWithLightModel(s2 || { path: newPath }).catch(() => {});
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function routeBackgroundEvent(event: TiffaEventFrame): boolean {
@@ -85,20 +123,29 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
           const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, true);
+            // 新一轮生成开始：旧快照作废（agent 运行中切回时避免显示上一轮旧尾部）
+            useChatStore.getState().markCacheFresh(bgPath, false);
           }
         } else if (event.type === 'agent_end') {
           const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, false);
-            // 后台对话结束也触发自动重命名
-            const bgSess = useSessionsStore.getState().sessions.find((s) => s.path === bgPath);
-            if (bgSess && !bgPath.startsWith('__new__') && !useSessionsStore.getState().autoNamedSessions[bgPath]) {
-              autoRenameWithLightModel(bgSess).catch(() => {});
+            // 后台对话结束也触发自动重命名。__new__ 先兜底迁移再命名：切走时
+            // session_switch 主分支被跳过，迁移悬置；原条件直接排除 __new__，
+            // 导致新建对话在后台跑完也永不重命名。
+            if (!bgPath.startsWith('__new__')) {
+              const bgSess = useSessionsStore.getState().sessions.find((s) => s.path === bgPath);
+              if (bgSess && !useSessionsStore.getState().autoNamedSessions[bgPath]) {
+                autoRenameWithLightModel(bgSess).catch(() => {});
+              }
+            } else {
+              void migrateAndRenameNewTab(bgPath);
             }
-            // 后台结束：内存快照停留在切走时的旧内容（后台期间 message_update 被路由
-            // 拦截不入库），标记不新鲜 → 切回时 switchToSession 走 loadAndRenderHistory
-            // 从 JSONL 重读最新尾部（若标记新鲜会跳过重读，显示旧尾部=丢后台新内容）
-            useChatStore.getState().markCacheFresh(bgPath, false);
+            // 后台结束：缓冲已按归属路由积累完整内容（含 __new__ 临时会话），
+            // 落快照并标记新鲜——内核 JSONL 延迟批量写盘（agent_end 后才 flush）时，
+            // 切回优先显示内存快照，避免读到不完整磁盘内容而「回复消失/前台不刷新」。
+            useChatStore.getState().cacheSnapshot(bgPath, 0);
+            useChatStore.getState().markCacheFresh(bgPath, true);
           }
         }
       }
@@ -241,9 +288,9 @@ function handleEvent(event: TiffaEventFrame): void {
           }
         }
       }
-      // agent_end flush 缓存并标记新鲜
+      // agent_end flush 缓存并标记新鲜（__new__ 也缓存：迁移时快照随 migrateChatKey 一起走）
       const path = sessions.activeSessionPath;
-      if (path && !path.startsWith('__new__')) {
+      if (path) {
         chat.cacheSnapshot(path, 0);
         chat.markCacheFresh(path, true);
       }
@@ -261,17 +308,35 @@ function handleEvent(event: TiffaEventFrame): void {
         }, 7000);
       }
       // 自动重命名（每会话一次）
-      const sess = useSessionsStore.getState().sessions.find((s) => s.path === sessions.activeSessionPath);
-      if (sess && !useSessionsStore.getState().autoNamedSessions[sess.path]) {
+      const stNow = useSessionsStore.getState();
+      let sess = stNow.sessions.find((s) => s.path === sessions.activeSessionPath);
+      // sessions.sessions 只含磁盘列表，__new__ 临时 tab 不在其中——从 tab meta 兜底，
+      // 否则新建对话结束（session_switch 未达）时整个重命名分支被跳过，永不命名。
+      if (!sess && sessions.activeSessionPath) {
+        const meta = stNow.activeTabMeta[sessions.activeSessionPath];
+        if (meta) sess = { path: sessions.activeSessionPath, title: meta.title, firstMessage: meta.firstMessage };
+      }
+      if (sess && !stNow.autoNamedSessions[sess.path]) {
         if (sess.path.startsWith('__new__')) {
-          // 临时路径：轮询等迁移（最多 10s，每 1.5s 查一次）
+          // 临时路径：先主动兜底迁移（幂等，覆盖 session_switch 迟到/丢失），再轮询等迁移。
+          // 锚点固定为初始 tempPath——用户切走后 activeSessionPath 已变，按它查找
+          // 会找到别的会话（串台重命名）或找不到（静默放弃）。
+          const tempPath = sess.path;
+          void migrateAndRenameNewTab(tempPath);
           let attempts = 0;
           const poll = () => {
             attempts++;
-            const s2 = useSessionsStore.getState().sessions.find((x) => x.path === useSessionsStore.getState().activeSessionPath);
-            if (s2 && !s2.path.startsWith('__new__') && !useSessionsStore.getState().autoNamedSessions[s2.path]) {
-              autoRenameWithLightModel(s2).catch(() => {});
-            } else if (s2 && s2.path.startsWith('__new__') && attempts < 6) {
+            const st = useSessionsStore.getState();
+            // 迁移完成标志：tab meta 中 tempPath 的 key 已被 migrateTabPath 换成真实路径
+            if (!st.activeTabMeta[tempPath]) {
+              const np =
+                st.activeSessionPath && !st.activeSessionPath.startsWith('__new__') ? st.activeSessionPath : null;
+              if (np && !st.autoNamedSessions[np]) {
+                const s2 = st.sessions.find((x) => x.path === np);
+                autoRenameWithLightModel(s2 || { path: np }).catch(() => {});
+              }
+            } else if (attempts < 20) {
+              if (attempts % 3 === 0) void migrateAndRenameNewTab(tempPath);
               setTimeout(poll, 1500);
             }
           };
@@ -282,24 +347,30 @@ function handleEvent(event: TiffaEventFrame): void {
       }
       break;
     }
-    case 'turn_end':
-      chat.finalizeAssistant(sessions.activeSessionPath);
+    case 'turn_end': {
+      const wpTurn = resolveEventWritePath(event, sessions);
+      if (wpTurn) chat.finalizeAssistant(wpTurn);
       break;
+    }
     case 'message_start': {
+      // 事件按归属路由：后台/临时会话的消息写入自己的缓冲（回复期间内容不丢），
+      // 只有找不到归属的事件才丢弃——不写入 activeSessionPath，杜绝尾巴拼进当前视图。
+      const writePath = resolveEventWritePath(event, sessions);
+      if (!writePath) break;
       const msg = event.message as { role?: string; content?: unknown };
       if (!msg) break;
       if (msg.role === 'user') {
-        // 用户消息已在 sendMessage 提前渲染，或 AI 重命名模式 → 跳过
-        const running = sessions.activeSessionPath
-          ? proc.procStateMap[sessions.activeSessionPath]?.agentRunning
-          : false;
+        // 用户消息已在 sendMessage 提前渲染；后台会话（归属 ≠ 活跃）不重复添加。
+        if (writePath !== sessions.activeSessionPath) break;
+        // AI 重命名模式 → 跳过
+        const running = writePath ? proc.procStateMap[writePath]?.agentRunning : false;
         if (running || ui.aiRenameSession) break;
         const isSteered = !!(msg as { steering?: boolean }).steering || ui.pendingSteerMarker;
         const isQueued = !!(msg as { follow_up?: boolean }).follow_up || ui.pendingFollowUpMarker;
         if (ui.pendingSteerMarker) ui.setPendingSteerMarker(false);
         if (ui.pendingFollowUpMarker) ui.setPendingFollowUpMarker(false);
         const text = normalizeUserContent(msg.content);
-        chat.appendUserMessage(sessions.activeSessionPath, {
+        chat.appendUserMessage(writePath, {
           id: `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           role: 'user',
           parts: [{ kind: 'text', text }],
@@ -313,11 +384,13 @@ function handleEvent(event: TiffaEventFrame): void {
           break;
         }
         markFirstResponseReceived();
-        chat.beginAssistantMessage(sessions.activeSessionPath);
+        chat.beginAssistantMessage(writePath);
       }
       break;
     }
     case 'message_update': {
+      const path = resolveEventWritePath(event, sessions);
+      if (!path) break;
       const ast = event.assistantMessageEvent as
         | {
             type?: string;
@@ -329,7 +402,6 @@ function handleEvent(event: TiffaEventFrame): void {
           }
         | undefined;
       if (!ast) break;
-      const path = sessions.activeSessionPath;
       switch (ast.type) {
         case 'text_start':
           chat.textStart(path);
@@ -391,23 +463,27 @@ function handleEvent(event: TiffaEventFrame): void {
     case 'message_end': {
       const msg = event.message as { role?: string } | undefined;
       if (msg && msg.role === 'assistant') {
-        chat.finalizeAssistant(sessions.activeSessionPath);
+        const wpEnd = resolveEventWritePath(event, sessions);
+        if (wpEnd) chat.finalizeAssistant(wpEnd);
       }
       break;
     }
-    case 'tool_execution_start':
-      if (event.toolCallId && event.toolName) {
-        chat.toolStart(sessions.activeSessionPath, event.toolCallId, event.toolName, event.args);
+    case 'tool_execution_start': {
+      const wpTool = resolveEventWritePath(event, sessions);
+      if (event.toolCallId && event.toolName && wpTool) {
+        chat.toolStart(wpTool, event.toolCallId, event.toolName, event.args);
       }
       // ask 工具等用户回复：暂停卡住检测
       if (event.toolName === 'ask') stopStallCheck();
       break;
+    }
     case 'tool_execution_update':
       // 增量结果：React 版暂不渲染（等价 handleToolUpdate no-op）
       break;
     case 'tool_execution_end': {
-      if (event.toolCallId && event.toolName) {
-        chat.toolEnd(sessions.activeSessionPath, event.toolCallId, event.toolName, event.result, !!event.isError);
+      const wpToolEnd = resolveEventWritePath(event, sessions);
+      if (event.toolCallId && event.toolName && wpToolEnd) {
+        chat.toolEnd(wpToolEnd, event.toolCallId, event.toolName, event.result, !!event.isError);
       }
       if (event.toolName === 'ask') {
         const running = sessions.activeSessionPath
@@ -631,9 +707,10 @@ function handleEvent(event: TiffaEventFrame): void {
           refreshSessionTreeWithRetry(dirName, newPath);
         }
       }
-      // 后台 __new__ 补齐迁移
-      if (useSessionsStore.getState().sessions.some((s) => s.path.startsWith('__new__') && s.path !== useSessionsStore.getState().activeSessionPath)) {
-        import('./sessionController').then((sc) => sc.migrateStuckNewTabs()).catch(() => {});
+      // 后台 __new__ 补齐迁移（条件必须查 tab meta：sessions.sessions 是磁盘列表，
+      // 不含 __new__ 临时 tab——原条件永远不成立，切走后的迁移悬置，树里迟迟不出现）
+      if (Object.keys(useSessionsStore.getState().activeTabMeta).some((p) => p.startsWith('__new__'))) {
+        void migrateStuckNewTabs().catch(() => {});
       }
       break;
     }

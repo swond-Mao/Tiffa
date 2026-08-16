@@ -354,6 +354,8 @@ class TiffaInstanceManager {
                 cwd: inst.cwd,
                 sessionId: inst.sessionId,
                 sessionFilePath: inst.sessionFilePath,
+                prevSessionIds: inst.prevSessionIds || [],
+                spawnedAt: inst.spawnedAt,
                 active: key === this.activeKey,
                 ready: inst.ready,
                 agentRunning: inst.agentRunning,

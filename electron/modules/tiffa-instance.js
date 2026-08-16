@@ -49,6 +49,19 @@ class TiffaInstance {
      *  否则 isPrewarming=true 会把用户回复流尾部全部吞掉（见 _handleEvent prewarm 过滤） */
     userPromptInFlight = false;
     sessionFilePath = null;
+    /** 最近一次用户 prompt 文本（非内部命令）：用于探测内核自动创建的会话文件。
+     *  内核 RPC 模式从不向主进程发送 session_switch（hooks 内部事件不输出），
+     *  新对话实例的 sessionId/sessionFilePath 永远停留在前端临时 UUID——
+     *  渲染层 migrateStuckNewTabs 因此拿不到真实路径，__new__ tab 永不迁移。
+     *  这里在 agent_start（会话文件必已创建）时按 firstMessage 探测并模拟补发
+     *  session_switch，让实例身份/事件路由/迁移链路恢复正常。 */
+    lastPromptMessage = null;
+    /** 本实例当前 spawn 的起始时间（探测时按文件创建时间约束，避免误匹配旧会话） */
+    spawnedAt = Date.now();
+    /** 迁移前的旧 sessionId 列表（探测/session_switch 迁移时追加；渲染层匹配用） */
+    prevSessionIds = [];
+    /** 会话文件目录（--session-dir 参数，探测扫描用） */
+    sessionDir;
     _titleGenerated = false;
     _restoringContext = false;
     _pendingAskIds = new Set();
@@ -61,11 +74,13 @@ class TiffaInstance {
     constructor(cwd, sessionId = null) {
         this.cwd = cwd;
         this.sessionId = sessionId;
+        this.sessionDir = path_1.default.join(constants_1.SESSIONS_DIR, (0, session_utils_1.stableSessionDirName)(cwd));
     }
     start() {
         if (this.process)
             return;
         this.userKilled = false;
+        this.spawnedAt = Date.now();
         const env = {
             ...process.env,
             ...(0, process_utils_1.utf8Env)(),
@@ -201,6 +216,10 @@ class TiffaInstance {
             if (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up') {
                 this.userPromptInFlight = true;
             }
+            // 记录用户 prompt 文本（内部命令排除），供 agent_start 时探测内核自动创建的会话文件
+            if (frame.type === 'prompt' && typeof frame.message === 'string' && !frame.message.trim().startsWith('/')) {
+                this.lastPromptMessage = frame.message;
+            }
             if (this._restoringContext && (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up')) {
                 this._restoringContext = false;
                 console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消上下文恢复过滤`);
@@ -242,6 +261,10 @@ class TiffaInstance {
         }
         if (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up') {
             this.userPromptInFlight = true;
+        }
+        // 记录用户 prompt 文本（内部命令排除），供 agent_start 时探测内核自动创建的会话文件
+        if (frame.type === 'prompt' && typeof frame.message === 'string' && !frame.message.trim().startsWith('/')) {
+            this.lastPromptMessage = frame.message;
         }
         const line = JSON.stringify(frame) + '\n';
         try {
@@ -289,12 +312,21 @@ class TiffaInstance {
         else if (event.type === 'agent_start') {
             this.agentRunning = true;
             (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] agent_start`);
+            // 会话文件探测：内核 RPC 模式不输出 session_switch，新会话文件的真实
+            // id/路径主进程拿不到 → 实例身份停留在临时 UUID、渲染层迁移失效。
+            // agent_start 时会话文件必已创建，按 firstMessage 匹配并模拟补发 session_switch。
+            if (!this.sessionFilePath)
+                this._probeSessionFile();
         }
         else if (event.type === 'agent_end') {
             (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] agent_end code=${event._wasPrewarming ? 'prewarm' : 'normal'}`);
             event._wasPrewarming = this.isPrewarming;
             this.agentRunning = false;
             this.userPromptInFlight = false;
+            // agent_end 兜底探测：agent_start 时 firstMessage 可能尚未写盘（竞态）导致
+            // 探测未命中——结束时文件必已完整，补探测并模拟补发 session_switch。
+            if (!this.sessionFilePath)
+                this._probeSessionFile();
             if (!event._wasPrewarming && !this._titleGenerated) {
                 this._titleGenerated = true;
                 setTimeout(() => {
@@ -363,6 +395,8 @@ class TiffaInstance {
             this.sessionFilePath = event.sessionPath;
             const realSessionId = (0, session_utils_1.extractSessionIdFromPath)(event.sessionPath);
             if (realSessionId && realSessionId !== this.sessionId) {
+                if (this.sessionId && !this.prevSessionIds.includes(this.sessionId))
+                    this.prevSessionIds.push(this.sessionId);
                 if (_migrateSessionId)
                     _migrateSessionId(this.cwd, this.sessionId, realSessionId);
                 this.sessionId = realSessionId;
@@ -398,6 +432,98 @@ class TiffaInstance {
         }
         if (_mainWindow && !_mainWindow.isDestroyed()) {
             _mainWindow.webContents.send('tiffa:event', event);
+        }
+    }
+    /** 探测内核自动创建的会话文件（RPC 模式无 session_switch 事件时的补偿机制）：
+     *  内核把新会话文件写到磁盘（firstMessage = 用户 prompt 原文），但从不向主进程
+     *  发送 session_switch（hooks 内部事件不输出到 stdout）→ 实例 sessionId 永远停留在
+     *  前端临时 UUID、sessionFilePath 为 null → 渲染层 __new__ 迁移全部失效。
+     *  这里按 firstMessage + 文件创建时间（>= 本次 spawn）匹配，命中后更新实例身份，
+     *  并模拟补发 session_switch（_sessionIdPrev = 旧临时 id，渲染层归属校验按它通过）。 */
+    _probeSessionFile() {
+        const promptText = this.lastPromptMessage;
+        if (!promptText)
+            return;
+        const wanted = promptText.trim();
+        if (!wanted)
+            return;
+        try {
+            const files = [];
+            const walk = (dir) => {
+                let entries;
+                try {
+                    entries = fs_1.default.readdirSync(dir, { withFileTypes: true });
+                }
+                catch {
+                    return;
+                }
+                for (const e of entries) {
+                    const full = path_1.default.join(dir, e.name);
+                    if (e.isDirectory())
+                        walk(full);
+                    else if (e.isFile() && e.name.endsWith('.jsonl'))
+                        files.push(full);
+                }
+            };
+            walk(this.sessionDir);
+            // 候选必须唯一：多个同 firstMessage 的新文件（并发新对话发同一句话）不迁移，
+            // 避免把实例身份错迁到别人的会话导致更严重的串台。
+            let hit = null;
+            let hitCount = 0;
+            for (const file of files) {
+                let st;
+                try {
+                    st = fs_1.default.statSync(file);
+                }
+                catch {
+                    continue;
+                }
+                // 只匹配本实例 spawn 之后创建的文件（排除旧会话/并发其他实例的会话）。
+                // Windows 部分文件系统 birthtime 可能为 0，此时回退 mtime。
+                const created = st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs;
+                if (created < this.spawnedAt - 1000)
+                    continue;
+                const header = (0, session_utils_1.parseSessionHeader)(file);
+                if (!header.firstMessage)
+                    continue;
+                if (header.firstMessage.trim() !== wanted)
+                    continue;
+                hitCount++;
+                hit = file;
+            }
+            if (hitCount !== 1 || !hit)
+                return;
+            {
+                const file = hit;
+                const header = (0, session_utils_1.parseSessionHeader)(file);
+                const realId = header.sessionId || (0, session_utils_1.extractSessionIdFromPath)(file);
+                const oldId = this.sessionId;
+                if (realId && realId !== oldId) {
+                    if (oldId && !this.prevSessionIds.includes(oldId))
+                        this.prevSessionIds.push(oldId);
+                    if (_migrateSessionId)
+                        _migrateSessionId(this.cwd, oldId, realId);
+                    this.sessionId = realId;
+                }
+                this.sessionFilePath = file;
+                (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] 探测到会话文件 ${path_1.default.basename(file)} (${oldId || 'null'} -> ${realId || 'null'})`);
+                // 模拟补发 session_switch：渲染层 __new__ 迁移依赖它（内核 RPC 模式不发送）
+                if (_mainWindow && !_mainWindow.isDestroyed()) {
+                    _mainWindow.webContents.send('tiffa:event', {
+                        type: 'session_switch',
+                        reason: 'new',
+                        sessionPath: file,
+                        _cwd: this.cwd,
+                        _sessionIdPrev: oldId,
+                        _sessionId: realId,
+                        _sessionPath: file,
+                        _probed: true,
+                    });
+                }
+            }
+        }
+        catch {
+            /* ignore */
         }
     }
     _cleanup() {

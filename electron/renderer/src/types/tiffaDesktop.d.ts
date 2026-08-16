@@ -187,8 +187,8 @@ export interface TiffaDesktopApi {
 
   // ── 记忆 ──
   recallMemory: (query: string) => Promise<unknown>;
-  getIdentity: () => Promise<{ aiName?: string; userName?: string } | undefined>;
-  saveIdentity: (aiName: string, userName: string) => Promise<unknown>;
+  getIdentity: () => Promise<{ aiName?: string; userName?: string; gender?: string; persona?: string } | undefined>;
+  saveIdentity: (aiName: string, userName: string, gender?: string, persona?: string) => Promise<unknown>;
 
   // ── 已移除工作区 ──
   getRemovedCwds: () => Promise<string[]>;

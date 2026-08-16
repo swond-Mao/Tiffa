@@ -2597,36 +2597,58 @@ print(json.dumps({'results': results[:30]}, ensure_ascii=False))
     return m ? m[1].trim() : '';
   }
 
+  // 提取 AI.md 中的「角色卡」多行块（## 角色卡 标题到文件尾，去首尾空白）
+  // 注意 m 标志：标题位于 # AI 身份 之后，^ 需锚定行首而非字符串开头
+  function parsePersonaCard(content) {
+    if (!content) return '';
+    const m = content.match(/^##\s*角色卡\s*\n([\s\S]*)$/m);
+    if (!m) return '';
+    return m[1].replace(/^\s*\n+|[ \t\n]+$/g, '').trim();
+  }
+
   ipcMain.handle('memory:getIdentity', async () => {
     try {
       const aiContent = fs.existsSync(AI_MD) ? fs.readFileSync(AI_MD, 'utf8') : '';
       const userContent = fs.existsSync(USER_MD) ? fs.readFileSync(USER_MD, 'utf8') : '';
       const aiName = parseMdField(aiContent, '名字');
+      const gender = parseMdField(aiContent, '性别');
+      const persona = parsePersonaCard(aiContent);
       const userName = parseMdField(userContent, '称呼');
       return {
         aiName,
+        gender,
+        persona,
         userName,
         needsSetup: (!aiName || !userName),
       };
     } catch (err) {
-      return { aiName: '', userName: '', needsSetup: true, error: err.message };
+      return { aiName: '', gender: '', persona: '', userName: '', needsSetup: true, error: err.message };
     }
   });
 
-  ipcMain.handle('memory:saveIdentity', async (event, aiName, userName) => {
+  ipcMain.handle('memory:saveIdentity', async (event, aiName, userName, gender, persona) => {
     try {
       const name = (aiName || '').trim();
       const title = (userName || '').trim();
+      const newGender = (gender || '').trim();
+      const newPersona = (persona || '').trim();
       if (!name && !title) return { ok: false, error: '名字与称呼不能都为空' };
 
-      // 写 AI.md（整体覆盖，结构固定）
+      // 写 AI.md（整体覆盖，结构固定；未显式更新的性别/角色卡保留旧值）
       if (name) {
+        const prevAi = fs.existsSync(AI_MD) ? fs.readFileSync(AI_MD, 'utf8') : '';
+        const prevGender = parseMdField(prevAi, '性别');
+        const prevPersona = parsePersonaCard(prevAi);
+        const finalGender = newGender || prevGender;
+        const finalPersona = newPersona || prevPersona;
         const aiMd = [
           '# AI 身份',
           '',
           `- 名字：${name}`,
+          ...(finalGender ? [`- 性别：${finalGender}`] : []),
           '- 定位：你的桌面 AI 助手，陪你写代码、想方案、管记忆。',
           '',
+          ...(finalPersona ? ['## 角色卡', '', finalPersona, ''] : []),
         ].join('\n');
         fs.writeFileSync(AI_MD, aiMd, 'utf8');
       }

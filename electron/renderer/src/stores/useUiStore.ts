@@ -52,6 +52,8 @@ export interface UiState {
   approvalModeRestarting: boolean;
   aiName: string;
   userName: string;
+  gender: string;
+  persona: string;
   todoPhases: unknown[];
   sessionSwitching: boolean;
   pendingActivation: PendingActivation | null;
@@ -85,6 +87,8 @@ export interface UiState {
   loadApprovalMode: (workspacePath: string | null) => void;
   setAiName: (v: string) => void;
   setUserName: (v: string) => void;
+  setGender: (v: string) => void;
+  setPersona: (v: string) => void;
   setTodoPhases: (v: unknown[]) => void;
   setSessionSwitching: (v: boolean) => void;
   setPendingActivation: (v: PendingActivation | null) => void;
@@ -114,6 +118,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   approvalModeRestarting: false,
   aiName: '助手',
   userName: '',
+  gender: '',
+  persona: '',
   todoPhases: [],
   sessionSwitching: false,
   pendingActivation: null,
@@ -166,6 +172,8 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   setAiName: (v) => set({ aiName: v }),
   setUserName: (v) => set({ userName: v }),
+  setGender: (v) => set({ gender: v }),
+  setPersona: (v) => set({ persona: v }),
   setTodoPhases: (v) => set({ todoPhases: v }),
   setSessionSwitching: (v) => set({ sessionSwitching: v }),
   setPendingActivation: (v) => set({ pendingActivation: v }),
