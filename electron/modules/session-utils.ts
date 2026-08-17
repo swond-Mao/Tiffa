@@ -573,7 +573,8 @@ export function tryGenerateSessionTitle(
 export function parseMdField(content: string | null | undefined, field: string): string {
   if (!content) return '';
   const re = new RegExp(
-    '^\\s*-\\s*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[:：]\\s*(.+?)\\s*$',
+    // [ \t]* 而非 \s*：\s 能匹配换行，空值字段（- 称呼：）会跨行吞掉下一行内容
+    '^[ \\t]*-[ \\t]*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[ \\t]*[:：][ \\t]*(.+?)[ \\t]*$',
     'm',
   );
   const m = content.match(re);

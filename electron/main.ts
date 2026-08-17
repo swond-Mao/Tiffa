@@ -2613,7 +2613,7 @@ print(json.dumps({'results': results[:30]}, ensure_ascii=False))
   // 从 markdown 字段行 `- 字段名：值` / `- 字段名: 值` 提取 value
   function parseMdField(content, field) {
     if (!content) return '';
-    const re = new RegExp('^\\s*-\\s*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[:：]\\s*(.+?)\\s*$', 'm');
+    const re = new RegExp('^[ \\t]*-[ \\t]*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[ \\t]*[:：][ \\t]*(.+?)[ \\t]*$', 'm');
     const m = content.match(re);
     return m ? m[1].trim() : '';
   }

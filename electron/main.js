@@ -2737,7 +2737,7 @@ print(json.dumps({'results': results[:30]}, ensure_ascii=False))
     function parseMdField(content, field) {
         if (!content)
             return '';
-        const re = new RegExp('^\\s*-\\s*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[:：]\\s*(.+?)\\s*$', 'm');
+        const re = new RegExp('^[ \\t]*-[ \\t]*' + field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[ \\t]*[:：][ \\t]*(.+?)[ \\t]*$', 'm');
         const m = content.match(re);
         return m ? m[1].trim() : '';
     }

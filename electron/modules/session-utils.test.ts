@@ -133,6 +133,11 @@ describe('parseMdField', () => {
   it('提取半角冒号字段', () => {
     expect(parseMdField('- name: Tiffa', 'name')).toBe('Tiffa');
   });
+  it('空值字段不吞下一行（防跨行泄漏）', () => {
+    expect(parseMdField('- 称呼：\n- 语言：中文（简体）', '称呼')).toBe('');
+    expect(parseMdField('- 称呼：\n- 语言：中文（简体）', '语言')).toBe('中文（简体）');
+  });
+
 
   it('无匹配返回空串', () => {
     expect(parseMdField('# 标题', '名字')).toBe('');
