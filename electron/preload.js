@@ -116,6 +116,23 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   getComputerUseStatus: () => ipcRenderer.invoke('computer-use:status'),
   toggleComputerUse: (enabled) => ipcRenderer.invoke('computer-use:toggle', enabled),
 
+  // ── Computer Use v4：每应用策略 + 窗口快照热键 ──
+  getComputerUsePolicies: () => ipcRenderer.invoke('computer-use:policies:get'),
+  setComputerUsePolicies: (cfg) => ipcRenderer.invoke('computer-use:policies:set', cfg),
+  getWindowSnapshotHotkey: () => ipcRenderer.invoke('window-snapshot:getHotkey'),
+  setWindowSnapshotHotkey: (cfg) => ipcRenderer.invoke('window-snapshot:setHotkey', cfg),
+  reloadWindowSnapshotHotkey: () => ipcRenderer.invoke('window-snapshot:reload'),
+  onWindowSnapshot: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('window-snapshot:captured', h);
+    return () => ipcRenderer.removeListener('window-snapshot:captured', h);
+  },
+  onWindowSnapshotError: (cb) => {
+    const h = (_e, payload) => cb(payload);
+    ipcRenderer.on('window-snapshot:error', h);
+    return () => ipcRenderer.removeListener('window-snapshot:error', h);
+  },
+
   // ── 旁路模型 / MCP 模型配置 ──
   getBypassModel: () => ipcRenderer.invoke('settings:getBypassModel'),
   saveBypassModel: (cfg) => ipcRenderer.invoke('settings:saveBypassModel', cfg),

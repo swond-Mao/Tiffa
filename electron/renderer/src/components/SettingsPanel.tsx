@@ -870,6 +870,35 @@ function ComputerUseSection() {
     void load();
   }, []);
 
+  // ── v4：加载并渲染每应用策略列表 ──
+  const loadPolicyList = async () => {
+    try {
+      const cur = (await window.tiffaDesktop.getComputerUsePolicies()) as any;
+      const apps = (cur && cur.apps) || {};
+      const el = document.getElementById('policyList');
+      if (!el) return;
+      const entries = Object.entries(apps).map(([k, v]) => `${k} = ${v}`).join('；') || '（无，默认 ask）';
+      el.textContent = `当前策略：${entries}`;
+    } catch {
+      /* ignore */
+    }
+  };
+  useEffect(() => {
+    void loadPolicyList();
+    const loadHotkey = async () => {
+      try {
+        const cfg = (await window.tiffaDesktop.getWindowSnapshotHotkey()) as any;
+        if (cfg && cfg.hotkey) {
+          const el = document.getElementById('snapshotHotkeyInput') as HTMLInputElement | null;
+          if (el) el.value = cfg.hotkey;
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    void loadHotkey();
+  }, []);
+
   return (
     <div className="settings-section">
       <div className="settings-section-title">Computer Use（电脑控制）</div>
@@ -892,6 +921,68 @@ function ComputerUseSection() {
         <span className="model-toggle-slider" />
         <span className="model-toggle-label">{enabled ? '已开启（重启 Tiffa 后生效）' : '已关闭'}</span>
       </label>
+      {/* ── v4：每应用执行策略 ── */}
+      <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-muted)' }}>
+        每应用执行策略（ask=逐步确认 / auto-run=跳过确认 / disabled=禁止操作）
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        <input
+          id="policyAppName"
+          placeholder="应用名关键词（如 微信 / Excel）"
+          style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+        />
+        <select
+          id="policyAppMode"
+          style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+        >
+          <option value="auto-run">auto-run</option>
+          <option value="disabled">disabled</option>
+        </select>
+        <button
+          type="button"
+          className="settings-btn"
+          onClick={async () => {
+            const name = (document.getElementById('policyAppName') as HTMLInputElement).value.trim();
+            const mode = (document.getElementById('policyAppMode') as HTMLSelectElement).value;
+            if (!name) return;
+            const cur = (await window.tiffaDesktop.getComputerUsePolicies()) as any;
+            const next = { ...cur, apps: { ...(cur.apps || {}), [name]: mode } };
+            await window.tiffaDesktop.setComputerUsePolicies(next);
+            addToast('success', `策略已保存：${name} = ${mode}（即时生效）`);
+            (document.getElementById('policyAppName') as HTMLInputElement).value = '';
+            loadPolicyList();
+          }}
+        >
+          添加策略
+        </button>
+      </div>
+      <div id="policyList" style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+        {/* 由下方 useEffect 渲染当前策略列表 */}
+      </div>
+      {/* ── v4：窗口快照热键 ── */}
+      <div style={{ marginTop: 14, fontSize: 13, color: 'var(--text-muted)' }}>
+        窗口快照热键（默认 Ctrl+Alt+K，按热键把当前活动窗口截图注入对话）
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+        <input
+          id="snapshotHotkeyInput"
+          placeholder="Ctrl+Alt+K"
+          defaultValue="CommandOrControl+Alt+K"
+          style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+        />
+        <button
+          type="button"
+          className="settings-btn"
+          onClick={async () => {
+            const hotkey = (document.getElementById('snapshotHotkeyInput') as HTMLInputElement).value.trim();
+            await window.tiffaDesktop.setWindowSnapshotHotkey({ enabled: true, hotkey });
+            await window.tiffaDesktop.reloadWindowSnapshotHotkey();
+            addToast('success', `快照热键已更新：${hotkey}`);
+          }}
+        >
+          保存热键
+        </button>
+      </div>
     </div>
   );
 }

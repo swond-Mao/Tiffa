@@ -80,6 +80,7 @@ export interface ChatState {
   // ── 杂项 ──
   setDraftInput: (v: string | null) => void;
   setPendingImages: (v: MessageImage[]) => void;
+  addPendingImage: (img: MessageImage) => void;
   setWelcomePhase: (v: 'showing' | 'done') => void;
   setAiRenameMode: (v: boolean) => void;
   setAiRenameText: (v: string) => void;
@@ -450,7 +451,10 @@ export const useChatStore = create<ChatState>((set) => ({
 
   // ── 杂项 ──
   setDraftInput: (v) => set({ draftInput: v }),
-  setPendingImages: (v) => set({ pendingImages: v }),  setWelcomePhase: (v) => set({ welcomePhase: v }),
+  setPendingImages: (v) => set({ pendingImages: v }),
+  addPendingImage: (img) =>
+    set((s) => ({ pendingImages: [...s.pendingImages, img] })),
+  setWelcomePhase: (v) => set({ welcomePhase: v }),
   setAiRenameMode: (v) => {
     if (!v) dbgLog('aiRename', `final text: ${useChatStore.getState().aiRenameText.length} 字`);
     set({ aiRenameMode: v });

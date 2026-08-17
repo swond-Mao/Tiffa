@@ -1,11 +1,11 @@
 ---
 name: computer-use
-description: "AI 驱动的 Windows 桌面自动化（v3，探测优先）。仅『电脑控制』触发。"
+description: "AI 驱动的 Windows 桌面自动化（v4，探测优先）。仅『电脑控制』触发。"
 name_cn: "电脑控制"
-description_cn: "AI 驱动的 Windows 桌面自动化 v3（应用探测 + 策略选择 + 五级降级），仅『电脑控制』触发。"
+description_cn: "AI 驱动的 Windows 桌面自动化 v4（应用探测 + 策略选择 + 五级降级 + 弹窗检测 + Esc 制动），仅『电脑控制』触发。"
 ---
 
-# 电脑控制 v3 — 探测优先的桌面自动化
+# 电脑控制 v4 — 探测优先的桌面自动化
 
 ## 铁律
 
@@ -19,14 +19,20 @@ description_cn: "AI 驱动的 Windows 桌面自动化 v3（应用探测 + 策略
 8. **工具返回失败就是失败。** ui_tars 返回“无响应/未解析出动作”、desktop_input 报错，都是失败信号。不许把失败美化成“部分成功”然后继续，必须停下来换方法或如实报告。
 9. **输入前必须先点击输入框（自主执行，不等用户提醒）。** 任何 `desktop_input(action="type")` 之前，必须先 `ui_tars(task="点击XXX输入框", execute=true)` 精确点击目标输入框获得焦点。输入框没焦点，输入必然失败。盲窗（微信等）的输入框尤其要用 ui_tars 定位，不许猜坐标、不许假设已有焦点。
 10. **操作任何窗口前必须先 `ui_foreground(window="目标")` 确保它在前台（程序化检测，不看截图）。** 窗口“露个角”不等于在前台——截图上看得见不代表它持有键盘焦点。只有 ui_foreground 返回“在前台”才能继续操作；不在前台它会自动置前。禁止用“截图里能看到”来判断前台。
+11. **操作返回中出现 `⚠️ 新弹窗` / `⚠️ 之前的弹窗...仍未处理` 时，必须先处理弹窗（按用户指示点确认/取消），再继续原任务。** 禁止忽略弹窗继续操作——弹窗挡住后续所有点击，继续操作必然落空。
+12. **修改 computer_use 工具链（computer_use_mcp.py / uia_core.py / computer_use.py / run_eval.py）后，必须运行回归评测：`& '<PORTABLE_ROOT>/python/python.exe' '<PORTABLE_ROOT>/data/agent/managed-skills/computer-use/run_eval.py'`，全绿才算修完。** 评测在记事本上自动跑（会短暂弹窗），不会碰用户文件。
 
 ## 安全流程
 
-1. **ask 确认**：用 ask 工具向用户确认任务意图
+1. **ask 确认**：用 ask 工具向用户确认任务意图。**先查每应用策略**（`$ROOT/data/agent/computer-use-policies.json`，Tiffa 设置界面维护）：
+   - `auto-run` 应用：任务级确认一次即可，**不再逐步确认**（Windows 确认框也跳过）
+   - `disabled` 应用：禁止操作，MCP 会直接拒绝（ui_foreground/launch 返回拒绝消息）
+   - `ask`（默认）：每次操作都确认
 2. **展示计划**：告诉用户将做什么、哪些窗口会受影响、采用什么策略
 3. **用户确认后才执行**
-4. **Windows 确认框**：`computer_use` 和 `desktop_input(launch)` 会弹确认
-5. **ESC 紧急制动**：pyautogui FAILSAFE 已开启，鼠标移到角落即中断
+4. **Windows 确认框**：`computer_use` 和 `desktop_input(launch)` 会弹确认（auto-run 应用跳过）
+5. **ESC 紧急制动**：用户随时可按 Esc 中断——MCP 下一个副作用操作（ui_act / desktop_input / computer_use / ui_click_text / ui_tars 执行）会返回 `⚠️ 紧急制动已触发`，收到后必须停止并请示用户。pyautogui FAILSAFE（鼠标甩角落）作为第二道保险。
+6. **弹窗优先**：工具返回带 `⚠️ 新弹窗` 时，先按用户指示处理弹窗，再继续原任务。
 
 ## 禁止操作
 
@@ -410,12 +416,12 @@ ui_click_text(query="三jian客", window="微信", scope="group", verify_title="
 
 ---
 
-## 关键改进（vs v2）
+## 关键改进（vs v3）
 
-| | v2 (旧) | v3 (新) |
+| | v3 (旧) | v4 (新) |
 |---|---|---|
-| 规划 | 直接上手操作 | 强制探测→策略选择→再执行 |
-| 应用识别 | 一视同仁 | 按框架分类，查表施策 |
-| 后台通道 | 不考虑 | CLI/API/COM 优先于 GUI |
-| 盲窗处理 | 降级到 OCR | 探测阶段就判定，直接走 OCR 路线 |
-| 多应用任务 | 无指导 | 分段执行，每段独立策略 |
+| 弹窗处理 | 靠探测流程+分步验证应对 | 动作前后窗口 diff 自动检测，弹窗控件列表直接附在工具返回，重复弹窗报"仍未处理" |
+| 操作确认 | 所有应用一律 ask + MessageBox | 每应用策略（auto-run 跳确认 / disabled 拒绝 / ask 默认），设置界面维护 |
+| 中断机制 | pyautogui FAILSAFE（鼠标甩角落） | 全局 Esc 低级键盘钩子，副作用工具入口 one-shot 制动信号 |
+| 质量保障 | 改工具靠实机手测 | 回归评测集 run_eval.py（7 场景），改工具链必跑 |
+| 工具链 | 10 原子工具 | 10 原子工具 + 弹窗检测合成 + 策略层 + 制动层 |

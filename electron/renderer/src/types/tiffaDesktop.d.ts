@@ -220,6 +220,14 @@ export interface TiffaDesktopApi {
   toggleXmlTranslation: (enabled: boolean) => Promise<unknown>;
   getComputerUseStatus: () => Promise<{ enabled?: boolean } | undefined>;
   toggleComputerUse: (enabled: boolean) => Promise<unknown>;
+  // ── Computer Use v4：每应用策略 + 窗口快照 ──
+  getComputerUsePolicies: () => Promise<{ default: string; apps: Record<string, string>; popup_ignore: string[] }>;
+  setComputerUsePolicies: (cfg: unknown) => Promise<{ ok: boolean; error?: string }>;
+  getWindowSnapshotHotkey: () => Promise<{ enabled: boolean; hotkey: string }>;
+  setWindowSnapshotHotkey: (cfg: unknown) => Promise<{ ok: boolean; error?: string }>;
+  reloadWindowSnapshotHotkey: () => Promise<{ ok: boolean }>;
+  onWindowSnapshot: (cb: (p: { data: string; mimeType: string; title: string }) => void) => () => void;
+  onWindowSnapshotError: (cb: (p: { error: string }) => void) => () => void;
 
   // ── 旁路模型 / MCP 模型配置 ──
   getBypassModel: () => Promise<TiffaBypassModelConfig | undefined>;

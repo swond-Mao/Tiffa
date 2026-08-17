@@ -229,6 +229,61 @@ def list_windows():
     return out, None
 
 
+def _window_class(hwnd):
+    """取窗口类名（Win32 GetClassNameW）。失败返回空串。"""
+    try:
+        buf = ctypes.create_unicode_buffer(256)
+        n = ctypes.windll.user32.GetClassNameW(hwnd, buf, 256)
+        return buf.value if n else ""
+    except Exception:
+        return ""
+
+
+POPUP_IGNORE_CLASSES = {
+    # 系统非弹窗常驻：桌面、任务栏、工具提示
+    "Progman", "Shell_TrayWnd", "Tooltip_class", "tooltips_class32",
+    "NotifyIconOverflowWindow", "Shell_SecondaryTrayWnd", "Windows.UI.Core.CoreWindow",
+}
+
+
+def detect_new_windows(prev_hwnds, ignore_title_keywords=None):
+    """动作后检测新出现的顶层窗口（弹窗/确认框合成）。
+
+    prev_hwnds: 动作前的 hwnd 集合（顶层窗口可见部分）。
+    返回 [{hwnd, title, cls, pid}]——新出现且可见、非系统常驻、未在
+    ignore_title_keywords 中的窗口。任何异常返回空列表（弹窗检测失败
+    不能阻塞主操作）。
+    """
+    try:
+        wins, err = list_windows()
+        if err:
+            return []
+        ignore = set()
+        if ignore_title_keywords:
+            ignore = {k.lower() for k in ignore_title_keywords if k}
+        out = []
+        for w in wins:
+            if w["minimized"]:
+                continue
+            hwnd = w["el"].CurrentNativeWindowHandle if hasattr(w["el"], "CurrentNativeWindowHandle") else None
+            if not hwnd or hwnd in prev_hwnds:
+                continue
+            if not ctypes.windll.user32.IsWindowVisible(hwnd):
+                continue
+            cls = w["class"] or _window_class(hwnd)
+            if cls in POPUP_IGNORE_CLASSES:
+                continue
+            title = (w["name"] or "").strip()
+            if not title:
+                continue
+            if ignore and any(k in title.lower() for k in ignore):
+                continue
+            out.append({"hwnd": hwnd, "title": title, "cls": cls, "pid": w["pid"]})
+        return out
+    except Exception:
+        return []
+
+
 def get_foreground():
     """取当前前台窗口元素。"""
     iuia, _ = get_uia()

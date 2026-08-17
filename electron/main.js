@@ -654,6 +654,147 @@ function setupIpc() {
     // ── Computer Use Toggle（后台开关：默认关，启动不拉起 MCP，开机更快）──
     const COMPUTER_USE_ENABLED_FILE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'computer-use-enabled');
     const COMPUTER_USE_MCP_JSON = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'mcp.json');
+    // ── Computer Use v4：每应用执行策略（data/agent/computer-use-policies.json）──
+    const COMPUTER_USE_POLICIES_FILE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'computer-use-policies.json');
+    function defaultPolicies() {
+        return { default: 'ask', apps: {}, popup_ignore: ['Tiffa'] };
+    }
+    function readPolicies() {
+        try {
+            if (!fs_1.default.existsSync(COMPUTER_USE_POLICIES_FILE))
+                return defaultPolicies();
+            const cfg = JSON.parse(fs_1.default.readFileSync(COMPUTER_USE_POLICIES_FILE, 'utf8'));
+            if (!cfg || typeof cfg !== 'object')
+                return defaultPolicies();
+            return {
+                default: ['ask', 'auto-run', 'disabled'].includes(cfg.default) ? cfg.default : 'ask',
+                apps: cfg.apps && typeof cfg.apps === 'object' ? cfg.apps : {},
+                popup_ignore: Array.isArray(cfg.popup_ignore) ? cfg.popup_ignore : ['Tiffa'],
+            };
+        }
+        catch {
+            return defaultPolicies();
+        }
+    }
+    electron_1.ipcMain.handle('computer-use:policies:get', async () => readPolicies());
+    electron_1.ipcMain.handle('computer-use:policies:set', async (event, cfg) => {
+        try {
+            const clean = {
+                default: ['ask', 'auto-run', 'disabled'].includes(cfg && cfg.default) ? cfg.default : 'ask',
+                apps: cfg && cfg.apps && typeof cfg.apps === 'object' ? cfg.apps : {},
+                popup_ignore: Array.isArray(cfg && cfg.popup_ignore) ? cfg.popup_ignore : ['Tiffa'],
+            };
+            const dir = path_1.default.dirname(COMPUTER_USE_POLICIES_FILE);
+            if (!fs_1.default.existsSync(dir))
+                fs_1.default.mkdirSync(dir, { recursive: true });
+            fs_1.default.writeFileSync(COMPUTER_USE_POLICIES_FILE, JSON.stringify(clean, null, 2) + '\n', 'utf8');
+            console.log('[主进程] computer-use policies 已保存:', JSON.stringify(clean));
+            return { ok: true, policies: clean };
+        }
+        catch (err) {
+            return { ok: false, error: err.message };
+        }
+    });
+    // ── Computer Use v4：全局窗口快照热键（默认 Ctrl+Alt+K）──
+    const WINDOW_SNAPSHOT_CFG_FILE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'window-snapshot.json');
+    const DEFAULT_SNAPSHOT_HOTKEY = 'CommandOrControl+Alt+K';
+    function readSnapshotCfg() {
+        try {
+            if (!fs_1.default.existsSync(WINDOW_SNAPSHOT_CFG_FILE))
+                return { enabled: true, hotkey: DEFAULT_SNAPSHOT_HOTKEY };
+            const cfg = JSON.parse(fs_1.default.readFileSync(WINDOW_SNAPSHOT_CFG_FILE, 'utf8'));
+            return {
+                enabled: cfg.enabled !== false,
+                hotkey: typeof cfg.hotkey === 'string' && cfg.hotkey ? cfg.hotkey : DEFAULT_SNAPSHOT_HOTKEY,
+            };
+        }
+        catch {
+            return { enabled: true, hotkey: DEFAULT_SNAPSHOT_HOTKEY };
+        }
+    }
+    electron_1.ipcMain.handle('window-snapshot:getHotkey', async () => readSnapshotCfg());
+    electron_1.ipcMain.handle('window-snapshot:setHotkey', async (event, cfg) => {
+        try {
+            const clean = {
+                enabled: cfg && cfg.enabled !== false,
+                hotkey: cfg && typeof cfg.hotkey === 'string' && cfg.hotkey ? cfg.hotkey : DEFAULT_SNAPSHOT_HOTKEY,
+            };
+            const dir = path_1.default.dirname(WINDOW_SNAPSHOT_CFG_FILE);
+            if (!fs_1.default.existsSync(dir))
+                fs_1.default.mkdirSync(dir, { recursive: true });
+            fs_1.default.writeFileSync(WINDOW_SNAPSHOT_CFG_FILE, JSON.stringify(clean, null, 2) + '\n', 'utf8');
+            console.log('[主进程] window-snapshot 配置已保存:', JSON.stringify(clean));
+            return { ok: true, cfg: clean };
+        }
+        catch (err) {
+            return { ok: false, error: err.message };
+        }
+    });
+    // 快照动作：取 z-order 顶部窗口（当前活动窗口）→ 推给渲染层
+    async function captureWindowSnapshot() {
+        try {
+            const sources = await electron_1.desktopCapturer.getSources({
+                types: ['window'],
+                thumbnailSize: { width: 1600, height: 1600 },
+            });
+            if (!sources || sources.length === 0) {
+                (0, session_utils_1.mainLog)('[主进程] captureWindowSnapshot: 无可用窗口源');
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('window-snapshot:error', { error: '无可用窗口源' });
+                }
+                return;
+            }
+            const src = sources[0]; // z-order 顶部 = 当前活动窗口
+            const img = src.thumbnail;
+            if (!img || img.isEmpty()) {
+                (0, session_utils_1.mainLog)('[主进程] captureWindowSnapshot: 快照为空');
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('window-snapshot:error', { error: '快照为空（窗口可能最小化）' });
+                }
+                return;
+            }
+            const b64 = img.toPNG().toString('base64');
+            (0, session_utils_1.mainLog)(`[主进程] captureWindowSnapshot: 已捕获 ${src.name} (${(b64.length * 0.75 / 1024).toFixed(0)}KB)`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('window-snapshot:captured', {
+                    data: b64,
+                    mimeType: 'image/png',
+                    title: src.name || '窗口快照',
+                });
+            }
+        }
+        catch (err) {
+            (0, session_utils_1.mainLog)(`[主进程] captureWindowSnapshot 失败: ${String((err && err.message) || err)}`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('window-snapshot:error', { error: String((err && err.message) || err) });
+            }
+        }
+    }
+    // 注册/注销全局热键（跟随配置）
+    function registerSnapshotHotkey() {
+        try {
+            electron_1.globalShortcut.unregisterAll();
+            const cfg = readSnapshotCfg();
+            if (!cfg.enabled) {
+                (0, session_utils_1.mainLog)('[主进程] 窗口快照热键: 已禁用，不注册');
+                return;
+            }
+            const ok = electron_1.globalShortcut.register(cfg.hotkey, () => {
+                void captureWindowSnapshot();
+            });
+            (0, session_utils_1.mainLog)(`[主进程] 窗口快照热键 ${cfg.hotkey}: ${ok ? 'OK' : '注册失败（可能被占用）'}`);
+            console.log(`[主进程] 窗口快照热键 ${cfg.hotkey}: ${ok ? 'OK' : '注册失败（可能被占用）'}`);
+        }
+        catch (err) {
+            (0, session_utils_1.mainLog)(`[主进程] registerSnapshotHotkey 失败: ${err.message}`);
+            console.error('[主进程] registerSnapshotHotkey 失败:', err.message);
+        }
+    }
+    registerSnapshotHotkey();
+    electron_1.ipcMain.handle('window-snapshot:reload', async () => {
+        registerSnapshotHotkey();
+        return { ok: true };
+    });
     function isComputerUseEnabled() {
         try {
             if (!fs_1.default.existsSync(COMPUTER_USE_ENABLED_FILE))
@@ -2202,7 +2343,7 @@ function setupIpc() {
             return { error: err.message };
         }
     });
-    // ── 重命名会话：追加 title 事件行（不重写文件，避免与内核写盘竞态）──
+    // ── 重命名会话：优先内核 set_session_name 写 title slot，无实例时降级追加 title 事件行 ──
     electron_1.ipcMain.handle('sessions:rename', async (event, sessionPath, newTitle) => {
         try {
             const resolved = path_1.default.resolve(sessionPath);
@@ -2212,14 +2353,31 @@ function setupIpc() {
             if (!newTitle || typeof newTitle !== 'string' || !String(newTitle).trim()) {
                 return { error: 'Invalid title' };
             }
-            // 旧实现 readFileSync + writeFileSync 整文件重写：与内核实例的并发写盘
-            // （消息行/custom 心跳行）竞态，重写会覆盖内核尚未落盘/刚写入的内容 →
-            // 刷新页面读到缺尾部的会话文件（AI 重命名后刷新丢尾部对话，关闭重开才恢复）。
-            // 改为原子追加 title 事件行：不动已有内容，parseSessionHeader 取最新 title 事件。
+            const name = String(newTitle).trim().slice(0, 60);
+            // 优先走内核 set_session_name：内核把 title 写入文件第一行 title slot
+            // （256 字节定宽、原地改写头部，永远在 parseSessionHeader 的 64KB 头窗内），
+            // 并追加 title_change 审计行 + 广播变更事件——tab 与树从同一权威来源取名。
+            // 旧实现只往文件末尾追加 title 事件行：对话继续后消息行把 title 行推出
+            // parseSessionHeader 的尾窗，树永远读不到新名（tab 与树分叉）。
+            const sid = (0, session_utils_1.extractSessionIdFromPath)(resolved);
+            const inst = sid
+                ? (tiffaManager.getBySessionIdAnywhere(sid) || tiffaManager.getBySessionId(tiffaManager.activeCwd, sid))
+                : null;
+            if (inst) {
+                try {
+                    await inst.sendCommand({ type: 'set_session_name', name });
+                    console.log(`[rename] 内核写入 title slot: ${name} (${resolved})`);
+                    return { success: true };
+                }
+                catch (err) {
+                    console.warn(`[rename] set_session_name 失败，降级追加 title 行: ${err.message}`);
+                }
+            }
+            // 降级：无活跃实例或命令失败 → 追加 title 事件行（不重写文件，避免与内核写盘竞态）
             const titleLine = JSON.stringify({
                 type: 'title',
                 v: 1,
-                title: String(newTitle).trim().slice(0, 60),
+                title: name,
                 source: 'manual',
                 updatedAt: new Date().toISOString(),
             }) + '\n';
@@ -2822,14 +2980,31 @@ print(json.dumps({'results': results[:30]}, ensure_ascii=False))
     });
 }
 // ── App Lifecycle ──
+// 单实例锁：禁止双开。双实例会竞争同一批会话目录：互相 kill 实例（命令超时）、
+// 一方把另一方新建的会话文件当孤儿清理（对话丢失）、事件路由串台（回复进错对话）。
+// 后启动的实例直接退出；已有实例收到二次启动时聚焦主窗口。
+if (!electron_1.app.requestSingleInstanceLock()) {
+    electron_1.app.quit();
+}
+else {
+    electron_1.app.on('second-instance', () => {
+        const wins = electron_1.BrowserWindow.getAllWindows();
+        if (wins.length > 0) {
+            const win = wins[0];
+            if (win.isMinimized())
+                win.restore();
+            win.focus();
+        }
+    });
+}
 electron_1.app.whenReady().then(() => {
     setupIpc();
-    (0, window_setup_1.createWindow)();
+    mainWindow = (0, window_setup_1.createWindow)();
     // 懒启动：不在此处启动 Tiffa，等前端 loadProjects 切换项目时再 activate
     //（此处不再 activate 默认工作区，避免启动时创建两个 Tiffa 实例）
     electron_1.app.on('activate', () => {
         if (electron_1.BrowserWindow.getAllWindows().length === 0) {
-            (0, window_setup_1.createWindow)();
+            mainWindow = (0, window_setup_1.createWindow)();
         }
     });
 });
@@ -2840,6 +3015,7 @@ electron_1.app.on('window-all-closed', () => {
     electron_1.app.quit();
 });
 electron_1.app.on('before-quit', (e) => {
+    electron_1.globalShortcut.unregisterAll(); // 窗口快照热键清理
     if (gracefulShutdownStarted)
         return; // 第二次（app.quit 再次触发）直接放行退出
     gracefulShutdownStarted = true;

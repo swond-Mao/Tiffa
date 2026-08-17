@@ -27,6 +27,7 @@ import io
 import os
 import time
 import ctypes
+import ctypes.wintypes
 from datetime import datetime
 from pathlib import Path
 
@@ -434,8 +435,201 @@ def _check_forbidden(cmd):
     return None
 
 
+# ══════════════════════════════════════════════════════════════
+# 每应用执行策略（v4）
+# ══════════════════════════════════════════════════════════════
+# 存储：$ROOT/data/agent/computer-use-policies.json（Tiffa 设置界面写入）
+# 结构：{ "default": "ask", "apps": { "微信": "auto-run", "Excel": "auto-run" }, "popup_ignore": ["Tiffa"] }
+# MCP 每次调用实时读取（不缓存），改策略无需重启。
+
+POLICIES_PATH = Path(os.environ.get("PORTABLE_ROOT", Path(__file__).resolve().parents[4])) / "data" / "agent" / "computer-use-policies.json"
+
+
+def _load_policies() -> dict:
+    try:
+        if POLICIES_PATH.exists():
+            return json.loads(POLICIES_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"default": "ask", "apps": {}, "popup_ignore": ["Tiffa"]}
+
+
+def _match_policy(window_title: str = "", process_name: str = "") -> str:
+    """按窗口标题/进程名子串匹配策略，返回 ask / auto-run / disabled。"""
+    pol = _load_policies()
+    apps = pol.get("apps") or {}
+    for key, val in apps.items():
+        k = str(key).lower()
+        if k and ((window_title and k in window_title.lower()) or
+                  (process_name and k in process_name.lower())):
+            return val if val in ("auto-run", "disabled") else "ask"
+    d = pol.get("default", "ask")
+    return d if d in ("auto-run", "disabled") else "ask"
+
+
+# ══════════════════════════════════════════════════════════════
+# 弹窗检测合成（v4）
+# ══════════════════════════════════════════════════════════════
+# 动作前快照顶层窗口 hwnd 集合 → 动作后 diff → 新窗口（弹窗/确认框）
+# 以文本追加到工具返回，主模型先处理弹窗再继续原任务。
+
+_popup_seen = {}  # hwnd -> title，用于重复弹窗提醒
+_last_seen_hwnds = set()  # 跨调用基线：上一次工具调用时的窗口集合
+
+
+def _snapshot_hwnds() -> set:
+    """当前所有可见顶层窗口的 hwnd 集合。失败返回空集。"""
+    try:
+        U = _ensure_uia()
+        wins, err = U.list_windows()
+        if err:
+            return set()
+        s = set()
+        for w in wins:
+            if w.get("minimized"):
+                continue
+            h = w["el"].CurrentNativeWindowHandle if hasattr(w["el"], "CurrentNativeWindowHandle") else None
+            if h:
+                s.add(h)
+        return s
+    except Exception:
+        return set()
+
+
+def _popup_check(action_desc: str = "") -> str:
+    """每次工具调用后调用：跨调用 diff 检测新弹窗并格式化返回文本。
+
+    用模块级 _last_seen_hwnds 做基线（上一次调用时的窗口集合），与当前快照
+    diff——弹窗无论出现在动作前还是动作后都能检测到。首次调用只建立基线
+    不报告（避免把所有现存窗口误报为新弹窗）。无弹窗返回空串。
+    """
+    global _last_seen_hwnds
+    try:
+        U = _ensure_uia()
+        cur = _snapshot_hwnds()
+        if not _last_seen_hwnds:
+            _last_seen_hwnds = cur
+            return ""
+        ignore = (_load_policies().get("popup_ignore") or ["Tiffa"])
+        new = U.detect_new_windows(_last_seen_hwnds, ignore_title_keywords=ignore)
+        _last_seen_hwnds = cur
+        lines = []
+        for w in new:
+            hwnd = w["hwnd"]
+            if hwnd in _popup_seen:
+                continue  # 已在提醒队列，走下方未处理检查
+            _popup_seen[hwnd] = w["title"]
+            # UIA 轻量枚举：弹窗内前 10 个有名称控件
+            ctrl_text = ""
+            try:
+                items, meta, err = U.inspect(window=w["title"], max_items=10, probe_actions=True)
+                if not err:
+                    names = [it.get("name", "").strip() for it in items if it.get("name", "").strip()]
+                    if names:
+                        ctrl_text = "，控件: " + " | ".join(names[:8])
+            except Exception:
+                pass
+            lines.append(f"⚠️ 新弹窗:「{w['title']}」(类名 {w['cls'] or '?'}{ctrl_text}) → 按用户指示用 ui_act 处理（确认/取消），勿忽略")
+        # 未处理提醒：_popup_seen 中仍在当前窗口集合的弹窗（排除本次 new 的）
+        new_hwnds = {w["hwnd"] for w in new}
+        for hwnd, title in list(_popup_seen.items()):
+            if hwnd in new_hwnds:
+                continue  # 本次已报新弹窗，不重复
+            if hwnd in cur:
+                lines.append(f"⚠️ 之前的弹窗「{title}」仍未处理（请先处理再继续原任务）")
+            else:
+                _popup_seen.pop(hwnd, None)  # 弹窗已关闭，清理
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+# ══════════════════════════════════════════════════════════════
+# Esc 紧急制动（v4）
+# ══════════════════════════════════════════════════════════════
+# 低级键盘钩子（WH_KEYBOARD_LL，ctypes 实现，无新依赖）：Esc 按下置一次性
+# 标志，下一个副作用工具入口返回制动信号。钩子回调只置位，不做任何 IO。
+
+ABORT_FLAG = False
+_esc_hook_installed = False
+
+
+# ctypes 钩子回调需要持有引用防 GC
+_LLKHF = ctypes.c_long
+_KBLLHOOKPROC = ctypes.CFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p)
+_hook_handle = None
+_hook_cb = None
+
+# HHOOK 是 64 位句柄：SetWindowsHookExW 返回 HHOOK（指针），CallNextHookEx 返回 LRESULT。
+# 不设 restype 默认 c_int（32 位有符号），句柄高位非零时溢出导致误判安装失败。
+ctypes.windll.user32.SetWindowsHookExW.restype = ctypes.c_void_p
+ctypes.windll.user32.SetWindowsHookExW.argtypes = [ctypes.c_int, _KBLLHOOKPROC, ctypes.c_void_p, ctypes.c_uint]
+ctypes.windll.user32.CallNextHookEx.restype = ctypes.c_ssize_t
+ctypes.windll.user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p]
+
+
+def _esc_hook_proc(nCode, wParam, lParam):
+    global ABORT_FLAG
+    if nCode >= 0 and wParam == 0x0100:  # WM_KEYDOWN
+        try:
+            vk = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_ulong)).contents.value & 0xFF
+            if vk == 0x1B:  # VK_ESCAPE
+                ABORT_FLAG = True
+        except Exception:
+            pass
+    return ctypes.windll.user32.CallNextHookEx(_hook_handle, nCode, wParam, lParam)
+
+
+def _install_esc_hook():
+    """安装 Esc 低级键盘钩子。失败静默降级（不影响 MCP 主功能）。"""
+    global _hook_handle, _hook_cb, _esc_hook_installed
+    if _esc_hook_installed:
+        return True
+    try:
+        WH_KEYBOARD_LL = 13
+        _hook_cb = _KBLLHOOKPROC(_esc_hook_proc)
+        # 低级键盘钩子（WH_KEYBOARD_LL）的 hMod 参数必须为 NULL（文档要求），
+        # 传 GetModuleHandleW(None) 会导致 ERROR_MOD_NOT_FOUND(126)。
+        _hook_handle = ctypes.windll.user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, _hook_cb, None, 0)
+        if not _hook_handle:
+            return False
+        _esc_hook_installed = True
+        # 钩子需要消息循环：daemon 线程跑 GetMessageW
+        import threading
+        def _msg_loop():
+            msg = ctypes.wintypes.MSG()
+            while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
+                ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
+                ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+        threading.Thread(target=_msg_loop, daemon=True).start()
+        return True
+    except Exception as e:
+        _esc_hook_installed = False
+        import traceback
+        log_err(f"esc hook install failed: {e}")
+        log_err(traceback.format_exc())
+        return False
+
+
+def _aborted() -> str | None:
+    """副作用工具入口检查：命中返回制动消息（one-shot，清除标志）。"""
+    global ABORT_FLAG
+    if not ABORT_FLAG:
+        return None
+    ABORT_FLAG = False
+    log("abort", "Esc 紧急制动触发")
+    return "⚠️ 紧急制动已触发（Esc）：操作已停止。请先向用户确认是否继续；继续时重新执行探测流程。"
+
+
 def _confirm(task):
-    """Windows MessageBox 二次确认。"""
+    """Windows MessageBox 二次确认（v4：auto-run 策略跳过弹窗）。"""
+    # 策略匹配：任务描述里含应用名则按应用策略
+    pol = _match_policy(window_title=task, process_name="")
+    if pol == "auto-run":
+        return True
+    if pol == "disabled":
+        return False
     MB_YESNO = 0x4; MB_ICONWARNING = 0x30
     MB_DEFBUTTON2 = 0x100; MB_SETFOREGROUND = 0x10000
     msg = (
@@ -1041,6 +1235,11 @@ def handle_ui_foreground(args):
     if not window:
         return [_text("缺少 window 参数")], True
 
+    # v4：disabled 应用拒绝操作
+    pol = _match_policy(window_title=window, process_name=window)
+    if pol == "disabled":
+        return [_text(f"❌ 应用「{window}」已被用户设为禁用操作（computer-use-policies.json）")], True
+
     ok, err = U.is_foreground(window)
     if err:
         return [_text(f"检测失败: {err}")], True
@@ -1103,6 +1302,9 @@ def handle_ui_inspect(args):
 
 def handle_ui_act(args):
     U = _ensure_uia()
+    ab = _aborted()
+    if ab:
+        return [_text(ab)], False
     ref = args.get("ref", "")
     action = args.get("action", "invoke")
     text = args.get("text")
@@ -1117,6 +1319,9 @@ def handle_ui_act(args):
     # 操作后自动截一张小图回传，主模型立刻能看到效果
     img, _, _ = U.screenshot(max_width=800)
     contents = [_text(result)]
+    popup = _popup_check(action_desc=f"act {ref} {action}")
+    if popup:
+        contents.append(_text(popup))
     img_block = _image(img)
     if img_block:
         contents.append(img_block)
@@ -1232,7 +1437,7 @@ def handle_ui_find_text(args):
     h = hits
     return [_text(f'最佳命中: 文本={h["text"]!r} 分数={h["score"]} '
                   f'中心=({h["cx"]:.0f},{h["cy"]:.0f}) '
-                  f'包围盒=({h["x1"]:.0f},{h["y1"]:.0f})-({h["x2"]:.0f},{h["y2"]:.0f})'), False]
+                  f'包围盒=({h["x1"]:.0f},{h["y1"]:.0f})-({h["x2"]:.0f},{h["y2"]:.0f})')], False
 
 
 def handle_ui_click_text(args):
@@ -1259,6 +1464,9 @@ def handle_ui_click_text(args):
     # 点击后附一张小截图，主模型可立刻看到结果
     img, _, _ = U.screenshot(max_width=800)
     contents = [_text(desc + (f"\n⚠️ {warn}" if warn else ""))]
+    popup = _popup_check(action_desc=f"click_text {query}")
+    if popup:
+        contents.append(_text(popup))
     ib = _image(img)
     if ib:
         contents.append(ib)
@@ -1269,13 +1477,20 @@ def handle_desktop_input(args):
     U = _ensure_uia()
     import pyautogui
     atype = args.get("action", "")
+    ab = _aborted()
+    if ab:
+        return [_text(ab)], False
     try:
         if atype == "click":
             nx, ny = float(args.get("nx", 500)), float(args.get("ny", 500))
             px, py = U.norm_to_physical(nx, ny)
             btn = args.get("button", "left")
             pyautogui.click(px, y=py, button=btn)
-            return [_text(f"已点击 归一化({nx:.1f},{ny:.1f}) -> 物理像素({px},{py}) [{btn}]")], False
+            contents = [_text(f"已点击 归一化({nx:.1f},{ny:.1f}) -> 物理像素({px},{py}) [{btn}]")]
+            popup = _popup_check("desktop_input click")
+            if popup:
+                contents.append(_text(popup))
+            return contents, False
 
         elif atype == "double_click":
             nx, ny = float(args.get("nx", 500)), float(args.get("ny", 500))
@@ -1326,9 +1541,21 @@ def handle_desktop_input(args):
             fb = _check_forbidden(cmd)
             if fb:
                 return [_text(f"命令被拦截: '{cmd}' 包含禁止操作 '{fb}'")], True
+            # 策略：disabled 应用拒绝启动
+            pol = _match_policy(window_title=cmd, process_name=cmd)
+            if pol == "disabled":
+                return [_text(f"❌ 应用「{cmd}」已被用户设为禁用操作")], True
+            # auto-run 应用跳过确认框
+            if pol != "auto-run":
+                if not _confirm(f"启动应用 {cmd}"):
+                    return [_text("用户取消启动")], False
             os.startfile(cmd)
             time.sleep(2)
-            return [_text(f"已启动: {cmd}")], False
+            contents = [_text(f"已启动: {cmd}")]
+            popup = _popup_check("desktop_input launch")
+            if popup:
+                contents.append(_text(popup))
+            return contents, False
 
         elif atype == "wait":
             ms = int(args.get("ms", 1000))
@@ -1344,6 +1571,9 @@ def handle_desktop_input(args):
 
 def handle_computer_use(args):
     U = _ensure_uia()
+    ab = _aborted()
+    if ab:
+        return [_text(ab)], False
     task = args.get("task", "")
 
     # 危险检查
@@ -1351,7 +1581,7 @@ def handle_computer_use(args):
     if dk:
         return [_text(f"任务包含禁止操作: {dk}")], True
 
-    # 确认
+    # 确认（v4：auto-run 策略跳过）
     if not _confirm(task):
         return [_text("用户取消操作")], False
 
@@ -1409,6 +1639,9 @@ def handle_ui_tars(args):
     task = args.get("task", "")
     window = args.get("window")
     execute = bool(args.get("execute", False))
+    ab = _aborted() if execute else None
+    if ab:
+        return [_text(ab)], False
 
     if not GROUNDING_ENABLED or not GROUNDING_API_BASE:
         return [_text("UI-TARS 未启用：grounding.json 需配置 api_base 且 enabled=1")], True
@@ -1502,7 +1735,8 @@ def log_err(msg):
 
 
 def main():
-    log_err("Computer Use MCP Server v2 启动 (UIA 优先 + 四级降级) [uia_core 懒加载]")
+    log_err("Computer Use MCP Server v4 启动 (UIA 优先 + 五级降级) [uia_core 懒加载]")
+    _install_esc_hook()
 
     _logged_dpi = False
     for line in sys.stdin:
@@ -1524,7 +1758,7 @@ def main():
                 "result": {
                     "protocolVersion": "2024-11-05",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "computer-use-v2", "version": "2.0.0"}
+                    "serverInfo": {"name": "computer-use-v4", "version": "4.0.0"}
                 }
             })
         elif method == "notifications/initialized":

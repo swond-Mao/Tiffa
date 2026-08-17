@@ -16,6 +16,7 @@ import { abortMessage, sendMessage, sendSteer, compactMessage } from '../service
 import ModelPicker from './ModelPicker';
 import ThinkingPicker from './ThinkingPicker';
 import type { MessageImage } from '../types/messages';
+import { dbgLog } from '../services/utils';
 
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -85,6 +86,22 @@ export default function InputBox() {
       useChatStore.getState().setDraftInput(null);
     }
   }, [draftInput, agentRunning, shouldDisable]);
+
+  // ── 全局窗口快照热键：监听主进程推送，注入待发送图片 ──
+  useEffect(() => {
+    dbgLog('snapshot', '快照监听已挂载');
+    const off = window.tiffaDesktop.onWindowSnapshot((p) => {
+      dbgLog('snapshot', `收到快照事件: ${p.title} dataLen=${p.data.length}`);
+      const img: MessageImage = { data: p.data, mimeType: p.mimeType || 'image/png', name: p.title };
+      setImages((prev) => [...prev, img]);
+      useUiStore.getState().addToast('info', `已捕获窗口快照：${p.title}`);
+    });
+    const offErr = window.tiffaDesktop.onWindowSnapshotError((p) => {
+      dbgLog('snapshot', `快照错误事件: ${p.error}`);
+      useUiStore.getState().addToast('warning', `窗口快照失败：${p.error}`);
+    });
+    return () => { off(); offErr(); };
+  }, []);
 
   // ── slash 命令检测 ──
 
