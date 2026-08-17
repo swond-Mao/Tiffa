@@ -470,8 +470,14 @@ function parseSessionHeader(filePath) {
                 const obj = JSON.parse(line);
                 // title 事件取“最后一个”（覆盖语义）：手动重命名以追加 title 事件行实现，
                 // 头部可能有多条旧 title 事件；新追加的（更新的）必须优先。
-                if (obj.type === 'title' && obj.title) {
-                    title = obj.title;
+                // title slot（第一行定宽 256 字节，含 pad 字段）是权威标题：内核
+                // set_session_name 原地改写它，永远在头部，无条件采用；追加的
+                // title / title_change 行只在尚无标题时兜底（历史遗留），避免旧行
+                // 覆盖 slot 新值（旧实现追加行被消息推出头窗后树读不到新名的问题）。
+                if ((obj.type === 'title' || obj.type === 'title_change') && obj.title) {
+                    const isSlot = typeof obj.pad === 'string';
+                    if (isSlot || !title)
+                        title = obj.title;
                 }
                 if (obj.id && !sessionId && obj.version) {
                     sessionId = obj.id;
@@ -501,10 +507,13 @@ function parseSessionHeader(filePath) {
                 // skip
             }
         }
-        // 追加标题（手动重命名）在文件尾部：头部 64KB 读不到时，扫描文件尾部 4KB
-        // 取最新 title 事件（旧实现只扫头部，追加的标题对长会话不生效）
-        if (stat.size > headSize) {
-            const tailSize = Math.min(4096, stat.size);
+        // 追加标题（手动重命名）在文件尾部：头部 64KB 读不到时，扫描文件尾部 64KB
+        // 取最新 title / title_change 事件（旧实现只扫头部，追加的标题对长会话不生效；
+        // 旧实现尾窗仅 4KB，消息持续追加会把 title 行推出窗口——扩大为与头窗同尺寸
+        // 64KB，并识别内核 title_change 审计行）。仅当头部尚未确定标题时兜底，
+        // 避免更早的遗留行覆盖 title slot 的新值。
+        if (stat.size > headSize && !title) {
+            const tailSize = Math.min(65536, stat.size);
             const fd2 = fs_1.default.openSync(filePath, 'r');
             try {
                 const buf2 = Buffer.alloc(tailSize);
@@ -513,7 +522,7 @@ function parseSessionHeader(filePath) {
                 for (const line of tailLines) {
                     try {
                         const obj = JSON.parse(line);
-                        if (obj.type === 'title' && obj.title)
+                        if ((obj.type === 'title' || obj.type === 'title_change') && obj.title)
                             title = obj.title;
                     }
                     catch {

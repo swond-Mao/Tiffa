@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useProjectsStore } from '../stores/useProjectsStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
+import { useProcStore } from '../stores/useProcStore';
 import { useUiStore, hasPendingAsk } from '../stores/useUiStore';
 import { selectProject, loadProjects } from '../services/sessionController';
 import {
@@ -73,6 +74,8 @@ function SessionTree({ dirName }: { dirName: string }) {
   const activeSessionPath = useSessionsStore((s) => s.activeSessionPath);
   const activeSessionPaths = useSessionsStore((s) => s.activeSessionPaths);
   const expandedSessionTrees = useSessionsStore((s) => s.expandedSessionTrees);
+  // 活动对话（实例已就绪）集合：左侧圆点只对它们显示，选中（active）不点亮
+  const sessionReadyMap = useProcStore((s) => s.sessionReadyMap);
   const uiQueue = useUiStore((s) => s.uiQueue);
   void uiQueue;
 
@@ -101,6 +104,7 @@ function SessionTree({ dirName }: { dirName: string }) {
           'session-item',
           activeSessionPaths.includes(session.path) ? 'open' : '',
           session.path === activeSessionPath ? 'active' : '',
+          sessionReadyMap[session.path] ? 'ready' : '',
           hasPendingAsk(session.sessionId) || hasPendingAsk(extractSessionId(session.path)) ? 'pending-ask' : '',
         ]
           .filter(Boolean)

@@ -14,7 +14,7 @@ import type { TiffaProjectSummary, TiffaModelInfo, TiffaModelsConfig } from '../
 import {
   startStallCheck, stopStallCheck,
   startFirstResponseCheck, stopFirstResponseCheck,
-  markFirstResponseReceived,
+  markFirstResponseReceived, stopAllGuards,
 } from './generationGuard';
 import { loadAndRenderHistory, autoRenameWithLightModel, setHistoryPreload } from './historyService';
 import { dirNameFromSessionPath, extractSessionId, dbgLog, localizeKernelMessage } from './utils';
@@ -463,9 +463,8 @@ export async function selectProject(dirName: string): Promise<void> {
     const running = sessions.activeSessionPath ? proc.procStateMap[sessions.activeSessionPath]?.agentRunning : false;
     proc.setInstanceRunning(oldCwd, !!running);
   }
-  stopStallCheck();
-  stopFirstResponseCheck();
-
+  // 切项目：停止全部会话的检测器（新项目的守卫从零开始）
+  stopAllGuards();
   const project = useProjectsStore.getState().projects.find((p) => p.dirName === dirName);
   if (!project || !project.path && !project.cwd) return;
   const cwd = project.cwd || project.path || '';
@@ -759,8 +758,9 @@ export async function switchToSession(sessionPath: string): Promise<void> {
   if (oldSessionPath) {
     proc.setSessionRunning(oldSessionPath, !!proc.procStateMap[oldSessionPath]?.agentRunning);
   }
-  stopStallCheck();
-  stopFirstResponseCheck();
+  // 只停旧会话的检测器：并行会话的卡住/首响检测不受切换影响
+  stopStallCheck(oldSessionPath);
+  stopFirstResponseCheck(oldSessionPath);
 
   // 缓存旧会话消息快照
   if (oldSessionPath) {
@@ -904,7 +904,7 @@ export async function switchToSession(sessionPath: string): Promise<void> {
   const agentRunning = !!proc.procStateMap[sessionPath]?.agentRunning;
   if (agentRunning) {
     proc.setSessionRunning(sessionPath, true);
-    startStallCheck();
+    startStallCheck(sessionPath);
     ui.setStatusText('运行中...');
   } else {
     ui.setStatusText('就绪');
@@ -915,6 +915,8 @@ export async function switchToSession(sessionPath: string): Promise<void> {
   // 不活动对话保持可打字/可选模型，点发送时才由 sendMessage 兜底拉起实例。
   if (targetSessionId) {
     void window.tiffaDesktop.isReady(targetSessionId).then(async (ready) => {
+      // 无论是否仍为活跃会话：记录该会话实例就绪态（对话树圆点显示依据）
+      proc.setSessionReady(sessionPath, ready);
       if (useSessionsStore.getState().activeSessionId !== targetSessionId) return;
       proc.setReady(ready);
       if (ready) {
@@ -1094,8 +1096,8 @@ export async function sendMessage(text: string, images?: Array<{ data: string; m
   const sendImages = images && images.length > 0 ? images.map((img) => ({ data: img.data, mimeType: img.mimeType })) : undefined;
   proc.setSessionRunning(activePath, true);
   proc.setInstanceRunning(projects.workspacePath, true);
-  startStallCheck();
-  startFirstResponseCheck();
+  startStallCheck(activePath);
+  startFirstResponseCheck(activePath);
   ui.setStatusText('思考中...');
   try {
     await window.tiffaDesktop.send(message, sendImages, useSessionsStore.getState().activeSessionId);
@@ -1103,8 +1105,8 @@ export async function sendMessage(text: string, images?: Array<{ data: string; m
     ui.addToast('error', `发送失败: ${(err as Error).message}`);
     proc.setSessionRunning(activePath, false);
     proc.setInstanceRunning(projects.workspacePath, false);
-    stopStallCheck();
-    stopFirstResponseCheck();
+    stopStallCheck(activePath);
+    stopFirstResponseCheck(activePath);
     chat.finalizeAssistant(activePath);
     ui.setStatusText('就绪');
   }
@@ -1414,12 +1416,13 @@ export async function abortMessage(): Promise<void> {
   const proc = useProcStore.getState();
   const chat = useChatStore.getState();
   const sid = useSessionsStore.getState().activeSessionId;
+  const abortPath = useSessionsStore.getState().activeSessionPath;
   try {
     await window.tiffaDesktop.abort(sid);
   } catch {
     /* ignore */
   }
-  stopStallCheck();
+  stopStallCheck(abortPath);
   ui.setStatusText('已发送停止信号，等待 agent 响应...');
   // 15s 兜底
   setTimeout(() => {

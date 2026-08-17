@@ -15,6 +15,7 @@ import {
   startStallCheck, stopStallCheck,
   startFirstResponseCheck, stopFirstResponseCheck,
   markFirstResponseReceived, currentModelLabel,
+  touchGuard, hasReceivedFirstResponse,
 } from './generationGuard';
 import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache } from './sessionController';
 import { autoRenameWithLightModel } from './historyService';
@@ -119,17 +120,28 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
       event.type !== 'extension_ui_request'
     ) {
       if (event._sessionId != null) {
-        if (event.type === 'agent_start' || event.type === 'prompt_result') {
+        if (event.type === 'ready') {
+          // 后台实例就绪：点亮该会话圆点（活跃会话的 ready 由 handleEvent 记录）
+          const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
+          if (bgPath) proc.setSessionReady(bgPath, true);
+        } else if (event.type === 'agent_start' || event.type === 'prompt_result') {
           const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, true);
             // 新一轮生成开始：旧快照作废（agent 运行中切回时避免显示上一轮旧尾部）
             useChatStore.getState().markCacheFresh(bgPath, false);
+            // 后台首响也要标记并清定时器：发送时启动的首响检测依赖 agent_start/
+            // message_start，否则后台会话 30s 后误报“未收到模型响应”
+            if (event.type === 'agent_start') markFirstResponseReceived(bgPath);
+            startStallCheck(bgPath);
           }
         } else if (event.type === 'agent_end') {
           const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, false);
+            // 只停本会话检测器：并行会话的卡住/首响检测互不干扰
+            stopStallCheck(bgPath);
+            stopFirstResponseCheck(bgPath);
             // 后台对话结束也触发自动重命名。__new__ 先兜底迁移再命名：切走时
             // session_switch 主分支被跳过，迁移悬置；原条件直接排除 __new__，
             // 导致新建对话在后台跑完也永不重命名。
@@ -146,6 +158,13 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
             // 切回优先显示内存快照，避免读到不完整磁盘内容而「回复消失/前台不刷新」。
             useChatStore.getState().cacheSnapshot(bgPath, 0);
             useChatStore.getState().markCacheFresh(bgPath, true);
+          }
+        } else if (event.type === 'message_start') {
+          // 后台 assistant 首响：标记该会话已收到首响（清其首响超时定时器）
+          const bgMsg = event.message as { role?: string } | undefined;
+          if (bgMsg && bgMsg.role === 'assistant') {
+            const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
+            if (bgPath) markFirstResponseReceived(bgPath);
           }
         }
       }
@@ -170,10 +189,14 @@ function handleEvent(event: TiffaEventFrame): void {
   const ui = useUiStore.getState();
   const projects = useProjectsStore.getState();
 
-  proc.touch();
+  // per-session 卡死计时：按事件归属路径 touch（无归属时回退活跃会话）
+  touchGuard(resolveEventWritePath(event, sessions) || sessions.activeSessionPath);
 
   switch (event.type) {
     case 'ready': {
+      // 记录实例就绪态（无论是否活跃会话）：对话树左侧圆点据此显示活动对话
+      const readyPath = event._sessionId ? resolveBgPath(event._sessionId, sessions) : sessions.activeSessionPath;
+      if (readyPath) proc.setSessionReady(readyPath, true);
       // 后台实例（非当前活跃会话）的 ready 不处理 UI 状态：避免用活跃会话的模型记录
       // 错误恢复后台实例、或把就绪/模型显示错置（启动阶段 activeSessionId 为空时放行）
       if (event._sessionId && sessions.activeSessionId && event._sessionId !== sessions.activeSessionId) break;
@@ -208,12 +231,14 @@ function handleEvent(event: TiffaEventFrame): void {
         const ml = currentModelLabel();
         return ml ? ` [${ml}]` : '';
       })();
-      const path = sessions.activeSessionPath;
+      const path = resolveEventWritePath(event, sessions) || sessions.activeSessionPath;
       const running = path ? proc.procStateMap[path]?.agentRunning : false;
-      if (running && !proc.receivedFirstResponse) {
-        // 首响前报错 → 复位
-        stopStallCheck();
-        stopFirstResponseCheck();
+      // 首响判定 per-session：只有“确实首响前”才复位——避免其他会话发送重置全局
+      // 首响标志后，本会话收到 error 被误判“首响前报错”而强制停止（并行对话自动停止根因）
+      if (running && !hasReceivedFirstResponse(path)) {
+        // 首响前报错 → 复位（只停本会话检测器，不影响并行会话）
+        stopStallCheck(path);
+        stopFirstResponseCheck(path);
         proc.setSessionRunning(path, false);
         proc.setInstanceRunning(projects.workspacePath, false);
         chat.finalizeAssistant(path);
@@ -228,23 +253,27 @@ function handleEvent(event: TiffaEventFrame): void {
       }
       break;
     }
-    case 'prompt_result':
+    case 'prompt_result': {
+      const pathPr = resolveEventWritePath(event, sessions) || sessions.activeSessionPath;
       if (event.agentInvoked) {
-        proc.setSessionRunning(sessions.activeSessionPath, true);
+        proc.setSessionRunning(pathPr, true);
         proc.setInstanceRunning(projects.workspacePath, true);
-        startStallCheck();
+        startStallCheck(pathPr);
         ui.setStatusText('思考中...');
       }
       break;
-    case 'agent_start':
-      proc.setSessionRunning(sessions.activeSessionPath, true);
+    }
+    case 'agent_start': {
+      const pathAs = resolveEventWritePath(event, sessions) || sessions.activeSessionPath;
+      proc.setSessionRunning(pathAs, true);
       proc.setInstanceRunning(projects.workspacePath, true);
       // 新一轮生成：缓存快照可能落后，标记不新鲜
-      chat.markCacheFresh(sessions.activeSessionPath, false);
-      markFirstResponseReceived();
-      startStallCheck();
+      chat.markCacheFresh(pathAs, false);
+      markFirstResponseReceived(pathAs);
+      startStallCheck(pathAs);
       ui.setStatusText('思考中...');
       break;
+    }
     case 'agent_end': {
       // AI 重命名模式：提取标题并应用
       if (ui.aiRenameSession) {
@@ -267,15 +296,17 @@ function handleEvent(event: TiffaEventFrame): void {
         }
         break;
       }
-      proc.setSessionRunning(sessions.activeSessionPath, false);
+      const pathAe = resolveEventWritePath(event, sessions) || sessions.activeSessionPath;
+      proc.setSessionRunning(pathAe, false);
       proc.setInstanceRunning(projects.workspacePath, false);
       ui.setPendingSteerMarker(false);
-      stopStallCheck();
-      stopFirstResponseCheck();
-      chat.finalizeAssistant(sessions.activeSessionPath);
+      // per-session：只停本会话检测器（不误清并行会话的检测）
+      stopStallCheck(pathAe);
+      stopFirstResponseCheck(pathAe);
+      chat.finalizeAssistant(pathAe);
       // 空回复检测：模型不可达/出错时内核不发 error 事件（只发 notice/message_end），
       // 用户看到"模型不回复"却没有原因。agent_end 时检查最后一条 assistant 是否真的产出了内容。
-      const ap = sessions.activeSessionPath;
+      const ap = pathAe;
       if (ap) {
         const msgs = useChatStore.getState().messagesMap[ap] || [];
         const lastMsg = msgs[msgs.length - 1];
@@ -289,7 +320,7 @@ function handleEvent(event: TiffaEventFrame): void {
         }
       }
       // agent_end flush 缓存并标记新鲜（__new__ 也缓存：迁移时快照随 migrateChatKey 一起走）
-      const path = sessions.activeSessionPath;
+      const path = pathAe;
       if (path) {
         chat.cacheSnapshot(path, 0);
         chat.markCacheFresh(path, true);
@@ -383,7 +414,7 @@ function handleEvent(event: TiffaEventFrame): void {
           chat.setAiRenameText('');
           break;
         }
-        markFirstResponseReceived();
+        markFirstResponseReceived(writePath);
         chat.beginAssistantMessage(writePath);
       }
       break;
@@ -473,8 +504,8 @@ function handleEvent(event: TiffaEventFrame): void {
       if (event.toolCallId && event.toolName && wpTool) {
         chat.toolStart(wpTool, event.toolCallId, event.toolName, event.args);
       }
-      // ask 工具等用户回复：暂停卡住检测
-      if (event.toolName === 'ask') stopStallCheck();
+      // ask 工具等用户回复：暂停卡住检测（仅本会话）
+      if (event.toolName === 'ask') stopStallCheck(wpTool);
       break;
     }
     case 'tool_execution_update':
@@ -486,10 +517,8 @@ function handleEvent(event: TiffaEventFrame): void {
         chat.toolEnd(wpToolEnd, event.toolCallId, event.toolName, event.result, !!event.isError);
       }
       if (event.toolName === 'ask') {
-        const running = sessions.activeSessionPath
-          ? proc.procStateMap[sessions.activeSessionPath]?.agentRunning
-          : false;
-        if (running) startStallCheck();
+        const running = wpToolEnd ? proc.procStateMap[wpToolEnd]?.agentRunning : false;
+        if (running) startStallCheck(wpToolEnd);
       }
       // todo 工具结果包含 phases
       if (event.toolName === 'todo' && event.result) {
@@ -750,18 +779,41 @@ function handleExited(data: { sessionId?: string; cwd?: string; autoRestarting?:
   const proc = useProcStore.getState();
   const chat = useChatStore.getState();
   const ui = useUiStore.getState();
-  // 多实例严格过滤
-  if (sessions.activeSessionId) {
-    if (data.sessionId !== sessions.activeSessionId) return;
-  } else if (data.cwd && projects.workspacePath && data.cwd !== projects.workspacePath) {
+  // 无论活跃/后台：实例退出即标记该会话未就绪（对话树圆点据此熄灭；重启后由 ready 事件重新点亮）
+  const exitedPath = data.sessionId
+    ? (resolveBgPath(data.sessionId, sessions) || sessions.activeSessionPath)
+    : sessions.activeSessionPath;
+  if (exitedPath) proc.setSessionReady(exitedPath, false);
+  // 多实例严格过滤：只把“活跃会话”的退出当作全局事件。后台实例退出只复位其自身
+  // 状态，不动全局 tiffaReady / 状态栏 / 检测器（否则并行对话 B 崩溃重启会把
+  // 对话 A 的 UI 打成“未就绪”，且 A 的生成检测被误清）。
+  const isActive = sessions.activeSessionId
+    ? data.sessionId === sessions.activeSessionId
+    : !data.sessionId && (!projects.workspacePath || data.cwd === projects.workspacePath);
+  if (!isActive) {
+    if (data.sessionId) {
+      const bgPath = resolveBgPath(data.sessionId, sessions);
+      if (bgPath) {
+        // 后台实例退出：复位该会话 agentRunning 与检测器，避免切回时误判“运行中”
+        proc.setSessionRunning(bgPath, false);
+        stopStallCheck(bgPath);
+        stopFirstResponseCheck(bgPath);
+        chat.finalizeAssistant(bgPath);
+        chat.cacheSnapshot(bgPath, 0);
+        chat.markCacheFresh(bgPath, true);
+      }
+    }
     return;
   }
   // 审批模式切换触发的有计划重启：旧进程 exit 事件在新进程 ready 之前到达，
-  // 属正常预期，不显示"已断开"，保持"重启中..."状态等 ready 事件恢复。
+  // 属正常预期，不显示“已断开”，保持“重启中...”状态等 ready 事件恢复。
   if (ui.approvalModeRestarting) return;
+  const activePath = sessions.activeSessionPath;
   // 自动重启：标记未就绪禁止发送
   if (data.autoRestarting) {
     proc.setReady(false);
+    stopStallCheck(activePath);
+    stopFirstResponseCheck(activePath);
     ui.setStatusText(`重启中 (第${data.crashCount}次)...`);
     ui.addToast(
       'warning',
@@ -770,9 +822,11 @@ function handleExited(data: { sessionId?: string; cwd?: string; autoRestarting?:
     return;
   }
   proc.setReady(false);
-  proc.setSessionRunning(sessions.activeSessionPath, false);
+  proc.setSessionRunning(activePath, false);
+  stopStallCheck(activePath);
+  stopFirstResponseCheck(activePath);
   ui.setPendingSteerMarker(false);
-  chat.finalizeAssistant(sessions.activeSessionPath);
+  chat.finalizeAssistant(activePath);
   if (data.crashCount && data.crashCount > 0) {
     const codeInfo = data.code !== undefined && data.code !== null ? `（退出码 ${data.code}${data.signal ? `, signal ${data.signal}` : ''}）` : '';
     ui.setStatusText(`连续崩溃 ${data.crashCount} 次，已停止自动重启${codeInfo}`);
@@ -799,6 +853,30 @@ export function initEventRouter(): void {
   window.tiffaDesktop.onExited((data) =>
     handleExited(data as { sessionId?: string; cwd?: string; autoRestarting?: boolean; crashCount?: number; code?: number; signal?: string | null }),
   );
+
+  // 兜底同步实例就绪态：启动恢复（实例已就绪但无 ready 事件）/事件丢失等场景，
+  // 低频轮询 getInstances（sessionFilePath = 会话路径）保持对话树圆点准确；
+  // 只做合并点亮，熄灭一律走 exited 事件，避免旧快照覆盖并发事件写入。
+  const syncInstancesReady = async (): Promise<void> => {
+    try {
+      const instances = (await window.tiffaDesktop.getInstances()) as
+        | Array<{ sessionFilePath?: string | null; ready?: boolean }>
+        | undefined;
+      if (!instances || !Array.isArray(instances)) return;
+      const readyMap: Record<string, boolean> = {};
+      for (const inst of instances) {
+        if (!inst.sessionFilePath) continue;
+        readyMap[String(inst.sessionFilePath)] = !!inst.ready;
+      }
+      if (Object.keys(readyMap).length > 0) {
+        useProcStore.setState((s) => ({ sessionReadyMap: { ...s.sessionReadyMap, ...readyMap } }));
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  void syncInstancesReady();
+  setInterval(() => void syncInstancesReady(), 15000);
 }
 
 export { finalizeStreamText };

@@ -419,7 +419,8 @@ body {
 }
 
 /* 静默（未激活）会话：圆点占位隐藏，避免与 tab 高亮重复指示；
-   仅当前激活会话（.active）与待回复会话（.pending-ask）显示圆点 */
+   仅活动对话（实例已就绪 .ready）与待回复会话（.pending-ask）显示圆点——
+   选中（.active）只高亮整行，不点亮圆点（选中对话不一定是活动对话） */
 .session-item-dot {
   width: 6px;
   height: 6px;
@@ -430,13 +431,14 @@ body {
   transition: background 0.15s;
 }
 
-/* 当前激活会话：整行高亮 + 圆点点亮 */
+/* 当前查看的会话：仅整行高亮（选中态），不控制圆点 */
 .session-item.active {
   background: hsl(var(--accent-main-000) / 0.15);
   color: hsl(var(--text-100));
 }
 
-.session-item.active .session-item-dot {
+/* 活动对话（实例已就绪）：圆点点亮 */
+.session-item.ready .session-item-dot {
   visibility: visible;
   background: hsl(var(--accent-main-200));
   box-shadow: 0 0 0 2px hsl(var(--accent-main-200) / 0.25);
