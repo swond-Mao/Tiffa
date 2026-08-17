@@ -62,6 +62,8 @@ class TiffaInstance {
     prevSessionIds = [];
     /** 会话文件目录（--session-dir 参数，探测扫描用） */
     sessionDir;
+    /** 新建会话预写的正式文件（spawn 时通过 --session 引导内核加载，身份立即确定） */
+    initialSessionFile = null;
     _titleGenerated = false;
     _restoringContext = false;
     _pendingAskIds = new Set();
@@ -71,9 +73,10 @@ class TiffaInstance {
     static setTitleGenerateCallback(fn) {
         TiffaInstance._titleGenerateCallback = fn;
     }
-    constructor(cwd, sessionId = null) {
+    constructor(cwd, sessionId = null, initialSessionFile = null) {
         this.cwd = cwd;
         this.sessionId = sessionId;
+        this.initialSessionFile = initialSessionFile;
         this.sessionDir = path_1.default.join(constants_1.SESSIONS_DIR, (0, session_utils_1.stableSessionDirName)(cwd));
     }
     start() {
@@ -103,6 +106,10 @@ class TiffaInstance {
         const args = [constants_1.TIFFA_CLI, '--mode', 'rpc-ui', '-e', constants_1.EXTENSION_PATH, '-e', constants_1.COMPUTER_USE_EXTENSION_PATH];
         const stableSessionDir = path_1.default.join(constants_1.SESSIONS_DIR, (0, session_utils_1.stableSessionDirName)(this.cwd));
         args.push('--session-dir', stableSessionDir);
+        // 新建会话：预写正式文件已就绪 → 启动即加载（resume 语义），身份在 spawn 时确定
+        if (this.initialSessionFile) {
+            args.push('--session', this.initialSessionFile);
+        }
         console.log(`[TiffaInstance] Starting Tiffa cwd=${this.cwd}`, constants_1.BUN_EXE, args.join(' '));
         this.process = (0, child_process_1.spawn)(constants_1.BUN_EXE, args, {
             env: env,
@@ -304,6 +311,15 @@ class TiffaInstance {
                         .finally(() => { clearTimeout(restoreDeadline); setTimeout(() => { this._restoringContext = false; }, 800); });
                 }
             }
+            // 新建会话引导：内核已通过 --session 加载预写文件，立即确定正式身份。
+            // 补发 session_switch 让渲染层当场把 __new__ tab 迁移到真实路径，
+            // 不再依赖 firstMessage 探测（长消息/图片/命令/并发同文案时探测会永久失败）。
+            // 注意必须放在崩溃重启恢复分支之后：两分支条件互斥（引导要求 sessionFilePath 为空），
+            // 若放在前面会误入恢复分支产生冗余 switch_session 与 800ms 事件过滤窗口。
+            if (this.initialSessionFile && !this.sessionFilePath) {
+                this.sessionFilePath = this.initialSessionFile;
+                this.announceNewSessionReady();
+            }
         }
         if (event.type === 'prompt_result' && event.agentInvoked) {
             this.agentRunning = true;
@@ -433,6 +449,24 @@ class TiffaInstance {
         if (_mainWindow && !_mainWindow.isDestroyed()) {
             _mainWindow.webContents.send('tiffa:event', event);
         }
+    }
+    /** 新建会话引导完成后立即通知渲染层：__new__ tab 当场迁移（幂等，重复到达无害） */
+    announceNewSessionReady() {
+        if (!this.sessionFilePath)
+            return;
+        if (!_mainWindow || _mainWindow.isDestroyed())
+            return;
+        const realId = (0, session_utils_1.extractSessionIdFromPath)(this.sessionFilePath) || this.sessionId;
+        _mainWindow.webContents.send('tiffa:event', {
+            type: 'session_switch',
+            reason: 'new',
+            sessionPath: this.sessionFilePath,
+            _cwd: this.cwd,
+            _sessionIdPrev: this.sessionId,
+            _sessionId: realId,
+            _sessionPath: this.sessionFilePath,
+            _probed: true,
+        });
     }
     /** 探测内核自动创建的会话文件（RPC 模式无 session_switch 事件时的补偿机制）：
      *  内核把新会话文件写到磁盘（firstMessage = 用户 prompt 原文），但从不向主进程

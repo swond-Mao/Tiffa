@@ -178,3 +178,6 @@ data/agent/managed-skills/*/node_modules/
 data/agent/managed-skills/*/.cache/
 # dashiai-ppt project 依赖
 data/agent/managed-skills/dashiai-ppt/project/node_modules/
+
+# Qoder 运行时缓存（不入库）
+.cache/

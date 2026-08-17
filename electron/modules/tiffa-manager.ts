@@ -5,7 +5,7 @@
  */
 import path from 'path';
 import { TiffaInstance } from './tiffa-instance';
-import { findSessionFile } from './session-utils';
+import { findSessionFile, prepareNewSessionFile } from './session-utils';
 import { killTree } from './process-utils';
 import { MAX_INSTANCES, LRU_KEEP_ALIVE_MS, setCurrentWorkspaceDir } from './constants';
 
@@ -103,7 +103,11 @@ export class TiffaInstanceManager {
     }
 
     const spawnPromise = (async (): Promise<ActivateResult> => {
-      const inst = new TiffaInstance(normalized, sessionId);
+      // 新建会话：spawn 前预写正式会话文件，内核 --session 启动即加载（身份立即确定）。
+      // 已有会话（findSessionFile 命中）不预写，走原恢复逻辑。
+      const existingFile = sessionId ? findSessionFile(normalized, sessionId) : null;
+      const preparedFile = existingFile ? null : prepareNewSessionFile(normalized, sessionId);
+      const inst = new TiffaInstance(normalized, sessionId, preparedFile);
       this.instances.set(key, inst);
       inst.start();
       await this._waitSpawnReady(inst);
@@ -114,26 +118,33 @@ export class TiffaInstanceManager {
         return { inst, ready: inst.ready };
       }
 
-      // 会话上下文恢复
+      // 会话上下文恢复（已有会话）或新建引导确认（预写文件）
       if (inst.ready && inst.sessionId) {
         const sessionFile = findSessionFile(normalized, inst.sessionId);
         if (sessionFile) {
-          inst._restoringContext = true;
-          const restoreDeadline = setTimeout(() => {
-            if (inst._restoringContext) {
-              inst._restoringContext = false;
-              console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复超时，强制解除过滤`);
-            }
-          }, 15000);
-          try {
-            await inst.sendCommand({ type: 'switch_session', sessionPath: sessionFile });
+          if (preparedFile && path.resolve(sessionFile) === path.resolve(preparedFile)) {
+            // 新建引导：--session 已让内核加载预写文件（session_switch 补发在
+            // _handleEvent ready 分支完成）。这里只做日志兜底，不重复补发。
             inst.sessionFilePath = sessionFile;
-            console.log(`[TiffaInstance:${inst._shortCwd()}] 会话上下文已恢复: ${sessionFile}`);
-          } catch (err) {
-            console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复失败: ${(err as Error).message}`);
-          } finally {
-            clearTimeout(restoreDeadline);
-            setTimeout(() => { inst._restoringContext = false; }, 800);
+            console.log(`[TiffaInstance:${inst._shortCwd()}] 新会话引导完成: ${sessionFile}`);
+          } else {
+            inst._restoringContext = true;
+            const restoreDeadline = setTimeout(() => {
+              if (inst._restoringContext) {
+                inst._restoringContext = false;
+                console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复超时，强制解除过滤`);
+              }
+            }, 15000);
+            try {
+              await inst.sendCommand({ type: 'switch_session', sessionPath: sessionFile });
+              inst.sessionFilePath = sessionFile;
+              console.log(`[TiffaInstance:${inst._shortCwd()}] 会话上下文已恢复: ${sessionFile}`);
+            } catch (err) {
+              console.warn(`[TiffaInstance:${inst._shortCwd()}] 上下文恢复失败: ${(err as Error).message}`);
+            } finally {
+              clearTimeout(restoreDeadline);
+              setTimeout(() => { inst._restoringContext = false; }, 800);
+            }
           }
         }
       }

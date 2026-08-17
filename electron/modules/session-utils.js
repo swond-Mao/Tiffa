@@ -9,6 +9,7 @@ exports._encodeSessionDirName = _encodeSessionDirName;
 exports.extractWorkspaceSuffix = extractWorkspaceSuffix;
 exports.stableSessionDirName = stableSessionDirName;
 exports.findSessionFile = findSessionFile;
+exports.prepareNewSessionFile = prepareNewSessionFile;
 exports.rotateLogIfNeeded = rotateLogIfNeeded;
 exports.mainLog = mainLog;
 exports.readTailLines = readTailLines;
@@ -140,6 +141,52 @@ function findSessionFile(cwd, sessionId) {
         // ignore
     }
     return null;
+}
+// ── 新建会话文件预写（立即正式化）──
+// 背景：旧方案靠 firstMessage 探测内核自动创建的会话文件（依赖消息长度 ≤100 字符、
+// 唯一命中、创建时间窗），长消息/图片消息/命令/并发同文案时探测永久失败，
+// __new__ 临时 tab 永不迁移，新对话竞态反复出现。
+// 新方案：spawn 内核前用前端生成的真实 sessionId 预写正式会话文件
+// （title slot + session header，格式与内核 SessionManager 完全一致），
+// 再通过 --session 启动参数让内核直接加载，身份在进程启动那一刻即确定。
+/** 内核 CURRENT_SESSION_VERSION（@oh-my-pi/pi-coding-agent/src/session/session-entries.ts） */
+const SESSION_HEADER_VERSION = 3;
+/** 复刻内核 serializeTitleSlot：固定 256 字节定宽第一行（含换行），title 为空 */
+function serializeTitleSlotForNewSession(updatedAt) {
+    const make = (pad) => JSON.stringify({ type: 'title', v: 1, title: '', updatedAt, pad }) + '\n';
+    const padBytes = 256 - Buffer.byteLength(make(''), 'utf8');
+    if (padBytes < 0)
+        throw new Error('title slot exceeds 256 bytes');
+    return make(' '.repeat(padBytes));
+}
+/**
+ * 预写新会话文件：`<sessionDir>/<fileSafeTimestamp>_<uuid>.jsonl`（与内核命名一致：
+ * ISO 时间戳的 `:` 与 `.` 替换为 `-`），写入 title slot + session header
+ * （version 3, id = 前端真实 sessionId, cwd）。返回文件路径；失败返回 null（调用方回退旧探测链路）。
+ */
+function prepareNewSessionFile(cwd, sessionId) {
+    try {
+        const projectDir = path_1.default.join(constants_1.SESSIONS_DIR, stableSessionDirName(cwd));
+        fs_1.default.mkdirSync(projectDir, { recursive: true });
+        const timestamp = new Date().toISOString();
+        const fileName = `${timestamp.replace(/[:.]/g, '-')}_${sessionId}.jsonl`;
+        const filePath = path_1.default.join(projectDir, fileName);
+        if (fs_1.default.existsSync(filePath))
+            return filePath;
+        const header = JSON.stringify({
+            type: 'session',
+            version: SESSION_HEADER_VERSION,
+            id: sessionId,
+            timestamp,
+            cwd: path_1.default.resolve(cwd),
+        });
+        fs_1.default.writeFileSync(filePath, serializeTitleSlotForNewSession(timestamp) + header + '\n', 'utf8');
+        return filePath;
+    }
+    catch (err) {
+        console.warn('[session-utils] 预写新会话文件失败:', err);
+        return null;
+    }
 }
 // ── 主进程日志 ──
 function rotateLogIfNeeded(filePath) {
