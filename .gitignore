@@ -53,7 +53,7 @@ data/agent/mnemopi/
 data/agent/removed-cwds.json
 
 # 个人档案与运行时记忆（AI 运行时会自动填充/覆写，install.ps1 / 应用启动时负责从模板生成，绝不入库）
-# AI.md 模板在 data/memory/AI.md.template（入库）：新机器 pull 后应用启动自动从模板重建/补齐角色卡
+# AI.md 模板在 data/memory/AI.md.template（入库，中性骨架不含角色卡）：新机器 pull 后应用启动自动从模板重建
 data/memory/USER.md
 data/memory/MEMORY.md
 data/memory/AI.md
