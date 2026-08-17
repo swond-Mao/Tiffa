@@ -418,34 +418,33 @@ body {
   color: hsl(var(--text-100));
 }
 
-/* 静默（未打开为 tab）会话 */
+/* 静默（未激活）会话：圆点占位隐藏，避免与 tab 高亮重复指示；
+   仅当前激活会话（.active）与待回复会话（.pending-ask）显示圆点 */
 .session-item-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
   background: hsl(var(--bg-400));
+  visibility: hidden;
   transition: background 0.15s;
 }
 
-/* 激活（已打开为 tab）会话：圆点点亮 */
-.session-item.open .session-item-dot {
-  background: hsl(var(--accent-main-200));
-}
-
-/* 当前激活会话：整行高亮 */
+/* 当前激活会话：整行高亮 + 圆点点亮 */
 .session-item.active {
   background: hsl(var(--accent-main-000) / 0.15);
   color: hsl(var(--text-100));
 }
 
 .session-item.active .session-item-dot {
+  visibility: visible;
   background: hsl(var(--accent-main-200));
   box-shadow: 0 0 0 2px hsl(var(--accent-main-200) / 0.25);
 }
 
 /* 正在等待用户回复（ask 抽屉待弹）的会话：圆点高亮脉动提示 */
 .session-item.pending-ask .session-item-dot {
+  visibility: visible;
   background: var(--accent);
   animation: pendingAskPulse 1.4s ease-in-out infinite;
 }
