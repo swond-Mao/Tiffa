@@ -68,6 +68,8 @@ export interface UiState {
   sidebarOpen: boolean;
   /** 设置面板是否打开（左下角齿轮控制） */
   settingsOpen: boolean;
+  /** 首次启动 onboarding 标记：身份不全（缺 AI 名字/用户称呼）时自动打开「设置 AI 身份」弹窗（identity.ts Phase 3） */
+  identitySetupPending: boolean;
   /** 正在 AI 重命名的 session（非 null 时抑制渲染） */
   aiRenameSession: unknown;
   /** 当前会话思考档位（null=未设置，跟随内核/模型默认）；由 thinking_level_changed 事件驱动 */
@@ -105,6 +107,8 @@ export interface UiState {
   setThinkingEfforts: (v: ThinkingLevel[] | null) => void;
   toggleSidebar: () => void;
   toggleSettings: () => void;
+  openIdentitySetup: () => void;
+  clearIdentitySetup: () => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -132,6 +136,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   fileViewMode: 'tree',
   sidebarOpen: false,
   settingsOpen: false,
+  identitySetupPending: false,
   aiRenameSession: null,
   thinkingLevel: null,
   thinkingEfforts: null,
@@ -199,6 +204,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setThinkingEfforts: (v) => set({ thinkingEfforts: v }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
+  openIdentitySetup: () => set({ settingsOpen: true, identitySetupPending: true }),
+  clearIdentitySetup: () => set({ identitySetupPending: false }),
 }));
 
 /** 某会话是否有未应答 ask（tab/树徽标用），key 可以是 sessionId 或 sessionPath */

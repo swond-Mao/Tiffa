@@ -13,6 +13,9 @@ export async function initIdentity(): Promise<void> {
     if (id && id.userName) useUiStore.getState().setUserName(id.userName);
     if (id && id.gender) useUiStore.getState().setGender(id.gender);
     if (id && id.persona) useUiStore.getState().setPersona(id.persona);
+    // Phase 3：首次启动身份不全（缺 AI 名字或用户称呼）→ 自动打开「设置 AI 身份」弹窗。
+    // 启动遮罩（z-index 3000）淡出后弹窗自然显现，无需额外时序同步。
+    if (id && id.needsSetup) useUiStore.getState().openIdentitySetup();
   } catch {
     /* ignore */
   }

@@ -958,6 +958,17 @@ function IdentitySection() {
     setCustomKeyword('');
     setShowModal(true);
   };
+  // 首次启动 onboarding：身份不全时自动打开「设置身份」弹窗（identity.ts Phase 3 触发）
+  const identitySetupPending = useUiStore((s) => s.identitySetupPending);
+  useEffect(() => {
+    if (identitySetupPending) {
+      open();
+      useUiStore.getState().clearIdentitySetup();
+    }
+    // open 为组件内函数，每次渲染重建；effect 仅依赖标记位，无需入依赖数组
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identitySetupPending]);
+
 
   const toggleKeyword = (kw: string) => {
     setSelKeywords((prev) => (prev.includes(kw) ? prev.filter((k) => k !== kw) : [...prev, kw]));
