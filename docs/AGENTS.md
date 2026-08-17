@@ -99,7 +99,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.2.2 的便携 AI 工作台，Elec
 
 > **压缩时对话连续性**：不再依赖独立的 gap-fill 层（2026-08-05 已废弃，每会话独立 dump + 60 分钟清理维护成本过高且与 Mnemopi 重叠）。会话压缩由扩展 `session.compacting` hook 走 ③ 旁路结构化总结（详见下文），生成的 9 段摘要即对话连续性载体；工具调用/结果细节经 `messageToParts` 提取后进入摘要（语义级），无需每会话额外 dump。
 
-> **隐私设计**：`data/memory/USER.md` / `MEMORY.md` 是运行时个人数据（AI 自动填充/覆写，内核记忆整理时直接 `Bun.write` 覆写 MEMORY.md），**已 gitignore 不入库**；模板由 install.ps1 第 6 步 Ensure-MemoryTemplate 生成（已存在则跳过）。`AI.md` / `constraints-inject.md` / `design-outline.md` 为项目级模板，正常入库。**绝对不要手动 `git add -f` 这两个运行时文件。**
+> **隐私设计**：`data/memory/USER.md` / `MEMORY.md` / `AI.md` 是运行时个人数据（AI 自动填充/覆写，内核记忆整理时直接 `Bun.write` 覆写 MEMORY.md），**已 gitignore 不入库**；模板由 install.ps1 第 6 步 Ensure-MemoryTemplate 生成（已存在则跳过），`AI.md` 的模板是随仓库的 `data/memory/AI.md.template`（应用启动时也自动从模板重建/补齐角色卡）。`constraints-inject.md` / `design-outline.md` 为项目级模板，正常入库。**绝对不要手动 `git add -f` 这三个运行时文件。**
 
 ### 写入路由
 

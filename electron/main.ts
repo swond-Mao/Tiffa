@@ -94,6 +94,27 @@ try {
 } catch (e) {
   console.warn('[config] 恢复 models.yml 失败:', e.message);
 }
+// ── 确保 AI.md 存在（运行时个人数据，gitignore 不入库；新机器 git clone/pull 后从 AI.md.template 模板恢复） ──
+// 1) 文件缺失 → 整体拷贝模板；2) 旧 pull 遗留的无角色卡版本 → 从模板补齐角色卡（不覆盖已有名字/性别等字段）
+try {
+  const MEM_AI_MD = path.join(PORTABLE_ROOT, 'data', 'memory', 'AI.md');
+  const MEM_AI_TEMPLATE = path.join(PORTABLE_ROOT, 'data', 'memory', 'AI.md.template');
+  if (fs.existsSync(MEM_AI_TEMPLATE)) {
+    const tpl = fs.readFileSync(MEM_AI_TEMPLATE, 'utf8');
+    const tplCard = (tpl.match(/^##\s*角色卡\s*\n([\s\S]*)$/m) || [])[1];
+    if (!fs.existsSync(MEM_AI_MD)) {
+      fs.mkdirSync(path.dirname(MEM_AI_MD), { recursive: true });
+      fs.copyFileSync(MEM_AI_TEMPLATE, MEM_AI_MD);
+      console.log('[memory] AI.md 缺失，已自动从 AI.md.template 恢复');
+    } else if (tplCard && !/^##\s*角色卡/m.test(fs.readFileSync(MEM_AI_MD, 'utf8'))) {
+      const cur = fs.readFileSync(MEM_AI_MD, 'utf8').replace(/\s+$/, '');
+      fs.writeFileSync(MEM_AI_MD, cur + '\n\n## 角色卡\n\n' + tplCard.trim() + '\n', 'utf8');
+      console.log('[memory] AI.md 缺少角色卡，已从 AI.md.template 补齐');
+    }
+  }
+} catch (e) {
+  console.warn('[memory] 恢复 AI.md 失败:', e.message);
+}
 
 // ── Global State（模块化：实例管理器从 tiffa-manager 导入） ──
 let mainWindow = null;

@@ -517,7 +517,13 @@ if (-not $SkipDesktop) {
 }
 
 # AI 昵称引导：默认模板名字是 Tiffa，询问用户是否改名为自己的名字
+# AI.md 为运行时文件（gitignore 不入库）：clone 后缺失时从随仓库的 AI.md.template 模板恢复
 $aiMd = Join-Path $ROOT "data\memory\AI.md"
+$aiTemplate = Join-Path $ROOT "data\memory\AI.md.template"
+if (-not (Test-Path $aiMd) -and (Test-Path $aiTemplate)) {
+    Copy-Item $aiTemplate $aiMd -Force
+    OK "已生成: AI.md（从 AI.md.template 模板恢复）"
+}
 if (Test-Path $aiMd) {
     $aiContent = Get-Content $aiMd -Raw -ErrorAction SilentlyContinue
     if ($aiContent -match "名字：Tiffa") {
