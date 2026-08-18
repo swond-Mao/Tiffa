@@ -15,7 +15,8 @@ Tiffa 的 Computer Use（电脑控制）功能使用 **MCP 方式**调用视觉�
 
 ### 2. 填写 grounding.json
 
-编辑 `skills/computer-use/grounding.json`：
+编辑 `skills/computer-use/grounding.json`（该文件已被 git 忽略，不入库；
+仓库提供同目录 `grounding.json.example` 模板，新机器首次启动会自动复制为 `grounding.json`，直接编辑即可）：
 
 ```json
 {
@@ -62,6 +63,7 @@ grounding.json 也兼容任何 OpenAI 格式的视觉模型端点，只需改 `a
 
 ## 安全提示
 
-- `grounding.json` 会被 git 跟踪，**不要把真实 API Key 提交到仓库**。
-  仓库内使用 `YOUR_ARK_API_KEY` 占位符，安装后请修改为自己的 key。
+- `grounding.json` **已从 git 跟踪中移除**（见 .gitignore），真实 API Key 只保存在本地，不会入库。
+  仓库只保留 `grounding.json.example` 模板（`YOUR_ARK_API_KEY` 占位符、`enabled: "0"` 默认关闭）。
+- 启动时仅当 `grounding.json` **缺失**才从模板复制，已配置好的文件不会被覆盖或修改。
 - 若确认泄露，立即在火山方舟控制台吊销并重建 API Key。

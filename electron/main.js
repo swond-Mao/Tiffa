@@ -75,6 +75,18 @@ try {
 catch (e) {
     console.warn('[config] 恢复 models.yml 失败:', e.message);
 }
+// ── 确保 grounding.json 存在（computer-use 视觉模型配置，含真实 API Key 不入库；缺失时从 example 恢复，绝不覆盖已有配置） ──
+try {
+    const GROUNDING_JSON = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
+    const GROUNDING_EXAMPLE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json.example');
+    if (!fs_1.default.existsSync(GROUNDING_JSON) && fs_1.default.existsSync(GROUNDING_EXAMPLE)) {
+        fs_1.default.copyFileSync(GROUNDING_EXAMPLE, GROUNDING_JSON);
+        console.log('[config] 已自动从 grounding.json.example 恢复 grounding.json');
+    }
+}
+catch (e) {
+    console.warn('[config] 恢复 grounding.json 失败:', e.message);
+}
 // ── 确保 AI.md 存在（运行时个人数据，gitignore 不入库；新机器 git clone/pull 后从 AI.md.template 模板恢复） ──
 // 1) 文件缺失 → 整体拷贝模板；2) 旧 pull 遗留的无角色卡版本 → 从模板补齐角色卡（不覆盖已有名字/性别等字段）
 try {
