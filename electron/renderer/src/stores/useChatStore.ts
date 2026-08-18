@@ -14,7 +14,8 @@ import type { ChatMessage, HistoryState, MessageImage, MessagePart, SessionMessa
 import { createEmptyStreamingState } from '../types/messages';
 import { applyOutputFixes } from '../services/outputFixes';
 import { extractDiff, summarizeToolCall } from '../services/messageBuilders';
-import { dbgLog } from '../services/utils';
+import { dbgLog, msgFingerprint } from '../services/utils';
+import { useSessionsStore } from '../stores/useSessionsStore';
 
 export const HISTORY_LAZY_BATCH = 40;
 export const SESSION_CACHE_LIMIT = 3;
@@ -111,12 +112,19 @@ export const useChatStore = create<ChatState>((set) => ({
       return { history };
     }),
 
-  // ── 消息 CRUD ──
-  setMessages: (path, messages) =>
-    set((s) => {
+  setMessages: (path, messages) => {
+    if (path) {
+      // 诊断：记录每次非空/清空写入。isBg=true 表示写入的是「非当前活跃」路径——
+      // 若某条 setMessages 的 path 是新会话 B 却带着旧会话 A 的指纹，即为跨会话串味铁证。
+      const active = useSessionsStore.getState().activeSessionPath;
+      const isBg = active !== null && active !== path;
+      dbgLog('write', `setMessages path=${path}${isBg ? ' [BG]':''} active=${active ?? 'null'} ${msgFingerprint(messages)}`);
+    }
+    return set((s) => {
       if (!path) return s;
       return { messagesMap: { ...s.messagesMap, [path]: messages } };
-    }),
+    });
+  },
 
   appendUserMessage: (path, msg) =>
     set((s) => {
@@ -385,6 +393,9 @@ export const useChatStore = create<ChatState>((set) => ({
         return { messagesMap: { ...s.messagesMap, [path]: messages }, streaming };
       }
       messages.push({
+        // 与 live 消息一致的稳定 id：无 id 消息会退化成 ChatView 位置 key，
+        // 该气泡若跨会话残留会导致 DOM 错乱（见 messageBuilders historyMessageId 注释）
+        id: `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: 'assistant',
         parts: [],
         error: text,

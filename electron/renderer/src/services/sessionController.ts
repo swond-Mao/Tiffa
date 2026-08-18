@@ -17,7 +17,7 @@ import {
   markFirstResponseReceived, stopAllGuards,
 } from './generationGuard';
 import { loadAndRenderHistory, autoRenameWithLightModel, setHistoryPreload } from './historyService';
-import { dirNameFromSessionPath, extractSessionId, dbgLog, localizeKernelMessage } from './utils';
+import { dirNameFromSessionPath, extractSessionId, dbgLog, localizeKernelMessage, msgFingerprint } from './utils';
 import { normalizeUserContent } from './messageBuilders';
 
 // ── 模块级状态 ──
@@ -679,19 +679,28 @@ export async function migrateStuckNewTabs(diskSessions: unknown = null): Promise
 /** 8 处引用迁移（session_switch / migrateStuckNewTabs 共用） */
 export function applySessionMigration(oldPath: string, newPath: string, realSessionId: string | null): void {
   const sessions = useSessionsStore.getState();
+  const chatBefore = useChatStore.getState();
+  // 诊断：迁移前 oldPath/newPath 各自缓冲与缓存的指纹。若 oldPath(__new__) 已带旧会话 A
+  // 的指纹，说明 __new__ 缓冲在迁移前就被污染（根因在 newSession→activateSession 之间的事件串味）；
+  // 若 newPath 已带 A 指纹，说明 B 真实路径在迁移前就被写入（根因在 findSessionFile 碰撞或预载串味）。
+  dbgLog('migrate', `迁移前 oldPath=${oldPath} ${msgFingerprint(chatBefore.messagesMap[oldPath])}`);
+  dbgLog('migrate', `迁移前 newPath=${newPath} ${msgFingerprint(chatBefore.messagesMap[newPath])}`);
+  dbgLog('migrate', `迁移前 newCache=${msgFingerprint(chatBefore.sessionMessageCache[newPath]?.messages)} newHistCache=${msgFingerprint(chatBefore.history[newPath]?.cache?.messages)}`);
   sessions.migrateTabPath(oldPath, newPath, realSessionId);
   useChatStore.getState().migrateChatKey(oldPath, newPath);
   renameProcKey(oldPath, newPath);
+  const chatAfter = useChatStore.getState();
+  dbgLog('migrate', `迁移后 newPath=${newPath} ${msgFingerprint(chatAfter.messagesMap[newPath])}`);
   // 迁移的是当前活跃 tab：迁移前 __new__ 显示的是内存快照（切走时的旧内容），
   // 后台回复已写盘但前台看不到——迁移后必须从磁盘重读最新尾部，否则仍显示旧内容。
   // agent 运行中且有流式时跳过（事件会追平，避免破坏 streaming.messageIndex）。
   if (useSessionsStore.getState().activeSessionPath === newPath) {
-    const chat = useChatStore.getState();
-    const st = chat.streaming[newPath];
+    const st = chatAfter.streaming[newPath];
     const hasLiveStream = !!(st && st.messageIndex >= 0);
     if (!hasLiveStream) {
-      chat.resetHistory(newPath);
-      chat.markCacheFresh(newPath, false);
+      dbgLog('migrate', `迁移后重载历史 newPath=${newPath} active=true`);
+      chatAfter.resetHistory(newPath);
+      chatAfter.markCacheFresh(newPath, false);
       void loadAndRenderHistory(newPath).catch(() => {});
     }
   }

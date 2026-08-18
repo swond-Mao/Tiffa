@@ -447,6 +447,24 @@ export default function ChatView() {
 
   const showWelcome = messages.length === 0 && welcomePhase === 'showing';
 
+  // 稳定且唯一的渲染 key：
+  // ① 优先 m.id（历史消息经 historyMessageId 生成内容哈希 id、流式消息为 live-*，均稳定）
+  // ② 缺失时回退到该消息在全量数组中的真实位置（startIdx + 局部索引，列表内唯一；
+  //    旧的 `m-${startIdx}` 非窗口化会话恒为 m-0 → 全会话重复 key → 跨会话 DOM 残留，已废弃）
+  // ③ 末尾对重复 key 追加序号兜底：即便上游漏给 id 也保证 key 唯一，杜绝 React 重复 key
+  //    导致的跨会话气泡 DOM 不卸载（日志实锤 n=0 sh=12233）
+  const keySeen = new Map<string, number>();
+  const makeKey = (m: (typeof visible)[number], idx: number): string => {
+    const base = m.id || `m-${startIdx + idx}`;
+    const n = keySeen.get(base);
+    if (n === undefined) {
+      keySeen.set(base, 1);
+      return base;
+    }
+    keySeen.set(base, n + 1);
+    return `${base}#${n}`;
+  };
+
   // #chatPanel 由 App 组装提供（含 #inputArea / #minimap 等兄弟节点）
   return (
     <>
@@ -457,8 +475,8 @@ export default function ChatView() {
           </button>
         )}
         {showWelcome && <WelcomeScreen />}
-        {visible.map((m) => (
-          <MessageBubble key={m.id || `m-${startIdx}`} msg={m} />
+        {visible.map((m, idx) => (
+          <MessageBubble key={makeKey(m, idx)} msg={m} />
         ))}
       </div>
       <button

@@ -8,7 +8,7 @@ import { useChatStore, HISTORY_LAZY_BATCH } from '../stores/useChatStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useUiStore } from '../stores/useUiStore';
 import { buildHistoryMessages } from './messageBuilders';
-import { extractSessionId, dbgLog } from './utils';
+import { extractSessionId, dbgLog, msgFingerprint } from './utils';
 import type { TiffaHistoryMessage } from '../types/tiffaDesktop';
 
 /** loadEpoch 防竞态：快速切换会话时防止旧回调覆盖新数据（模块级） */
@@ -37,6 +37,7 @@ export async function loadAndRenderHistory(sessionPath: string): Promise<boolean
     let hasMore = false;
     const hist = chat.history[sessionPath];
     const cached = hist?.cache;
+    const fromCache = !!cached;
     if (cached) {
       // 预载缓存命中：同时推进游标（=已渲染尾部条数），否则后续「加载更早」
       // 会以 skip=0 重复读取已显示的尾部并前插——表现为消息重复/拼接错乱。
@@ -80,7 +81,7 @@ export async function loadAndRenderHistory(sessionPath: string): Promise<boolean
     const all = buildHistoryMessages(raw as TiffaHistoryMessage[]);
     const older = all.length > HISTORY_LAZY_BATCH ? all.slice(0, -HISTORY_LAZY_BATCH) : [];
     const tail = all.length > HISTORY_LAZY_BATCH ? all.slice(-HISTORY_LAZY_BATCH) : all;
-    chat.setHistory(sessionPath, { pending: older });
+    dbgLog('hist', `落库 src=${fromCache ? 'cache' : 'ipc'} path=${sessionPath} active=${sessions.activeSessionPath ?? 'null'} tail=${msgFingerprint(tail)} all=${all.length}`);
     chat.setMessages(sessionPath, tail);
     useChatStore.getState().setWelcomePhase('done');
     return tail.length > 0;

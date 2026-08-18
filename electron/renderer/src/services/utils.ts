@@ -9,6 +9,30 @@ export function extractSessionId(sessionPath?: string | null): string | null {
   return match ? match[1] : null;
 }
 
+/** 消息指纹（诊断用）：取首/尾各 2 条，每条提取 role + 文本前 40 字，用于定位
+ * 「某会话缓冲内容实际来自哪个会话」。返回 "n=43|first=[user:你好]|last=[assistant:根据]"。 */
+export function msgFingerprint(msgs: unknown[] | null | undefined, maxHead = 2, maxTail = 2): string {
+  if (!Array.isArray(msgs) || msgs.length === 0) return 'empty';
+  const pick = (m: unknown): string => {
+    const obj = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>;
+    const role = typeof obj.role === 'string' ? obj.role : '?';
+    let text = '';
+    const parts = Array.isArray(obj.parts) ? obj.parts : [];
+    for (const p of parts) {
+      const part = (typeof p === 'object' && p !== null ? p : {}) as Record<string, unknown>;
+      if (part.kind === 'text' && typeof part.text === 'string' && part.text) {
+        text = part.text;
+        break;
+      }
+    }
+    if (!text && typeof obj.text === 'string') text = obj.text;
+    text = String(text).replace(/\s+/g, ' ').trim();
+    return `${role}:${text.slice(0, 40)}`;
+  };
+  const head = msgs.slice(0, maxHead).map(pick).join(' | ');
+  const tail = msgs.slice(-maxTail).map(pick).join(' | ');
+  return `n=${msgs.length}|first=[${head}]|last=[${tail}]`;
+}
 /** 反查：通过 sessionId 在活跃 tab 中找 sessionPath（后台事件路由用）。
  *  注意：不做 activeSessionId 短路——activeSessionPath 可能因切换中断/竞态与
  *  activeSessionId 不一致（残留），短路会把事件归属到错误视图（跨会话流出根因）。 */

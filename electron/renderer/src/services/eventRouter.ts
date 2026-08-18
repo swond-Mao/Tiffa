@@ -548,6 +548,7 @@ function handleEvent(event: TiffaEventFrame): void {
       const INTERACTIVE = ['editor', 'select', 'confirm', 'input'];
       if (INTERACTIVE.includes(method)) {
         // 所有会话的 ask 统一入全局队列——不再隐藏后台 ask，队列头常显
+        dbgLog('ask', `enqueueAsk method=${method} sid=${ssid ?? 'null'} active=${sessions.activeSessionId ?? 'null'} bg=${ssid && sessions.activeSessionId ? ssid !== sessions.activeSessionId : 'n/a'}`);
         ui.enqueueAsk(event as unknown as AskItem);
         break;
       }
@@ -716,6 +717,7 @@ function handleEvent(event: TiffaEventFrame): void {
         const activeNewObj = useSessionsStore.getState().sessions.find((s) => s.path === sessions.activeSessionPath);
         const expectedTempId = (activeNewObj && activeNewObj.sessionId) || sessions.activeSessionId;
         const prevSessionId = event._sessionIdPrev;
+        dbgLog('switch', `归属校验 prev=${prevSessionId ?? 'null'} expected=${expectedTempId ?? 'null'} match=${!!(prevSessionId && expectedTempId && prevSessionId === expectedTempId)} oldPath=${sessions.activeSessionPath} newPath=${String(event.sessionPath)} activeSid=${sessions.activeSessionId}`);
         if (prevSessionId && expectedTempId && prevSessionId !== expectedTempId) break;
         const newPath = String(event.sessionPath);
         const oldPath = sessions.activeSessionPath;

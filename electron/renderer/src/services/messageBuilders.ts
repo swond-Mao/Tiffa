@@ -80,13 +80,38 @@ export function buildToolPart(tc: {
   };
 }
 
+/** FNV-1a 32 位哈希（轻量无依赖，内容 → 短 token） */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * 历史消息稳定 id：主进程 parseSessionLines 不产出 id（ParsedMessage 无 id 字段），
+ * 旧代码 `id: msg.id` 导致所有历史消息 id 为 undefined → ChatView 渲染 key 全部退化成
+ * 同一个 `m-0`（重复 key）→ React 跨会话 diff 错乱、旧会话气泡 DOM 不卸载（日志实锤
+ * n=0 sh=12233：0 条消息但内容高度 12000+px，即其他会话的残留 DOM）。
+ * 用内容哈希（role+时间戳+正文+思考+工具数）生成：同一消息重复解析 id 不变，
+ * 保证 React key 稳定且跨会话不冲突。
+ */
+function historyMessageId(msg: TiffaHistoryMessage): string {
+  const text = String(msg.text || '');
+  const thinking = String(msg.thinking || '');
+  const tc = Array.isArray(msg.toolCalls) ? msg.toolCalls.length : 0;
+  return `hist-${fnv1a(`${msg.role}|${msg.timestamp || ''}|${text}|${thinking}|${tc}`)}`;
+}
+
 /** 历史消息 → ChatMessage（等价 buildHistoryFragment 的单条转换） */
 export function buildHistoryMessage(msg: TiffaHistoryMessage): ChatMessage | null {
   if (msg.role === 'user') {
     const text = String(msg.text || '');
     if (!text) return null;
     return {
-      id: msg.id,
+      id: msg.id || historyMessageId(msg),
       role: 'user',
       parts: [{ kind: 'text', text }],
       steered: !!msg.steering,
@@ -111,7 +136,7 @@ export function buildHistoryMessage(msg: TiffaHistoryMessage): ChatMessage | nul
     }
     const model = msg.model ? String(msg.model) : '';
     return {
-      id: msg.id,
+      id: msg.id || historyMessageId(msg),
       role: 'assistant',
       parts,
       modelTag: model ? (model.split('/').pop() || model) : undefined,
