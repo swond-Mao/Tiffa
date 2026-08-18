@@ -75,7 +75,6 @@ export async function loadAndRenderHistory(sessionPath: string): Promise<boolean
     }
     if (!raw || raw.length === 0) {
       chat.setMessages(sessionPath, []);
-      useChatStore.getState().setWelcomePhase('done');
       return false;
     }
     const all = buildHistoryMessages(raw as TiffaHistoryMessage[]);

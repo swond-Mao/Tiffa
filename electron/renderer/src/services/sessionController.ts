@@ -251,8 +251,24 @@ export async function restoreModelIfAvailable(
     // “未知”不校验直接下发（内核 set_model 自带可用性检查）
     const availableSet = await withTimeout(getAvailableModelSet(), 10000, 'getAvailableModelSet').catch(() => null);
     if (availableSet && !availableSet.has(`${provider}/${modelId}`)) {
-      dbgLog('model', `模型 "${provider}/${modelId}" 不在可用列表中，跳过恢复`);
-      return false;
+      // 保存的模型标签可能已失效（models.json 重命名/删除/改配置，如 "Qwen3.X-直连" →
+      // "Qwen3.X"）：直接跳过会把实例留在"无模型"状态，用户一发消息内核就崩——
+      // 「切换对话后模型没正确拉起来」的根因。先做同 provider 归一化模糊兜底，
+      // 匹配到就用匹配项恢复，并顺带修正会话记忆里的过期标签。
+      const fallback = await resolveClosestModel(provider, modelId);
+      if (fallback) {
+        dbgLog('model', `模型 "${provider}/${modelId}" 不在可用列表，回退到 "${fallback.provider}/${fallback.modelId}"`);
+        provider = fallback.provider;
+        modelId = fallback.modelId;
+        try {
+          useSessionsStore.getState().setSessionModel(expectedSessionPath, provider, modelId);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        dbgLog('model', `模型 "${provider}/${modelId}" 不在可用列表中，跳过恢复`);
+        return false;
+      }
     }
     try {
       // 防御：实例当前已是目标模型时跳过 set_model。避免“切换会话时重复下发模型命令”
@@ -288,6 +304,29 @@ export async function restoreModelIfAvailable(
     }
   } finally {
     if (sessionId) restoreModelInFlight.delete(sessionId);
+  }
+}
+
+/** 精确模型标签失效时的兜底匹配：同 provider 下按归一化 id 找最近可用模型
+ *  （去 直连/Direct 后缀、空白、点、下划线、连字符、大小写），找不到再放宽到任意 provider */
+async function resolveClosestModel(
+  provider: string,
+  modelId: string,
+): Promise<{ provider: string; modelId: string } | null> {
+  try {
+    const list = await withTimeout(getModelListCached(true), 10000, 'getModelListRefresh');
+    if (!list || list.length === 0) return null;
+    const norm = (s: string) =>
+      s.toLowerCase().replace(/[\s_.-]+/g, '').replace(/直连|direct/g, '');
+    const target = norm(modelId);
+    if (!target) return null;
+    const sameProvider = list.find((m) => m.provider === provider && m.id && norm(m.id) === target);
+    if (sameProvider) return { provider, modelId: sameProvider.id };
+    const anyProvider = list.find((m) => m.id && norm(m.id) === target);
+    if (anyProvider) return { provider: anyProvider.provider, modelId: anyProvider.id };
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -882,16 +921,23 @@ export async function switchToSession(sessionPath: string): Promise<void> {
     // 会导致 agent 在后台已把新内容写盘后，切回来仍显示旧尾部——「尾部消失」根因）。
     const cacheFresh = chat.sessionCacheFresh[sessionPath];
     const cached = chat.sessionMessageCache[sessionPath];
-    if (cached && cached.messages.length > 0) {
+    const st = chat.streaming[sessionPath];
+    const hasLiveStream = !!(st && st.messageIndex >= 0);
+    if (hasLiveStream) {
+      // 会话正在流式：messagesMap 已有实时累积内容（后台会话的流式事件也实时写入——
+      // eventRouter 已放行后台 message_start/update/end）。此时快照（sessionMessageCache）
+      // 可能陈旧：用 setMessages 覆盖 messagesMap 会截断 streaming.messageIndex，
+      // 导致后续 text_delta/finalizeAssistant 因消息索引越界全部丢帧——
+      // 「切回后台会话内容卡住/只在工具调用或思考结束时跳变」的根因之一。
+      // 保持实时内容不覆盖、不重读历史，让流式事件继续追平。
+    } else if (cached && cached.messages.length > 0) {
       chat.setMessages(sessionPath, cached.messages);
       // 快照陈旧（未 flush）：立即显示后后台刷新校正。
       // agent 运行中且有流式消息时跳过刷新——流式事件会追平，而刷新替换消息数组会
       // 破坏 streaming.messageIndex 导致输出丢失；agentRunning 残留（后台 agent_end
       // 丢失：tab 被关/LRU 淘汰）或卡住无流式时刷新——从 JSONL 重读最新尾部，
       // 修「切回对话后尾部不见、重启后才可见」。
-      const st = chat.streaming[sessionPath];
-      const hasLiveStream = !!(st && st.messageIndex >= 0);
-      if (!cacheFresh && !hasLiveStream) {
+      if (!cacheFresh) {
         // 先重置历史游标再重读：切走期间若生成了新消息，带旧 cursor 增量读取
         // （skip=cursor）只会返回新增的几条并覆盖整个界面——表现为切回后
         // 「尾部消息消失/从中间截断」。重置后从尾部全量重读 200 条。

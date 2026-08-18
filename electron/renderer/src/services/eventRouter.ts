@@ -107,6 +107,16 @@ async function migrateAndRenameNewTab(tempPath: string): Promise<void> {
   }
 }
 
+// ── 流式诊断节流：同 key 每 500ms 最多记一条，避免 text_delta 高频刷爆日志 ──
+const _streamLogTs: Record<string, number> = {};
+function dbgStreamLog(msg: string): void {
+  const now = Date.now();
+  const key = msg.slice(0, 48);
+  if (_streamLogTs[key] && now - _streamLogTs[key] < 500) return;
+  _streamLogTs[key] = now;
+  dbgLog('stream', msg);
+}
+
 function routeBackgroundEvent(event: TiffaEventFrame): boolean {
   const sessions = useSessionsStore.getState();
   const projects = useProjectsStore.getState();
@@ -117,7 +127,14 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
     if (
       event._sessionId !== sessions.activeSessionId &&
       event.type !== 'session_switch' &&
-      event.type !== 'extension_ui_request'
+      event.type !== 'extension_ui_request' &&
+      // 后台会话的流式生命周期（开始/增量/结束）必须交给 handleEvent 按归属路径正常
+      // 处理：否则后台会话的 streaming[bgPath] 永不创建、textDelta 全被丢弃，切回后台
+      // 会话时前端「卡住」（磁盘 JSONL 已写全，故重启后内容还在）。
+      event.type !== 'message_start' &&
+      event.type !== 'message_update' &&
+      event.type !== 'message_end' &&
+      event.type !== 'turn_end'
     ) {
       if (event._sessionId != null) {
         if (event.type === 'ready') {
@@ -158,13 +175,6 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
             // 切回优先显示内存快照，避免读到不完整磁盘内容而「回复消失/前台不刷新」。
             useChatStore.getState().cacheSnapshot(bgPath, 0);
             useChatStore.getState().markCacheFresh(bgPath, true);
-          }
-        } else if (event.type === 'message_start') {
-          // 后台 assistant 首响：标记该会话已收到首响（清其首响超时定时器）
-          const bgMsg = event.message as { role?: string } | undefined;
-          if (bgMsg && bgMsg.role === 'assistant') {
-            const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
-            if (bgPath) markFirstResponseReceived(bgPath);
           }
         }
       }
@@ -387,6 +397,7 @@ function handleEvent(event: TiffaEventFrame): void {
       // 事件按归属路由：后台/临时会话的消息写入自己的缓冲（回复期间内容不丢），
       // 只有找不到归属的事件才丢弃——不写入 activeSessionPath，杜绝尾巴拼进当前视图。
       const writePath = resolveEventWritePath(event, sessions);
+      dbgStreamLog(`message_start path=${writePath ?? 'NULL'} sid=${event._sessionId} active=${sessions.activeSessionPath}`);
       if (!writePath) break;
       const msg = event.message as { role?: string; content?: unknown };
       if (!msg) break;
@@ -421,7 +432,10 @@ function handleEvent(event: TiffaEventFrame): void {
     }
     case 'message_update': {
       const path = resolveEventWritePath(event, sessions);
-      if (!path) break;
+      if (!path) {
+        dbgStreamLog(`message_update 无归属 type=${(event.assistantMessageEvent as { type?: string } | undefined)?.type} sid=${event._sessionId}`);
+        break;
+      }
       const ast = event.assistantMessageEvent as
         | {
             type?: string;
@@ -433,6 +447,7 @@ function handleEvent(event: TiffaEventFrame): void {
           }
         | undefined;
       if (!ast) break;
+      dbgStreamLog(`message_update ${ast.type} path=${path} bg=${path !== sessions.activeSessionPath}`);
       switch (ast.type) {
         case 'text_start':
           chat.textStart(path);
