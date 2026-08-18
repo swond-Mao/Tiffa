@@ -60,6 +60,56 @@ function ensureDir(dir: string) {
   try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }) } catch {}
 }
 
+// ── snapcompact 帧预算字节预判（纯函数，导出供单测）──
+// 背景：内核硬预算 = 新帧组 b64 总长 > 3,000,000 B → 抛 "standing image payload exceeds the per-request budget"
+// （手动路径无 LLM 兜底）。旧 130K 字符预判（1 字符 ≈ 17.7 B，内核静态估算）把中文密集内容低估 ~1.9 倍
+// （实测 33.4 B/字符：2,335,616B ÷ 69,956 字符），导致放行 ② 后仍爆预算。现改字节估算，宁高勿低：
+// - 新文本：rate = 12 + 24 × CJK 占比（B/字符；纯 ASCII 12 → 纯 CJK 36，实测 33.4 落在其间）
+// - Standing 帧：上次压缩 preserveData.snapcompact 各帧 b64 之和 —— 旧归档每次压缩都会重新渲染、
+//   持续占用预算，取精确值（不估算）
+// - 仅当 standing + estNew < 上限 才放行 ①②，否则直降 ③（上限默认 3MB × 0.8 = 2.4MB，可用
+//   TIFFA_COMPACT_SNAP_BUDGET_BYTES 覆盖；取代旧 TIFFA_COMPACT_SNAP_MAX_CHARS 字符阈值）
+export const SNAP_FRAME_BUDGET_CAP_DEFAULT = 2_400_000
+// 修复3 运行时兜底标记：main.js 检测到 snapcompact 超预算后写入并自动重试，
+// 本扩展 session_before_compact 钩子看到新鲜标记（< TTL）即本次强制 ③。
+// main 正常在重试结束后删除标记；TTL 防残留（如 main 崩溃未清理）。
+export const SNAP_FORCE_FLAG_NAME = "compact-force-next.json"
+export const SNAP_FORCE_FLAG_TTL_MS = 120_000
+
+export function estimateSnapFrameBytes(
+  msgs: unknown[],
+  prevPreserveData: Record<string, unknown> | undefined,
+): { estNewBytes: number; standingBytes: number; totalBytes: number; inkChars: number; cjkChars: number; ratePerChar: number } {
+  let inkChars = 0
+  let cjkChars = 0
+  try {
+    const s = JSON.stringify(msgs)
+    cjkChars = (s.match(/[\u2E80-\u9FFF\u3000-\u30FF\uF900-\uFAFF\uFF00-\uFFEF]/g) || []).length
+    inkChars = (s.match(/[^\s"\\{}[\],:]/g) || []).length
+  } catch { /* stringify 失败 → 按 0 计，放行 ②（极罕见） */ }
+  const ratePerChar = inkChars > 0 ? 12 + 24 * (cjkChars / inkChars) : 12
+  const estNewBytes = Math.round(inkChars * ratePerChar)
+  let standingBytes = 0
+  try {
+    const prevSnap = prevPreserveData?.snapcompact as { frames?: Array<{ data?: unknown }> } | undefined
+    for (const fr of prevSnap?.frames || []) {
+      if (typeof fr?.data === "string") standingBytes += fr.data.length
+    }
+  } catch { /* preserveData 结构异常 → 按 0 计 */ }
+  return { estNewBytes, standingBytes, totalBytes: estNewBytes + standingBytes, inkChars, cjkChars, ratePerChar }
+}
+
+/** 读 force 标记的时间戳；无标记/过期/损坏返回 0。agentDir = data/agent（PI_CODING_AGENT_DIR）。 */
+export function readSnapForceFlagTs(agentDir: string): number {
+  try {
+    const p = join(agentDir, SNAP_FORCE_FLAG_NAME)
+    if (!existsSync(p)) return 0
+    const ff = JSON.parse(readFileSync(p, "utf8")) as { ts?: unknown }
+    if (typeof ff?.ts === "number" && Date.now() - ff.ts < SNAP_FORCE_FLAG_TTL_MS) return ff.ts
+  } catch { /* 标记读取失败 = 无标记 */ }
+  return 0
+}
+
 // ── 踩坑记录文档层（L-踩坑）：项目 docs/ 下自动创建精选踩坑档案模板（幂等）──
 function ensurePitfallDoc(projectDir: string): void {
   try {
@@ -1570,7 +1620,7 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
   //   "1" / "auto"  -> 五级降级链
     //   "force"       -> 跳过 ①②，直接走 ③ 旁路结构化总结
   // 任何失败 return（不抛错）-> 内核回退。绝不让压缩卡死。
-  pi.on("session_before_compact", async (event: { preparation?: { messagesToSummarize?: unknown[]; turnPrefixMessages?: unknown[]; firstKeptEntryId?: string }; signal?: AbortSignal } | null, ctx?: any) => {
+  pi.on("session_before_compact", async (event: { preparation?: { messagesToSummarize?: unknown[]; turnPrefixMessages?: unknown[]; firstKeptEntryId?: string; previousPreserveData?: Record<string, unknown> }; signal?: AbortSignal } | null, ctx?: unknown) => {
     const mode = process.env.TIFFA_COMPACT
     if (!mode || mode === "0") {
       writeCompactRoute(isVisionModel() ? "snapcompact" : "kernel-llm", `未启用 TIFFA_COMPACT，内核默认${isVisionModel() ? " snapcompact（视觉）" : " LLM 自压（文本）"}`)
@@ -1587,23 +1637,28 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       // 故只需精炼一次，③ 不再二次调用。失败静默跳过，绝不影响压缩本身。
       void recordCompactProgress(msgs)
 
-      let force = mode === "force"
+      // ── 修复3：运行时兜底标记（snapcompact 超预算 → main 自动重试）──
+      // main.js 检测到 "standing image payload exceeds the per-request budget" 后写 compact-force-next.json
+      // 并重发 compact；本钩子看到新鲜标记即本次强制 ③（跳过 ①②）。已知边界（双路并发）：
+      // 标记写入后 120 秒内另一会话若压缩也会被强制 ③ —— 仅质量降级，不会失败。
+      const forceFlagTs = readSnapForceFlagTs(AGENT_DIR)
 
-      // ── 帧容量预判：超大会话跳过 snap 线，直降 ③ 旁路结构化总结 ──
-      // 内核实测参数（cli.js）：silver16-bw CJK 帧 cellWidth/cellHeight=16，frameSize=1568
-      // → 每帧容量 = 98列 × 98行 = 9604 字符；帧预算 r$=3000000，单帧 kz2=170000
-      // → 最多 floor(3000000/170000)=17 帧，总容量 ≈ 163268 字符。
-      // 超限后内核抛 "standing image payload exceeds the per-request budget"（无 LLM 兜底）。
-      // 故按待压缩文本的可渲染字符数预判（1 字符 = 1 单元格，与内核同口径），
-      // 留 20% 余量防序列化开销。阈值可用 TIFFA_COMPACT_SNAP_MAX_CHARS 覆盖，默认 130000。
+      let force = mode === "force" || forceFlagTs > 0
+      if (forceFlagTs > 0 && mode !== "force") {
+        log("compact-bypass", "②→③ 运行时兜底标记命中（snapcompact 超预算后 main 自动重试）-> 本次强制 ③ 旁路结构化总结")
+        writeCompactRoute("claude-route", "运行时兜底：上一轮 snapcompact 超帧预算，main 自动重试，直走 ③ 旁路结构化摘要")
+      }
+
+      // ── 帧预算字节预判（2026-08-19 修复：旧字符数阈值误判中文密集内容）──
+      // 估算口径见 estimateSnapFrameBytes 注释：新文本按 CJK 占比加权字节密度，standing 帧取精确值。
+      // standing + estNew < 上限 才放行 ①②，否则直降 ③。
       if (!force) {
-        const snapMaxChars = Math.max(1000, Number(process.env.TIFFA_COMPACT_SNAP_MAX_CHARS) || 130000)
-        let charCount = 0
-        try { charCount = (JSON.stringify(msgs).match(/[^\s"\\{}[\],:]/g) || []).length } catch {}
-        if (charCount > snapMaxChars) {
+        const budgetCap = Math.max(100_000, Number(process.env.TIFFA_COMPACT_SNAP_BUDGET_BYTES) || SNAP_FRAME_BUDGET_CAP_DEFAULT)
+        const est = estimateSnapFrameBytes(msgs, prep.previousPreserveData)
+        if (est.totalBytes > budgetCap) {
           force = true
-          log("compact-bypass", `⚠ 待压缩文本约 ${charCount} 字符超 ${snapMaxChars} 阈值（内核 17 帧总容量 ≈163268 字符），将爆 3MB 帧预算 -> 跳过 ①② 直降 ③`)
-          writeCompactRoute("claude-route", `帧容量预判降级：待压缩文本超 ${snapMaxChars} 字符，跳过 snap 线直走 ③ 旁路结构化摘要`)
+          log("compact-bypass", `⚠ 帧预算字节预判：新文本 est ${est.estNewBytes}B（墨 ${est.inkChars} 字符 @ ${est.ratePerChar.toFixed(1)}B/字符，CJK ${est.cjkChars}）+ standing 帧 ${est.standingBytes}B > 上限 ${budgetCap}B -> 跳过 ①② 直降 ③`)
+          writeCompactRoute("claude-route", `帧预算字节预判降级：est ${est.estNewBytes}B + standing ${est.standingBytes}B > 上限 ${budgetCap}B，跳过 snap 线直走 ③ 旁路结构化摘要`)
         }
       }
 

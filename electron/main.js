@@ -498,7 +498,44 @@ function setupIpc() {
         const inst = _routeBySession(sessionId);
         if (!inst)
             throw new Error('No active Tiffa instance');
-        return inst.sendCommand({ type: 'compact' });
+        try {
+            return await inst.sendCommand({ type: 'compact' });
+        }
+        catch (err) {
+            // ── 运行时兜底（2+3 修复 #3）：内核 snapcompact 爆帧预算（扩展字节预判漏判）──
+            // 五级链是前置钩子决策，② 放行后无钩子能接住内核预算错误；此处应用层兜底：
+            // 仅对该精确错误写 force 标记（扩展消费后本次强制 ③ 旁路结构化总结）并自动重试一次。
+            // 严格限次：只认此错误、只重试一次，防死循环；其他错误（Compaction already in progress /
+            // 内容过短 / 超时等）原样透传。标记由扩展消费 + TTL(120s) 双保险，重试结束（无论成败）删除。
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('standing image payload exceeds the per-request budget')) {
+                const flagPath = path_1.default.join(global.PORTABLE_ROOT, 'data', 'agent', 'compact-force-next.json');
+                try {
+                    fs_1.default.mkdirSync(path_1.default.dirname(flagPath), { recursive: true });
+                    fs_1.default.writeFileSync(flagPath, JSON.stringify({ ts: Date.now(), sessionId: inst.sessionId ?? sessionId }), 'utf8');
+                }
+                catch { /* 标记写失败则重试仍会走扩展预判（可能再降 ③），值得再试 */ }
+                (0, session_utils_1.mainLog)(`[compact-retry] ${inst._shortCwd()}#${inst.sessionId} snapcompact 帧预算超限 -> 写 force 标记自动重试（③ 旁路结构化摘要）`);
+                try {
+                    const retried = await inst.sendCommand({ type: 'compact' });
+                    try {
+                        fs_1.default.unlinkSync(flagPath);
+                    }
+                    catch { /* 已被删除，no-op */ }
+                    (0, session_utils_1.mainLog)(`[compact-retry] 重试成功，压缩以 ③ 完成`);
+                    return retried;
+                }
+                catch (retryErr) {
+                    try {
+                        fs_1.default.unlinkSync(flagPath);
+                    }
+                    catch { /* 同上 */ }
+                    (0, session_utils_1.mainLog)(`[compact-retry] 重试失败：${retryErr instanceof Error ? retryErr.message : String(retryErr)}（返回原始首跳错误）`);
+                    throw err;
+                }
+            }
+            throw err;
+        }
     });
     electron_1.ipcMain.handle('tiffa:command', async (event, type, payload, sessionId) => {
         const frame = { type, ...payload };
