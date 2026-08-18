@@ -2,10 +2,10 @@
   "mcpServers": {
     "computer-use": {
       "type": "stdio",
-      "command": "D:/oh-my-tiffa/python/python.exe",
+      "command": "{{PORTABLE_ROOT}}/python/python.exe",
       "args": [
         "-u",
-        "D:/oh-my-tiffa/data/agent/managed-skills/computer-use/computer_use_mcp.py"
+        "{{PORTABLE_ROOT}}/data/agent/managed-skills/computer-use/computer_use_mcp.py"
       ],
       "env": {
         "PYTHONIOENCODING": "utf-8",
