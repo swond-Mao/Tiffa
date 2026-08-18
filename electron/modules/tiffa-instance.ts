@@ -111,6 +111,10 @@ export class TiffaInstance {
       PI_CODING_AGENT_DIR: path.join(PORTABLE_ROOT, 'data', 'agent'),
       HOME: path.join(PORTABLE_ROOT, 'home'),
       USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
+      // pip 配置重定向到便携包（install.ps1 写入 home\pip\pip.ini，不污染系统 %APPDATA%，跨盘迁移可用）
+      ...(fs.existsSync(path.join(PORTABLE_ROOT, 'home', 'pip', 'pip.ini'))
+        ? { PIP_CONFIG_FILE: path.join(PORTABLE_ROOT, 'home', 'pip', 'pip.ini') }
+        : {}),
       BUN_INSTALL: PORTABLE_ROOT,
       TIFFA_COMPACT: 'auto',
       MNEMOPI_EMBEDDING_MODEL: 'BAAI/bge-small-zh-v1.5',

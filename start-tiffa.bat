@@ -16,6 +16,8 @@ REM ── 环境变量重定向到便携包 ──
 set "PI_CODING_AGENT_DIR=%ROOT%\data\agent"
 set "HOME=%ROOT%\home"
 set "USERPROFILE=%ROOT%\home"
+REM ── pip 配置重定向到便携包（install.ps1 写入 home\pip\pip.ini，避免依赖系统 %APPDATA%）──
+if exist "%ROOT%\home\pip\pip.ini" set "PIP_CONFIG_FILE=%ROOT%\home\pip\pip.ini"
 set "MNEMOPI_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5"
 set "TIFFA_COMPACT=auto"
 

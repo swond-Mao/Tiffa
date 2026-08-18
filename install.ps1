@@ -451,12 +451,16 @@ if (Test-Path $pyExe) {
             Invoke-WebRequest -Uri "https://bootstrap.pypa.io/get-pip.py" -OutFile $gp -UseBasicParsing
             # 安装 pip 时指定清华镜像（默认 pypi.org 国内不可达）
             & $pyExe $gp -i "https://pypi.tuna.tsinghua.edu.cn/simple" 2>$null
-            # 为后续 pip 写国内源配置
+            # 为后续 pip 写国内源配置（完全便携：写包内 home\pip\pip.ini，不污染 %APPDATA%，随包迁移）
             try {
-                $pipConfDir = Join-Path $env:APPDATA "pip"
+                $pipConfDir = Join-Path $ROOT "home\pip"
                 if (-not (Test-Path $pipConfDir)) { New-Item -ItemType Directory -Path $pipConfDir -Force | Out-Null }
                 $pipCache = Join-Path $ROOT ".cache\pip"
-                "[global]`nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple`ntrusted-host = pypi.tuna.tsinghua.edu.cn`ncache-dir = $pipCache" | Set-Content -Path (Join-Path $pipConfDir "pip.ini") -Encoding UTF8
+                $pipIni = Join-Path $pipConfDir "pip.ini"
+                "[global]`nindex-url = https://pypi.tuna.tsinghua.edu.cn/simple`ntrusted-host = pypi.tuna.tsinghua.edu.cn`ncache-dir = $pipCache" | Set-Content -Path $pipIni -Encoding UTF8
+                # 注入 PIP_CONFIG_FILE，本进程内后续 pip 调用（依赖安装）均走包内配置
+                $env:PIP_CONFIG_FILE = $pipIni
+                OK "pip 国内源配置已写入便携目录: $pipIni"
             } catch {}
         }
         & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input 2>&1 | Out-Null
