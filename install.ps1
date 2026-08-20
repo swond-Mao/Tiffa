@@ -66,29 +66,10 @@ function Invoke-Npm {
     }
 }
 
-# Step 1: 设置 npm 国内源
-Step 1 6 "设置 npm 国内镜像源"
-if (-not $NPM_CMD) {
-    FAIL "未找到 npm，请先安装含 npm 的 Node.js：https://nodejs.org/  （便携版请解压到 $ROOT\node\）"
-}
-# 不调用 npm config 命令（旧版 npm 对部分参数会报 EUSAGE，且会污染用户全局配置），
-# 统一直接写项目 .npmrc：npm/bun 都会从 cwd 向上查找项目配置，
-# 后续安装步骤在 $ROOT\npm-global 下执行，其父目录即 $ROOT，可读到该文件。
-$localRc = Join-Path $ROOT ".npmrc"
-try {
-    "registry=$CHINA_NPM" | Out-File -FilePath $localRc -Encoding UTF8 -Force
-    OK ".npmrc 已写入国内源 (npm/bun 共用)"
-} catch {
-    INFO "写入 .npmrc 失败，可手动在 $ROOT\.npmrc 写入 registry=$CHINA_NPM"
-}
-$env:ELECTRON_MIRROR = $CHINA_ELECTRON
-# 完全便携：npm 缓存也指到包内（默认 %LOCALAPPDATA%\npm-cache 会写 C 盘，可达数百 MB）
-$env:npm_config_cache = Join-Path $ROOT ".cache\npm"
-OK "npm 镜像: $CHINA_NPM"
-OK "Electron 镜像: $CHINA_ELECTRON"
-
-# Step 2: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
-Step 2 6 "检查 Node.js"
+# Step 1: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
+# 必须在 npm 镜像配置之前执行：全新机器没有任何 Node.js/npm，
+# 若先要求 npm 会在第一步直接 FAIL，导致 Node.js 自动下载永远轮不到执行。
+Step 1 6 "检查 Node.js"
 $nodeExe = Join-Path $ROOT "node\node.exe"
 if (Test-Path $nodeExe) {
     $v = & $nodeExe --version 2>$null
@@ -126,6 +107,36 @@ if (Test-Path $nodeExe) {
         }
     }
 }
+# 便携 node 前置到 PATH：Step 4/5 用 `cmd /c npm install` 执行，子进程继承的是
+# 本进程 PATH；不把 $ROOT\node 加进去，新下载的便携 npm 会 "不是内部或外部命令"。
+$nodeBinDir = Join-Path $ROOT "node"
+if ((Test-Path $nodeExe) -and ($env:Path -notlike "*$nodeBinDir*")) {
+    $env:Path = "$nodeBinDir;$env:Path"
+    OK "便携 node 已加入 PATH: $nodeBinDir"
+}
+# 此时 Node.js 已就位，重新解析 npm（脚本开头解析时便携 node 可能尚不存在）
+$NPM_CMD = Resolve-Npm
+
+# Step 2: 设置 npm 国内源
+Step 2 6 "设置 npm 国内镜像源"
+if (-not $NPM_CMD) {
+    FAIL "未找到 npm（Node.js 已就位但 npm 组件缺失）。请手动安装含 npm 的 Node.js：https://nodejs.org/  （便携版请解压到 $ROOT\node\）"
+}
+# 不调用 npm config 命令（旧版 npm 对部分参数会报 EUSAGE，且会污染用户全局配置），
+# 统一直接写项目 .npmrc：npm/bun 都会从 cwd 向上查找项目配置，
+# 后续安装步骤在 $ROOT\npm-global 下执行，其父目录即 $ROOT，可读到该文件。
+$localRc = Join-Path $ROOT ".npmrc"
+try {
+    "registry=$CHINA_NPM" | Out-File -FilePath $localRc -Encoding UTF8 -Force
+    OK ".npmrc 已写入国内源 (npm/bun 共用)"
+} catch {
+    INFO "写入 .npmrc 失败，可手动在 $ROOT\.npmrc 写入 registry=$CHINA_NPM"
+}
+$env:ELECTRON_MIRROR = $CHINA_ELECTRON
+# 完全便携：npm 缓存也指到包内（默认 %LOCALAPPDATA%\npm-cache 会写 C 盘，可达数百 MB）
+$env:npm_config_cache = Join-Path $ROOT ".cache\npm"
+OK "npm 镜像: $CHINA_NPM"
+OK "Electron 镜像: $CHINA_ELECTRON"
 
 # Step 3: 安装 Bun
 Step 3 6 "检查 Bun 运行时"
