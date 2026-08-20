@@ -216,7 +216,9 @@ export default function ChatView() {
       markUserScroll();
       const el0 = messagesRef.current;
       if (el0) scrollPosRef.current = el0.scrollTop;
-      if (distance() <= RESUME_EPS) {
+      // 只有真正滚到底（distance<=1）才恢复跟随：避免上滚一点点（distance<60）
+      // 刚 detach 又被此判定 attach 回来。回到底部/手动跳底才重新追底。
+      if (distance() <= 1) {
         followRef.current = true;
         // 窗口化：用户滚到底部时窗口前移到最新，让尾部消息进入窗口。
         // 否则窗口停在旧位置，最新消息永远在窗口外——「下滚看不到对话尾部」
@@ -245,10 +247,11 @@ export default function ChatView() {
       }
     };
     const onWheel = (e: WheelEvent) => {
-      // 鼠标智能跟随：只在“已明确滚离底部”时才脱离跟随；底部附近向上滚（deltaY<0）
-      // 不打断自动跟随，避免流式中轻轻向上滚一下就把 followRef 置 false 永久不跟随。
+      // 上滚即停止追底：只要向上滚（deltaY<0）就脱离跟随，无需先滚离 200px。
+      // 配合 onScroll「只有真正滚到底(distance<=1)才恢复跟随」，实现
+      // “上滚一点点就固定屏幕不追底，回到底才恢复追底”。
       markUserScroll();
-      if (e.deltaY < 0 && distance() > AUTO_FOLLOW_GAP) detach();
+      if (e.deltaY < 0) detach();
     };
     const onMouseDown = (e: MouseEvent) => {
       // 点击滚动条区域（offsetX 超出内容宽度）且已滚离底部才脱离；点消息正文不打断跟随
@@ -399,7 +402,10 @@ export default function ChatView() {
     }
     if (isStreaming) {
       prevStreamingRef.current = true;
-      if (dist > AUTO_FOLLOW_GAP && !followRef.current) return;
+      // 与 onWheel「上滚即 detach」配套：只要用户已上滚脱离（followRef=false），
+      // 流式/思考内容增长就不强制拉回底部。旧守卫 dist>200 会让「上滚一点点
+      // （dist<200）」被此行强行跳底，表现为思考/生成时滚动条滚不动。
+      if (!followRef.current) return;
       el.scrollTop = el.scrollHeight;
       scrollPosRef.current = el.scrollTop;
       // 二次校正：不 cancel，保证执行（markdown 测量补全后补到真实底部）
