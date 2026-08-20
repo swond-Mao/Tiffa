@@ -17,7 +17,7 @@ import {
   markFirstResponseReceived, currentModelLabel,
   touchGuard, hasReceivedFirstResponse,
 } from './generationGuard';
-import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache } from './sessionController';
+import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached } from './sessionController';
 import { autoRenameWithLightModel } from './historyService';
 import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
 import { normalizeUserContent } from './messageBuilders';
@@ -214,6 +214,10 @@ function handleEvent(event: TiffaEventFrame): void {
       ui.setStatusText('就绪');
       // 实例重启/新就绪：清死列表缓存，让模型校验走新实例的真实列表（后续调用自然重载）
       invalidateModelListCache();
+      // 引擎刚就绪：后台立即重载真实模型列表填缓存（不等用户点开模型选择器）。
+      // 启动页期间缓存可能还是 models.yml 兜底列表（引擎未起），此处换成新实例真实列表，
+      // 用户进入主界面点开模型选择器时秒开、无需等加载。
+      void getModelListCached(true).catch(() => {});
       // 模型恢复优先于 fetchCurrentModel
       const saved = sessions.activeSessionPath ? sessions.sessionModelMap[sessions.activeSessionPath] : null;
       if (saved && saved.provider && saved.modelId) {
