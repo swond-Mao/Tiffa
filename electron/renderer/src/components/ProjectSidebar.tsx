@@ -74,8 +74,10 @@ function SessionTree({ dirName }: { dirName: string }) {
   const activeSessionPath = useSessionsStore((s) => s.activeSessionPath);
   const activeSessionPaths = useSessionsStore((s) => s.activeSessionPaths);
   const expandedSessionTrees = useSessionsStore((s) => s.expandedSessionTrees);
-  // 活动对话（实例已就绪）集合：左侧圆点只对它们显示，选中（active）不点亮
-  const sessionReadyMap = useProcStore((s) => s.sessionReadyMap);
+  // 正在运行的会话集合：左侧圆点只对「AI 正在回复/运行中」的对话显示。
+  // 空闲对话（即使实例已就绪 .ready）一律不点亮——点开历史对话不亮，只高亮整行。
+  // 选中（active）不点亮，避免与运行态指示重复。
+  const procStateMap = useProcStore((s) => s.procStateMap);
   const uiQueue = useUiStore((s) => s.uiQueue);
   void uiQueue;
 
@@ -104,7 +106,7 @@ function SessionTree({ dirName }: { dirName: string }) {
           'session-item',
           activeSessionPaths.includes(session.path) ? 'open' : '',
           session.path === activeSessionPath ? 'active' : '',
-          sessionReadyMap[session.path] ? 'ready' : '',
+          procStateMap[session.path]?.agentRunning ? 'running' : '',
           hasPendingAsk(session.sessionId) || hasPendingAsk(extractSessionId(session.path)) ? 'pending-ask' : '',
         ]
           .filter(Boolean)

@@ -418,9 +418,11 @@ body {
   color: hsl(var(--text-100));
 }
 
-/* 静默（未激活）会话：圆点占位隐藏，避免与 tab 高亮重复指示；
-   仅活动对话（实例已就绪 .ready）与待回复会话（.pending-ask）显示圆点——
-   选中（.active）只高亮整行，不点亮圆点（选中对话不一定是活动对话） */
+/* 会话圆点：默认隐藏（占位不占行）。
+   只有两种情况点亮——① AI 正在回复/运行中（.running，agentRunning 驱动）；
+   ② 等待用户回复（.pending-ask）。
+   选中（.active）只高亮整行不点亮圆点；实例就绪（.ready）不点亮
+   （点开会话 = 实例就绪，若据此亮圆点会让"点开谁谁就亮"，已废弃该驱动）。 */
 .session-item-dot {
   width: 6px;
   height: 6px;
@@ -437,11 +439,16 @@ body {
   color: hsl(var(--text-100));
 }
 
-/* 活动对话（实例已就绪）：圆点点亮 */
-.session-item.ready .session-item-dot {
+/* AI 正在回复/运行中的会话：圆点亮起并缓慢脉动（前台/后台运行均适用） */
+.session-item.running .session-item-dot {
   visibility: visible;
   background: hsl(var(--accent-main-200));
   box-shadow: 0 0 0 2px hsl(var(--accent-main-200) / 0.25);
+  animation: runningDotPulse 1.4s ease-in-out infinite;
+}
+@keyframes runningDotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 /* 正在等待用户回复（ask 抽屉待弹）的会话：圆点高亮脉动提示 */
