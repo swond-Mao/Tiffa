@@ -24,7 +24,7 @@ function serializeModelsYaml(data: TiffaModelsConfig | null): string {
   if (!data || !data.providers) return lines.join('\n');
   lines.push('providers:');
   for (const [k, p] of Object.entries(data.providers)) {
-    lines.push(`  ${k}:`, `    baseUrl: "${p.baseUrl || ''}"`, `    api: "${p.api || 'custom-openai'}"`);
+    lines.push(`  ${k}:`, `    baseUrl: "${p.baseUrl || ''}"`, `    api: "${p.api || 'openai-completions'}"`);
     if (p.apiKey) lines.push(`    apiKey: "${p.apiKey}"`);
     if (p.models && p.models.length > 0) {
       lines.push('    models:');
@@ -500,11 +500,15 @@ function addProviderDialog(
       <input id="dlgProvKeyApi" type="password" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" placeholder="sk-xxx">
       <label style="font-size:12px;color:var(--text-muted);">API 类型</label>
       <select id="dlgProvApi" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;">
-        <option value="custom-openai">custom-openai（OpenAI 兼容）</option>
-        <option value="openai">openai</option>
-        <option value="anthropic">anthropic</option>
-        <option value="ollama">ollama</option>
-        <option value="deepseek">deepseek</option>
+        <option value="openai-completions">openai-completions（OpenAI 兼容 /chat/completions，最常用）</option>
+        <option value="openai-responses">openai-responses（OpenAI Responses API）</option>
+        <option value="openai-codex-responses">openai-codex-responses（Codex Responses）</option>
+        <option value="azure-openai-responses">azure-openai-responses（Azure OpenAI）</option>
+        <option value="anthropic-messages">anthropic-messages（Claude Messages API）</option>
+        <option value="google-generative-ai">google-generative-ai（Gemini API）</option>
+        <option value="google-gemini-cli">google-gemini-cli（Gemini CLI）</option>
+        <option value="google-vertex">google-vertex（Vertex AI）</option>
+        <option value="bedrock-converse-stream">bedrock-converse-stream（AWS Bedrock）</option>
       </select>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
         <button id="dlgProvCancel" style="padding:6px 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;">取消</button>
