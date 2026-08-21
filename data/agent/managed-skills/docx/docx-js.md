@@ -5,8 +5,8 @@ Generate .docx files with JavaScript/TypeScript.
 **Important: Read this entire document before starting.** Critical formatting rules and common pitfalls are covered throughout - skipping sections may result in corrupted files or rendering issues.
 
 ## Setup
-Assumes docx is already installed globally
-If not installed: `npm install -g docx`
+Tiffa 的 `install.ps1` 已把 `docx` 预装到 `npm-global\node_modules`（启动脚本注入 NODE_PATH），任意目录 `require('docx')` 均可用，无需手动安装。
+若报模块找不到（非 Tiffa 环境或拷贝缺失）：`npm install -g docx`
 
 ```javascript
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, ImageRun, Media, 

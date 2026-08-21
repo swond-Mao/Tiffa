@@ -22,16 +22,18 @@ triggers:
 
 数据驱动页面定义 → `build.js` 编译原生 .pptx + lint 规则校验 → HTML 版式快照预览。
 
-## 首次使用准备（新机器/新 clone 必须执行）
+## 依赖准备（install.ps1 已预装）
 
-技能依赖（react/react-dom/playwright-core/pptxgenjs/pdf-lib/pngjs/html-to-image/gsap）不入库，新机器 clone 后须先安装：
+技能依赖（react/react-dom/playwright-core/pptxgenjs/pdf-lib/pngjs/html-to-image/gsap）由 **`install.ps1` 第 6 步自动安装**；整包拷贝时 `node_modules/` 随包带走，内网即拷即用。
+
+若 `node_modules/` 缺失（如拷贝时未包含），需联网手动安装：
 
 ```bash
 cd data/agent/managed-skills/pptx-designer
 npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 ```
 
-- **依赖检查**：执行任务前先确认 `node_modules/` 存在；缺失时先 npm install 再继续，不要直接跑脚本
+- **依赖检查**：执行任务前先确认 `node_modules/` 存在；缺失时联网机器先 npm install，内网机器直接拷贝联网机器的 `node_modules/` 目录，不要硬跑脚本
 - **导出浏览器**：一键导出依赖系统 Edge/Chrome（`launch-export-browser` 自动探测），Windows 一般自带
 - **模板目录重建**（可选）：`build-layout-catalog.cjs` 重建 layout-catalog.md 需要 dashiai-ppt 技能在场；日常流程不需要，目录产物已入库
 

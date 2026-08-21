@@ -69,7 +69,7 @@ function Invoke-Npm {
 # Step 1: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
 # 必须在 npm 镜像配置之前执行：全新机器没有任何 Node.js/npm，
 # 若先要求 npm 会在第一步直接 FAIL，导致 Node.js 自动下载永远轮不到执行。
-Step 1 6 "检查 Node.js"
+Step 1 7 "检查 Node.js"
 $nodeExe = Join-Path $ROOT "node\node.exe"
 if (Test-Path $nodeExe) {
     $v = & $nodeExe --version 2>$null
@@ -118,7 +118,7 @@ if ((Test-Path $nodeExe) -and ($env:Path -notlike "*$nodeBinDir*")) {
 $NPM_CMD = Resolve-Npm
 
 # Step 2: 设置 npm 国内源
-Step 2 6 "设置 npm 国内镜像源"
+Step 2 7 "设置 npm 国内镜像源"
 if (-not $NPM_CMD) {
     FAIL "未找到 npm（Node.js 已就位但 npm 组件缺失）。请手动安装含 npm 的 Node.js：https://nodejs.org/  （便携版请解压到 $ROOT\node\）"
 }
@@ -139,7 +139,7 @@ OK "npm 镜像: $CHINA_NPM"
 OK "Electron 镜像: $CHINA_ELECTRON"
 
 # Step 3: 安装 Bun
-Step 3 6 "检查 Bun 运行时"
+Step 3 7 "检查 Bun 运行时"
 $bunExe = Join-Path $ROOT "npm-global\node_modules\bun\bin\bun.exe"
 if (Test-Path $bunExe) {
     $bv = & $bunExe --version 2>$null
@@ -171,7 +171,7 @@ if (Test-Path $bunExe) {
 }
 
 # Step 4: 安装 Tiffa 内核
-Step 4 6 "检查 Tiffa 内核"
+Step 4 7 "检查 Tiffa 内核"
 $agentDir = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent"
 if (Test-Path $agentDir) {
     $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
@@ -250,7 +250,7 @@ if (Test-Path $agentDir) {
 }
 
 # Step 5: 安装 Electron 桌面端
-Step 5 6 "检查 Electron 桌面端"
+Step 5 7 "检查 Electron 桌面端"
 $electronDir = Join-Path $ROOT "electron"
 $electronExe = Join-Path $electronDir "node_modules\electron\dist\electron.exe"
 if (Test-Path $electronExe) {
@@ -306,8 +306,129 @@ if (Test-Path $electronExe) {
     }
 }
 
-# Step 6: 初始化目录和配置
-Step 6 6 "初始化数据目录和配置文件"
+# Step 6: 安装技能 npm 依赖与无头浏览器（便携离线关键）
+# 各 PPT/PDF 技能脚本依赖本地 node_modules（如 pptxgenjs/playwright-core）；
+# node_modules 不随仓库入库，拷到内网无网时装不上 —— 必须在联网安装阶段全部装好，整包拷贝即拷即用。
+Step 6 7 "安装技能 npm 依赖与无头浏览器"
+$skillsDir = Join-Path $ROOT "data\agent\managed-skills"
+# 无头浏览器下载镜像：playwright 官方 CDN（azureedge）国内不可达，npmmirror 为官方认可镜像
+$env:PLAYWRIGHT_DOWNLOAD_HOST = "https://cdn.npmmirror.com/binaries/playwright"
+
+function Test-SkillDep {
+    param([string]$Dir, [string]$Pkg)
+    return (Test-Path (Join-Path $Dir "node_modules\$Pkg"))
+}
+function Install-SkillNpm {
+    param([string]$Dir, [string]$Pkg, [string]$Label)
+    if (-not (Test-Path (Join-Path $Dir "package.json"))) {
+        Write-Host "    [WARN] 缺少 $Dir\package.json，跳过 $Label" -ForegroundColor Yellow
+        return
+    }
+    if (Test-SkillDep $Dir $Pkg) {
+        OK "$Label (已安装)"
+        return
+    }
+    INFO "安装 $Label（国内镜像，失败自动重试）..."
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $done = $false
+    try {
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+            cmd /c "cd /d `"$Dir`" && npm install --no-audit --no-fund --loglevel=error" 2>&1 | Out-String | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-SkillDep $Dir $Pkg)) { $done = $true; break }
+            Write-Host "    [WARN] $Label 安装失败（第 $attempt/3 次，退出码 $LASTEXITCODE）" -ForegroundColor Yellow
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+    if ($done) {
+        OK "$Label 安装成功"
+    } else {
+        # 不 FAIL 整个安装：离线/内网机器装不上 npm 包属预期，给出手动指引（整包拷贝 node_modules 即可）
+        Write-Host "    [WARN] $Label 安装失败。联网机器重跑 install.ps1 或手动: cd $Dir && npm install；内网机器可直接拷贝联网机器 $Dir\node_modules。" -ForegroundColor Yellow
+    }
+}
+
+# ① pptx-designer：pptxgenjs/react/playwright-core 等（build 编译/预览/编辑器/模板逆向）
+Install-SkillNpm (Join-Path $skillsDir "pptx-designer") "pptxgenjs" "pptx-designer 依赖"
+# ② dashiai-ppt：project/ 渲染与导出依赖（tsx/esbuild/playwright-core/pptxgenjs 等）
+Install-SkillNpm (Join-Path $skillsDir "dashiai-ppt\project") "pptxgenjs" "dashiai-ppt 依赖"
+# ③ pdf 技能：playwright（npm install 的 postinstall 默认会下浏览器，先跳过，浏览器统一在 ⑤ 下载）
+$pdfSkillDir = Join-Path $skillsDir "pdf"
+if (-not (Test-SkillDep $pdfSkillDir "playwright")) {
+    if (-not (Test-Path (Join-Path $pdfSkillDir "package.json"))) {
+        '{"name":"pdf-skill-deps","private":true,"dependencies":{"playwright":"1.60.0"}}' | Set-Content -Path (Join-Path $pdfSkillDir "package.json") -Encoding UTF8
+    }
+    $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+    Install-SkillNpm $pdfSkillDir "playwright" "pdf 技能 playwright"
+    Remove-Item Env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD -ErrorAction SilentlyContinue
+} else {
+    OK "pdf 技能 playwright (已安装)"
+}
+# ④ docx：docx-js 生成的脚本在任意目录 require('docx') → 装进独立 skill-deps 目录，靠 NODE_PATH 暴露
+#    （不装进 npm-global：npm install 会按 package.json 剪枝内核树，清掉手工摆放的 bun 等组件）
+#    （start-tiffa.bat / electron 主进程均已注入 NODE_PATH=%ROOT%\skill-deps\node_modules）
+$skillDepsDir = Join-Path $ROOT "skill-deps"
+if (-not (Test-Path (Join-Path $skillDepsDir "package.json"))) {
+    New-Item -ItemType Directory -Path $skillDepsDir -Force | Out-Null
+    '{"name":"tiffa-skill-deps","private":true,"dependencies":{"docx":"^9.7.1"}}' | Set-Content -Path (Join-Path $skillDepsDir "package.json") -Encoding UTF8
+}
+Install-SkillNpm $skillDepsDir "docx" "docx 共享依赖 (skill-deps)"
+
+# ⑤ 无头浏览器 chromium-headless-shell（node/python 两侧 playwright 1.60.0 同版本共享同一缓存）
+#    落到 $ROOT\home（便携，随包拷贝）：dashiai 导出 / pdf 封面 / diagram-drawing 渲染共用
+$pwCacheRoot = Join-Path $ROOT "home\AppData\Local\ms-playwright"
+$shellInstalled = $false
+if (Test-Path $pwCacheRoot) {
+    $shellInstalled = @(Get-ChildItem $pwCacheRoot -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue).Count -gt 0
+}
+if ($shellInstalled) {
+    OK "无头浏览器 chromium-headless-shell (已就位)"
+} else {
+    $dashiaiProjDir = Join-Path $skillsDir "dashiai-ppt\project"
+    if (Test-SkillDep $dashiaiProjDir "playwright-core") {
+        INFO "下载无头浏览器（npmmirror 镜像，落入 home\AppData\Local\ms-playwright）..."
+        # 浏览器落盘位置由 LOCALAPPDATA 决定（playwright 在 Windows 读该变量），HOME/USERPROFILE 一并重定向兼容
+        # 必须指到便携 home，否则会下到 C:\Users\<用户>\AppData\Local
+        $prevUserProfile = $env:USERPROFILE
+        $prevHome = $env:HOME
+        $prevLocalAppData = $env:LOCALAPPDATA
+        $env:HOME = Join-Path $ROOT "home"
+        $env:USERPROFILE = Join-Path $ROOT "home"
+        $env:LOCALAPPDATA = Join-Path $ROOT "home\AppData\Local"
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $bwOk = $false
+        try {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+                cmd /c "cd /d `"$dashiaiProjDir`" && npx --no-install playwright-core install chromium-headless-shell" 2>&1 | Out-String | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    $shellInstalled = @(Get-ChildItem $pwCacheRoot -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue).Count -gt 0
+                    if ($shellInstalled) { $bwOk = $true; break }
+                }
+                Write-Host "    [WARN] 无头浏览器下载失败（第 $attempt/3 次，退出码 $LASTEXITCODE）" -ForegroundColor Yellow
+            }
+        } finally {
+            $env:USERPROFILE = $prevUserProfile
+            $env:HOME = $prevHome
+            $env:LOCALAPPDATA = $prevLocalAppData
+            $ErrorActionPreference = $prevEAP
+        }
+        if ($bwOk) {
+            OK "无头浏览器 chromium-headless-shell 已下载（便携 home）"
+        } else {
+            # 非致命：dashiai/pptx-designer 导出链路可回退系统 Edge/Chrome
+            Write-Host "    [WARN] 无头浏览器下载失败。PPT 导出将回退系统 Edge/Chrome；联网机器重跑 install.ps1 补装，或从联网机器拷贝 home\AppData\Local\ms-playwright。" -ForegroundColor Yellow
+        }
+    } else {
+        INFO "跳过无头浏览器下载（dashiai-ppt 依赖未安装成功）"
+    }
+}
+
+# Step 7: 初始化目录和配置
+Step 7 7 "初始化数据目录和配置文件"
 $dirs = @(
     "data\agent",
     "data\agent\sessions",
@@ -484,6 +605,48 @@ if (Test-Path $pyExe) {
     }
 }
 
+# ---- Python 依赖对齐（幂等）：覆盖"python 在但依赖不全/requirements 升级"的场景 ----
+# 旧逻辑只在 pip 缺失时装依赖，会出现"看起来装好、实际缺包"（如拷到内网后 pandas/openpyxl 等缺失）。
+if (Test-Path $pyExe) {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input --disable-pip-version-check 2>&1 | Out-String | Out-Null
+        $pipCode = $LASTEXITCODE
+        if ($pipCode -eq 0) {
+            OK "Python 依赖已对齐 requirements-python.txt"
+        } else {
+            Write-Host "    [WARN] Python 依赖安装未完成（退出码 $pipCode）。联网机器重跑: python -m pip install -r requirements-python.txt -i https://pypi.tuna.tsinghua.edu.cn/simple" -ForegroundColor Yellow
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+    # playwright 无头浏览器（python 侧）：与 node 侧 1.60.0 同 revision，已缓存则秒过
+    # 落盘位置同样由 LOCALAPPDATA 决定，重定向到便携 home
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $prevUserProfile = $env:USERPROFILE
+    $prevHome = $env:HOME
+    $prevLocalAppData = $env:LOCALAPPDATA
+    $env:HOME = Join-Path $ROOT "home"
+    $env:USERPROFILE = Join-Path $ROOT "home"
+    $env:LOCALAPPDATA = Join-Path $ROOT "home\AppData\Local"
+    try {
+        & $pyExe -m playwright install chromium-headless-shell 2>&1 | Out-String | Out-Null
+        $pwCode = $LASTEXITCODE
+        if ($pwCode -eq 0) {
+            OK "playwright 无头浏览器（python 侧）已就位"
+        } else {
+            Write-Host "    [WARN] python playwright 浏览器安装失败（退出码 $pwCode），diagram-drawing 无头渲染不可用。联网机器重跑: python -m playwright install chromium-headless-shell" -ForegroundColor Yellow
+        }
+    } finally {
+        $env:USERPROFILE = $prevUserProfile
+        $env:HOME = $prevHome
+        $env:LOCALAPPDATA = $prevLocalAppData
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
 # models.yml 示例
 $modelsEx = Join-Path $ROOT "data\agent\models.yml.example"
 $modelsYml = Join-Path $ROOT "data\agent\models.yml"
@@ -513,6 +676,12 @@ tools:
 # 创建桌面快捷方式
 if (-not $SkipDesktop) {
     $desktop = [Environment]::GetFolderPath("Desktop")
+    # 无桌面环境（如精简系统/服务会话）GetFolderPath 返回空，Join-Path 会抛错中断安装
+    if ([string]::IsNullOrWhiteSpace($desktop)) {
+        $commonDesktop = [Environment]::GetFolderPath("CommonDesktop")
+        if ([string]::IsNullOrWhiteSpace($commonDesktop)) { $commonDesktop = "$env:SystemDrive\Users\Public\Desktop" }
+        $desktop = $commonDesktop
+    }
     $shortcutPath = Join-Path $desktop "Tiffa.lnk"
     $target = Join-Path $ROOT "tiffa-desktop.exe"
     if (-not (Test-Path $target)) {

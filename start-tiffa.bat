@@ -24,6 +24,10 @@ set "TIFFA_COMPACT=auto"
 REM ── Bun 运行时路径 ──
 set "BUN_EXE=%ROOT%\npm-global\node_modules\bun\bin\bun.exe"
 set "TIFFA_CLI=%ROOT%\npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"
+REM ── 技能共享 npm 依赖解析路径（docx 等装在 npm-global，AI 生成的脚本在任意目录可 require）──
+set "NODE_PATH=%ROOT%\skill-deps\node_modules"
+REM ── playwright 浏览器落盘位置重定向到便携 home（Windows 读 LOCALAPPDATA）──
+set "LOCALAPPDATA=%ROOT%\home\AppData\Local"
 
 REM ── 工作目录 ──
 set "TIFFA_WORKSPACE=%ROOT%\workspace"

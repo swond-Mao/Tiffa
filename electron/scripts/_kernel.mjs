@@ -45,6 +45,8 @@ export function kernelEnv() {
     PI_CODING_AGENT_DIR: path.join(PORTABLE_ROOT, 'data', 'agent'),
     HOME: path.join(PORTABLE_ROOT, 'home'),
     USERPROFILE: path.join(PORTABLE_ROOT, 'home'),
+    NODE_PATH: path.join(PORTABLE_ROOT, 'skill-deps', 'node_modules'),
+    LOCALAPPDATA: path.join(PORTABLE_ROOT, 'home', 'AppData', 'Local'),
     BUN_INSTALL: PORTABLE_ROOT,
   };
 }

@@ -94,6 +94,10 @@ class TiffaInstance {
             ...(fs_1.default.existsSync(path_1.default.join(constants_1.PORTABLE_ROOT, 'home', 'pip', 'pip.ini'))
                 ? { PIP_CONFIG_FILE: path_1.default.join(constants_1.PORTABLE_ROOT, 'home', 'pip', 'pip.ini') }
                 : {}),
+            // 暴露技能共享 npm 依赖（docx 等）：docx-js 生成的脚本在任意目录 require('docx')
+            NODE_PATH: path_1.default.join(constants_1.PORTABLE_ROOT, 'skill-deps', 'node_modules'),
+            // playwright 浏览器落盘位置（Windows 读 LOCALAPPDATA），重定向到便携 home 随包迁移
+            LOCALAPPDATA: path_1.default.join(constants_1.PORTABLE_ROOT, 'home', 'AppData', 'Local'),
             BUN_INSTALL: constants_1.PORTABLE_ROOT,
             TIFFA_COMPACT: 'auto',
             MNEMOPI_EMBEDDING_MODEL: 'BAAI/bge-small-zh-v1.5',

@@ -258,8 +258,8 @@ print(meta.title, meta.author, meta.subject)
 ### Python packages
 - `pypdf` · `pdfplumber` · `reportlab` · `Pillow` · `pypdfium2` · `matplotlib`
 
-### Node.js (optional, for HTML cover rendering)
-- `playwright` + Chromium
+### Node.js (for HTML cover rendering；install.ps1 第 6 步已预装)
+- `playwright`（装在本技能 `node_modules/`）+ 无头 Chromium（`home\AppData\Local\ms-playwright`，随整包拷贝）
 
 ### System CLI tools (optional)
 - `poppler-utils` · `qpdf` · `pdftk`

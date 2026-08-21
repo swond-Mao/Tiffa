@@ -750,7 +750,8 @@ export default async function (pi: any) {
       // 写入工具：检查文件路径安全性
       if (tool === "edit" || tool === "write") {
         const fp = input.filePath || input.path || ""
-        if (fp) {
+        // xd:// 是设备 URI（recall/retain/computer-use MCP 等工具调用），不是文件写入，跳过文件路径检查
+        if (fp && !String(fp).startsWith("xd://")) {
           // 危险路径拦截
           if (isDangerousPath(fp)) {
             log("tool_call.blocked", `${tool} -> ${fp} (dangerous path)`)
