@@ -12,6 +12,7 @@ npm-global/
 node/
 python/
 home/
+skill-deps/node_modules/
 
 # Build artifacts & cache
 .temp/
