@@ -193,15 +193,15 @@ export default function InputBox() {
   };
 
   const handleSend = () => {
+    // 排队消息优先：输入框已清空时按 Enter 也要能触发发送
+    if (pendingQueueMessage && agentRunning) {
+      handleQueueSteer();
+      return;
+    }
     const t = text.trim();
     if (!t && images.length === 0) return;
     if (pendingActivation) return; // 引擎连接中，防重复触发
     if (agentRunning) {
-      // 已有排队消息 → 直接发送；无排队消息 → 入队
-      if (pendingQueueMessage) {
-        handleQueueSteer();
-        return;
-      }
       setPendingQueueMessage(t);
       setText('');
     } else {
