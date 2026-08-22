@@ -142,16 +142,21 @@ export async function archiveProject(project: TiffaProjectSummary): Promise<void
 
 export async function deleteProject(project: TiffaProjectSummary): Promise<void> {
   const ui = useUiStore.getState();
+  const projects = useProjectsStore.getState();
+  const isInsideWorkspace = !!projects.workspacePath &&
+    (project.cwd || '').toLowerCase().startsWith(projects.workspacePath.toLowerCase());
+  const insideText = isInsideWorkspace
+    ? `所有会话记录和项目文件夹将丢失，无法恢复！`
+    : `所有会话记录将丢失，无法恢复！（项目文件夹不受影响）`;
   const ok = await showModalConfirm(
     '删除项目',
-    `永久删除项目「${project.title || project.dirName}」？\n\n所有会话记录将丢失，无法恢复！`,
+    `永久删除项目「${project.title || project.dirName}」？\n\n${insideText}`,
   );
   if (!ok) return;
   const doubleCheck = await showModalConfirm(
     '再次确认',
     `删除「${project.title || project.dirName}」的全部数据？此操作不可撤销。`,
   );
-  if (!doubleCheck) return;
   try {
     const result = (await window.tiffaDesktop.deleteProject(project.dirName, project.cwd || '')) as { error?: string } | undefined;
     if (result && result.error) {
