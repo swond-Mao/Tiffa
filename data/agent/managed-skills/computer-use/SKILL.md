@@ -3,8 +3,6 @@ name: computer-use
 description: "AI 驱动的 Windows 桌面自动化（v4，探测优先）。仅『电脑控制』触发。"
 name_cn: "电脑控制"
 description_cn: "AI 驱动的 Windows 桌面自动化 v4（应用探测 + 策略选择 + 五级降级 + 弹窗检测 + Esc 制动），仅『电脑控制』触发。"
-must_ask:
-  - 确认操作意图与范围
 ---
 
 # 电脑控制 v4 — 探测优先的桌面自动化

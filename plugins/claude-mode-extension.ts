@@ -25,7 +25,6 @@
  * - error 续行（一次制 + 5 秒延迟）
  * - hub 工具移除
  * - PROJECT.md 生成 + 确定性注入（before_agent_start：项目根目录首次对话自动生成脚手架，每会话开头注入 system prompt）
- * - 技能目录确定性注入 + 技能会话必问重注入 + gates frontmatter 声明（扫描各技能 SKILL.md frontmatter，mtime 缓存）
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
@@ -197,13 +196,9 @@ export default async function (pi: any) {
   let skillLoadedMap = new Map<string, number>() // skill名 -> 加载时间戳
   let askTimestamp = 0                          // 最近一次 ask 的时间戳
   let lastSkillRead = ""                        // 跟踪最近读取的 skill 名，tool_result 时追加路径提示
-  let askKeywordMap: Record<string, number> = {} // ask 关键词组检测（原 styleAskedAt 泛化）：组名 -> 最近命中时间戳
+  let styleAskedAt = 0                          // 最近一次 ask 且包含"风格/模板"问题的时间戳
   let craftmanRanTimestamp = 0                  // craftman.py 最近一次经合法路径被派发的时间戳
-  // 门禁规则 requireAskKeywords 声明需要的关键词组名，每组要求一次新鲜的 ask
-  const ASK_KEYWORD_GROUPS: Record<string, RegExp> = {
-    style: /风格|模板|style|样式/i,
-    theme: /主题|风格|模板|配色|theme|style/i,
-  }
+  const STYLE_ASK_KEYWORDS = /风格|模板|style|样式/i
 
   // ── WebP 处理：已下放给内核 ──
   // 本地推理引擎（llama.cpp / local-server 等）在 models.yml 用内核原生 provider 命名，
@@ -221,10 +216,9 @@ export default async function (pi: any) {
     return Date.now() - askTimestamp < SKILL_STATE_TTL_MS
   }
 
-  function isAskKeywordFresh(key: string): boolean {
-    const ts = askKeywordMap[key]
-    if (!ts) return false
-    return Date.now() - ts < SKILL_STATE_TTL_MS
+  function isStyleAskFresh(): boolean {
+    if (!styleAskedAt) return false
+    return Date.now() - styleAskedAt < SKILL_STATE_TTL_MS
   }
 
   function isCraftmanRanFresh(): boolean {
@@ -235,7 +229,7 @@ export default async function (pi: any) {
   function resetSkillState() {
     skillLoadedMap = new Map()
     askTimestamp = 0
-    askKeywordMap = {}
+    styleAskedAt = 0
     craftmanRanTimestamp = 0
     lastSkillRead = ""
   }
@@ -278,187 +272,13 @@ export default async function (pi: any) {
     ].join("\n")
   }
 
-  // ── 技能强制：技能脚本 -> 对应 skill 名 + 是否必须先问用户 ──
-  // 内置规则 = 硬编码白名单（特征文件名脚本，命令任意位置匹配）；
-  // 各技能 SKILL.md frontmatter `gates:` 由 getEffectiveSkillRules() 合并（新技能免改插件代码），
-  // 要求命令含 managed-skills/<技能名> 或该技能本会话已加载（isSkillFresh）。
-  // requireAskKeywords：ask 关键词组名（见 ASK_KEYWORD_GROUPS），每组要求一次新鲜 ask
-  type SkillScriptRule = {
-    match: (cmd: string) => boolean
-    skill: string
-    requireAsk?: boolean
-    requireAskKeywords?: string[]
-    askHint?: string // requireAsk block 文案的定制提示（缺省用通用文案）
-  }
-  const COMFY_SCRIPT_PAT = /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?comfy\.py/i
-  const CRAFTMAN_SCRIPT_PAT = /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?craftman\.py/i
-  const PPTGEN_SCRIPT_PAT = /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?pptgen\.py/i
-  const COMPUTER_USE_SCRIPT_PAT = /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?computer_use\.py/i
-  const SKILL_SCRIPT_RULES: SkillScriptRule[] = [
-    { match: (cmd) => COMFY_SCRIPT_PAT.test(cmd), skill: "comfyui-image-gen", requireAsk: true },
-    { match: (cmd) => CRAFTMAN_SCRIPT_PAT.test(cmd), skill: "craftman", requireAsk: true, requireAskKeywords: ["style"] },
-    { match: (cmd) => PPTGEN_SCRIPT_PAT.test(cmd), skill: "pptgen", requireAsk: true, requireAskKeywords: ["style"] },
-    { match: (cmd) => COMPUTER_USE_SCRIPT_PAT.test(cmd), skill: "computer-use", requireAsk: true },
+  // 技能脚本 -> 对应 skill 名 + 是否必须先问用户
+  const SKILL_SCRIPT_RULES: Array<{ pattern: RegExp; skill: string; requireAsk: boolean; requireStyleAsk?: boolean }> = [
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?comfy\.py/i, skill: "comfyui-image-gen", requireAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?craftman\.py/i, skill: "craftman", requireAsk: true, requireStyleAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?pptgen\.py/i, skill: "pptgen", requireAsk: true, requireStyleAsk: true },
+    { pattern: /(?:^|\s)(?:python|python3|py|pythonw)\s+(?:--[a-z-]+\s+)*["']?[^\s"']*?computer_use\.py/i, skill: "computer-use", requireAsk: true },
   ]
-
-  // ── 技能索引：扫描 managed-skills/*/SKILL.md frontmatter（技能目录注入 + must_ask 重注入 + gates 声明）──
-  // mtime 缓存：稳态零解析成本，任一 SKILL.md 变化即重扫
-  type SkillGate = { pattern: RegExp | null; requireAsk: boolean; requireAskKeywords: string[] }
-  type SkillEntry = { name: string; purpose: string; triggers: string[]; mustAsk: string[]; gates: SkillGate[] }
-  let skillIndexCache: { key: string; entries: SkillEntry[] } | null = null
-  let effectiveRulesCache: { key: string; rules: SkillScriptRule[] } | null = null
-
-  // Mini YAML 解析器（子集）：key: value / key: + "- item" 列表 / "- k: v" 扁平 map 列表 / key: | > 块标量
-  // 容忍 frontmatter 缺失、字段缺失、深层嵌套；异常返回 {}（调用方兜底用目录名）
-  function parseSkillFrontmatter(md: string): Record<string, unknown> {
-    const lines = md.replace(/\r/g, "").split("\n")
-    const first = lines[0]
-    if (!first || first.trim() !== "---") return {}
-    let end = -1
-    for (let i = 1; i < lines.length; i++) {
-      const l = lines[i]
-      if (l && l.trim() === "---") { end = i; break }
-    }
-    if (end === -1) return {}
-    const result: Record<string, unknown> = {}
-    let currentKey: string | null = null
-    let currentItem: Record<string, string> | null = null
-    let blockLines: string[] | null = null
-    let blockFold = false
-    const strip = (s: string) => s.trim().replace(/^["']|["']$/g, "")
-    const flushBlock = () => {
-      if (blockLines && currentKey) {
-        result[currentKey] = (blockFold ? blockLines.filter((x) => x.trim()).join(" ") : blockLines.join("\n")).trim()
-      }
-      blockLines = null
-    }
-    for (const raw of lines.slice(1, end)) {
-      const trimmed = raw.trim()
-      if (!trimmed || trimmed.startsWith("#")) {
-        if (blockLines) blockLines.push("")
-        continue
-      }
-      const indent = raw.length - raw.trimStart().length
-      if (blockLines) {
-        if (indent > 0) { blockLines.push(trimmed); continue }
-        flushBlock()
-      }
-      if (indent === 0) {
-        currentItem = null
-        const m = trimmed.match(/^([A-Za-z_][\w-]*):\s*(.*)$/)
-        if (!m) { currentKey = null; continue }
-        currentKey = m[1]
-        const val = m[2].trim()
-        if (val === "") { result[currentKey] = []; continue }
-        if (/^[|>][+-]?$/.test(val)) { blockLines = []; blockFold = val.startsWith(">"); continue }
-        result[currentKey] = strip(val)
-        continue
-      }
-      if (currentKey && Array.isArray(result[currentKey])) {
-        if (trimmed.startsWith("- ")) {
-          const content = trimmed.slice(2).trim()
-          const kv = content.match(/^([\w-]+):\s*(.*)$/)
-          if (kv) {
-            currentItem = { [kv[1]]: strip(kv[2]) }
-            ;(result[currentKey] as unknown[]).push(currentItem)
-          } else {
-            currentItem = null
-            ;(result[currentKey] as unknown[]).push(strip(content))
-          }
-        } else if (currentItem) {
-          const kv = trimmed.match(/^([\w-]+):\s*(.*)$/)
-          if (kv) currentItem[kv[1]] = strip(kv[2])
-        }
-      }
-      // 其他缩进内容（深层嵌套 map 等）：忽略
-    }
-    flushBlock()
-    return result
-  }
-
-  function loadSkillIndex(): SkillEntry[] {
-    const root = join(PORTABLE_ROOT, "data", "agent", "managed-skills")
-    let dirNames: string[] = []
-    try {
-      dirNames = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
-    } catch {
-      return []
-    }
-    let mtimeKey = ""
-    const raws: Array<{ name: string; md: string }> = []
-    for (const name of dirNames) {
-      const mdPath = join(root, name, "SKILL.md")
-      let md = ""
-      try {
-        mtimeKey += name + ":" + Math.floor(statSync(mdPath).mtimeMs) + ";"
-        md = readFileSync(mdPath, "utf8")
-      } catch {
-        mtimeKey += name + ":0;"
-        continue
-      }
-      raws.push({ name, md })
-    }
-    if (skillIndexCache && skillIndexCache.key === mtimeKey) return skillIndexCache.entries
-    const entries: SkillEntry[] = raws.map(({ name, md }) => {
-      const fm = parseSkillFrontmatter(md)
-      const strVal = (k: string) => (typeof fm[k] === "string" ? (fm[k] as string) : "")
-      const strList = (k: string) => (Array.isArray(fm[k]) ? (fm[k] as unknown[]).filter((x) => typeof x === "string").map((x) => x as string) : [])
-      const descCn = strVal("description_cn")
-      const descEn = strVal("description")
-      const firstSentence = (descCn || (descEn.split(/。|；|;|\. /)[0] || "")).replace(/\\n/g, " ").replace(/\s+/g, " ").trim()
-      const gatesRaw: Array<Record<string, unknown>> = Array.isArray(fm["gates"])
-        ? (fm["gates"] as unknown[]).filter((g) => g && typeof g === "object" && !Array.isArray(g)).map((g) => g as Record<string, unknown>)
-        : []
-      const gates: SkillGate[] = gatesRaw
-        .filter((g) => typeof g.pattern === "string" && (g.pattern as string).length > 0)
-        .map((g) => {
-          const pat = g.pattern as string
-          let re: RegExp | null = null
-          try {
-            re = new RegExp(pat, "i")
-          } catch (e: any) {
-            log("skill_index.gates.bad_pattern", `${name}: ${pat} (${e && e.message ? e.message : String(e)})`)
-          }
-          const kwRaw = g.requireAskKeywords
-          const kws =
-            typeof kwRaw === "string" && kwRaw.length > 0
-              ? kwRaw.split(/[|,]/).map((s) => s.trim()).filter(Boolean)
-              : Array.isArray(kwRaw)
-                ? kwRaw.map((s) => String(s).trim()).filter(Boolean)
-                : []
-          return { pattern: re, requireAsk: g.requireAsk === true || g.requireAsk === "true", requireAskKeywords: kws }
-        })
-      return { name, purpose: firstSentence || name, triggers: strList("triggers"), mustAsk: strList("must_ask"), gates }
-    })
-    skillIndexCache = { key: mtimeKey, entries }
-    log("skill_index.loaded", `scanned ${entries.length} skills; gates: ${entries.filter((e) => e.gates.length > 0).map((e) => e.name + "x" + e.gates.length).join(", ") || "none"}`)
-    return entries
-  }
-
-  // 生效门禁规则 = 内置白名单 + 各技能 frontmatter gates（硬编码优先，按顺序首个命中即停）
-  function getEffectiveSkillRules(): SkillScriptRule[] {
-    const entries = loadSkillIndex()
-    const key = entries
-      .map((e) => e.gates.map((g) => `${g.pattern ? g.pattern.source : "-"}|${g.requireAsk ? 1 : 0}|${g.requireAskKeywords.join(",")}`).join(";"))
-      .join("|")
-    if (effectiveRulesCache && effectiveRulesCache.key === key) return effectiveRulesCache.rules
-    const extra: SkillScriptRule[] = []
-    for (const e of entries) {
-      for (const g of e.gates) {
-        if (!g.pattern) continue
-        const re = g.pattern
-        extra.push({
-          match: (cmd) => (cmd.includes("managed-skills/" + e.name) || isSkillFresh(e.name)) && re.test(cmd),
-          skill: e.name,
-          requireAsk: g.requireAsk,
-          requireAskKeywords: g.requireAskKeywords.length > 0 ? g.requireAskKeywords : undefined,
-          askHint: e.mustAsk.length > 0 ? `必问项：${e.mustAsk.join(" / ")}` : `参见 ${e.name} SKILL.md 必问项`,
-        })
-      }
-    }
-    effectiveRulesCache = { key, rules: [...SKILL_SCRIPT_RULES, ...extra] }
-    return effectiveRulesCache.rules
-  }
 
   log("init", [
     "=== claude-mode extension loaded (v6.2) ===",
@@ -694,9 +514,7 @@ export default async function (pi: any) {
         if (now - ts >= SKILL_STATE_TTL_MS) skillLoadedMap.delete(skill)
       }
       if (askTimestamp && now - askTimestamp >= SKILL_STATE_TTL_MS) askTimestamp = 0
-      for (const [k, ts] of Object.entries(askKeywordMap)) {
-        if (now - ts >= SKILL_STATE_TTL_MS) delete askKeywordMap[k]
-      }
+      if (styleAskedAt && now - styleAskedAt >= SKILL_STATE_TTL_MS) styleAskedAt = 0
       if (craftmanRanTimestamp && now - craftmanRanTimestamp >= SKILL_STATE_TTL_MS) craftmanRanTimestamp = 0
       await sanitizeTools("before_agent_start")
 
@@ -892,32 +710,6 @@ export default async function (pi: any) {
         log("before_agent_start.progress.error", e?.message || String(e))
       }
 
-      // (e) 技能目录（规划期确定性注入）+ 技能会话必问重注入（防压缩后 SKILL.md 纪律丢失）
-      try {
-        const entries = loadSkillIndex()
-        if (entries.length > 0) {
-          const rows = entries.map((e) => {
-            const purpose = e.purpose.replace(/\|/g, "/").slice(0, 45)
-            const trigs = e.triggers.slice(0, 5).join(", ")
-            return `| ${e.name} | ${purpose} | ${trigs || "-"} |`
-          })
-          injected.push(
-            ["## 技能目录（" + entries.length + " 个 · 规划按用途选技能，read skill://<名> 看完整步骤）", "| 技能 | 用途 | 触发词 |", "| --- | --- | --- |", ...rows].join("\n")
-          )
-        }
-        for (const [skill, ts] of skillLoadedMap) {
-          if (now - ts >= SKILL_STATE_TTL_MS) continue
-          const entry = entries.find((e) => e.name === skill)
-          const mustAskLine =
-            entry && entry.mustAsk.length > 0
-              ? "[技能会话中 · " + skill + "] 必问/确认：" + entry.mustAsk.slice(0, 8).map((m, i) => ("①②③④⑤⑥⑦⑧"[i] || "") + " " + m).join(" | ") + "——未完成先完成（用户明确说「直接做/你决定」除外）"
-              : "[技能会话中 · " + skill + "] 严格按 SKILL.md 步骤执行，不得跳步"
-          injected.push(mustAskLine)
-        }
-      } catch (err: any) {
-        log("before_agent_start.skill_catalog.error", err?.message || String(err))
-      }
-
       if (injected.length > 0) {
         const lineCount = injected.reduce((n, s) => n + s.split("\n").length, 0)
         log("before_agent_start.inject", `injecting ${lineCount} lines (constraints + project.md)`)
@@ -1078,50 +870,48 @@ export default async function (pi: any) {
       if (tool === "ask") {
         askTimestamp = Date.now()
         const qsText = JSON.stringify(input.questions || [])
-        const hitKeys = Object.entries(ASK_KEYWORD_GROUPS).filter(([, re]) => re.test(qsText)).map(([k]) => k)
-        for (const k of hitKeys) askKeywordMap[k] = Date.now()
-        log("tool_call.ask", hitKeys.length > 0 ? `ask recorded (keyword groups: ${hitKeys.join(",")})` : `ask recorded at ${askTimestamp}`)
+        if (STYLE_ASK_KEYWORDS.test(qsText)) {
+          styleAskedAt = Date.now()
+          log("tool_call.ask", `style ask recorded at ${styleAskedAt}`)
+        } else {
+          log("tool_call.ask", `ask recorded at ${askTimestamp}`)
+        }
       }
 
       // ── 技能强制：调技能脚本前必须先 read skill:// 和 ask 用户 ──
       if (tool === "bash" || tool === "shell") {
         const cmd = String(input.command || input.content || "")
 
-        for (const rule of getEffectiveSkillRules()) {
-          if (!rule.match(cmd)) continue
-          if (!isSkillFresh(rule.skill)) {
-            log("tool_call.blocked", `${rule.skill} script called without fresh SKILL.md read`)
-            return {
-              block: true,
-              reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未加载技能步骤（或已过期）。必须先执行 \`read skill://${rule.skill}\` 读取完整步骤规则，再按规则执行。不读就做 = 跳步骤。`,
+        for (const rule of SKILL_SCRIPT_RULES) {
+          if (rule.pattern.test(cmd)) {
+            if (!isSkillFresh(rule.skill)) {
+              log("tool_call.blocked", `${rule.skill} script called without fresh SKILL.md read`)
+              return {
+                block: true,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未加载技能步骤（或已过期）。必须先执行 \`read skill://${rule.skill}\` 读取完整步骤规则，再按规则执行。不读就做 = 跳步骤。`,
+              }
             }
-          }
-          if (rule.requireAsk && !isAskFresh()) {
-            log("tool_call.blocked", `${rule.skill} script called without fresh ask`)
-            const hint = rule.askHint
-              ? `SKILL.md 要求：${rule.askHint}`
-              : "SKILL.md 要求：执行前必须先用 ask 工具询问用户（如“要不要生图”“选哪种管线”等）。"
-            return {
-              block: true,
-              reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未询问用户（或询问已过期）。${hint} 请先问用户，再执行。`,
+            if (rule.requireAsk && !isAskFresh()) {
+              log("tool_call.blocked", `${rule.skill} script called without fresh ask`)
+              return {
+                block: true,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未询问用户（或询问已过期）。SKILL.md 要求：执行前必须先用 ask 工具询问用户（如"要不要生图""选哪种管线"等）。请先问用户，再执行。`,
+              }
             }
-          }
-          const missingKw = (rule.requireAskKeywords || []).filter((k) => !isAskKeywordFresh(k))
-          if (missingKw.length > 0) {
-            log("tool_call.blocked", `${rule.skill} script called without fresh keyword ask: ${missingKw.join(",")}`)
-            const kwNames: Record<string, string> = { style: "HTML 模板风格", theme: "主题/风格选择" }
-            const desc = missingKw.map((k) => kwNames[k] || k).join("，")
-            return {
-              block: true,
-              reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未 ask 用户选择${desc}（或询问已过期）。不要替用户默认——请先用 ask 工具让用户选择，再执行。`,
+            if (rule.requireStyleAsk && !isStyleAskFresh()) {
+              log("tool_call.blocked", `${rule.skill} script called without style ask`)
+              return {
+                block: true,
+                reason: `[claude-mode] 检测到调用 ${rule.skill} 脚本，但尚未 ask 用户选择 HTML 模板风格。SKILL.md 要求：执行前必须先 ask 用户选风格（pptgen 16 种风格之一，见 pptgen SKILL.md 风格列表）。不要替用户默认风格。`,
+              }
             }
+            // ask >= 1 且风格已确认，现在尝试执行——放行
+            if (rule.skill === "craftman") {
+              craftmanRanTimestamp = Date.now()
+              log("tool_call.craftman_dispatched", `craftman.py invoked at ${craftmanRanTimestamp}`)
+            }
+            break
           }
-          // ask 达标且关键词组已确认，现在尝试执行——放行
-          if (rule.skill === "craftman") {
-            craftmanRanTimestamp = Date.now()
-            log("tool_call.craftman_dispatched", `craftman.py invoked at ${craftmanRanTimestamp}`)
-          }
-          break
         }
 
         // ── 技能强制：禁止内联 pyautogui/mss/PIL 操控桌面 ──

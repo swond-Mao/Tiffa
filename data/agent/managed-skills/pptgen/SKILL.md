@@ -9,9 +9,6 @@ triggers:
   - 网页演示
   - interactive html
   - 网页展示
-must_ask:
-  - 要不要生图
-  - 风格选择（内置 16 种之一）
 ---
 
 # pptgen — 交互式 HTML 网页生成器
