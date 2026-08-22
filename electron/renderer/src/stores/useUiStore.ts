@@ -44,6 +44,8 @@ export interface UiState {
   currentProvider: string;
   /** 生成中排队消息：agent 结束后自动发送 */
   pendingQueueMessage: string | null;
+  /** 排队消息编辑中（textarea 可编辑待发送文本） */
+  isEditingQueue: boolean;
   pendingSteerMarker: boolean;
   pendingFollowUpMarker: boolean;
   /** Per-workspace approval mode */
@@ -82,6 +84,7 @@ export interface UiState {
   dequeueAsk: (id: string) => void;
   setCurrentModel: (model: string, provider?: string) => void;
   setPendingQueueMessage: (v: string | null) => void;
+  setIsEditingQueue: (v: boolean) => void;
   setPendingSteerMarker: (v: boolean) => void;
   setPendingFollowUpMarker: (v: boolean) => void;
   setApprovalMode: (v: ApprovalMode) => void;
@@ -116,6 +119,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   currentModel: '',
   currentProvider: '',
   pendingQueueMessage: null,
+  isEditingQueue: false,
   pendingSteerMarker: false,
   pendingFollowUpMarker: false,
   approvalMode: 'yolo',
@@ -161,6 +165,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     })),
 
   setPendingQueueMessage: (v) => set({ pendingQueueMessage: v }),
+  setIsEditingQueue: (v) => set({ isEditingQueue: v }),
   setPendingSteerMarker: (v) => set({ pendingSteerMarker: v }),
   setPendingFollowUpMarker: (v) => set({ pendingFollowUpMarker: v }),
   setApprovalMode: (v) => set({ approvalMode: v }),

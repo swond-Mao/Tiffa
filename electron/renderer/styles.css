@@ -1960,6 +1960,79 @@ body {
   background: hsl(var(--bg-300));
 }
 
+/* ── 排队栏编辑模式 ── */
+.pending-queue-edit {
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  color: hsl(210 80% 55%);
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.pending-queue-edit:hover {
+  color: hsl(210 90% 45%);
+  background: hsl(210 80% 55% / 0.12);
+}
+.pending-queue-bar-editing {
+  flex-direction: column;
+  align-items: stretch;
+}
+.pending-queue-edit-area {
+  width: 100%;
+}
+.pending-queue-edit-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid hsl(210 80% 55% / 0.4);
+  background: hsl(var(--bg-100));
+  color: hsl(var(--text-200));
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+  margin-bottom: 8px;
+}
+.pending-queue-edit-input:focus {
+  border-color: hsl(210 80% 55% / 0.7);
+  box-shadow: 0 0 0 2px hsl(210 80% 55% / 0.12);
+}
+.pending-queue-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.pending-queue-edit-confirm {
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: 1px solid hsl(35 90% 55% / 0.5);
+  background: hsl(35 90% 55% / 0.12);
+  color: hsl(35 80% 50%);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pending-queue-edit-confirm:hover {
+  background: hsl(35 90% 55% / 0.25);
+}
+.pending-queue-edit-cancel {
+  padding: 4px 12px;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border-200));
+  background: none;
+  color: hsl(var(--text-400));
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pending-queue-edit-cancel:hover {
+  color: hsl(var(--text-200));
+  background: hsl(var(--bg-300));
+}
+
 .hidden { display: none !important; }
 
 /* ── 输入区图片预览（缩略图） ── */

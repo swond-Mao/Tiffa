@@ -45,7 +45,9 @@ export default function InputBox() {
   // 连接期间由 pendingActivation 锁住发送按钮防止重复触发。
   const pendingActivation = useUiStore((s) => s.pendingActivation);
   const draftInput = useChatStore((s) => s.draftInput);
-
+  const isEditingQueue = useUiStore((s) => s.isEditingQueue);
+  const setIsEditingQueue = useUiStore((s) => s.setIsEditingQueue);
+  const [editText, setEditText] = useState('');
   const [text, setText] = useState('');
   const [images, setImages] = useState<MessageImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -67,7 +69,7 @@ export default function InputBox() {
       : !tiffaReady
         ? '输入消息，发送后自动连接引擎…'
         : agentRunning
-          ? 'Enter 排队 | 点击引导按钮立即干预'
+          ? 'Enter 排队 / 再次 Enter 发送 | 点击引导按钮立即干预'
           : '输入消息，Enter 发送，Shift+Enter 换行...';
 
   // ── textarea 高度自适应 ──
@@ -78,6 +80,11 @@ export default function InputBox() {
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
   }, [text]);
+
+  // ── 队列清空时退出编辑模式 ──
+  useEffect(() => {
+    if (!pendingQueueMessage) setIsEditingQueue(false);
+  }, [pendingQueueMessage, setIsEditingQueue]);
 
   // ── 一次性输入预填（分支等场景）──
 
@@ -190,8 +197,11 @@ export default function InputBox() {
     if (!t && images.length === 0) return;
     if (pendingActivation) return; // 引擎连接中，防重复触发
     if (agentRunning) {
-      // 生成中 Enter → 排队（等价 submitMidRun）
-      if (pendingQueueMessage) useUiStore.getState().addToast('info', '排队消息已替换');
+      // 已有排队消息 → 直接发送；无排队消息 → 入队
+      if (pendingQueueMessage) {
+        handleQueueSteer();
+        return;
+      }
       setPendingQueueMessage(t);
       setText('');
     } else {
@@ -212,8 +222,32 @@ export default function InputBox() {
     void sendSteer(msg);
   };
 
+
   const handleQueueCancel = () => {
     setPendingQueueMessage(null);
+    setIsEditingQueue(false);
+    setEditText('');
+  };
+  const handleEditQueue = () => {
+    if (!pendingQueueMessage) return;
+    setEditText(pendingQueueMessage);
+    setIsEditingQueue(true);
+    // 编辑模式下清空主 textarea 的焦点到编辑框
+  };
+
+  const handleConfirmEdit = () => {
+    const msg = editText.trim();
+    if (!msg) {
+      setIsEditingQueue(false);
+      return;
+    }
+    setPendingQueueMessage(null);
+    setIsEditingQueue(false);
+    void sendSteer(msg);
+  };
+  const handleCancelEdit = () => {
+    setIsEditingQueue(false);
+    setEditText('');
   };
 
   // ── 键盘 ──
@@ -296,14 +330,49 @@ export default function InputBox() {
       onDrop={onDrop}
     >
       {pendingQueueMessage && (
-        <div id="pendingQueueBar" className="pending-queue-bar">
-          <span id="pendingQueueText" className="pending-queue-text">{pendingQueueMessage}</span>
-          <button type="button" id="pendingQueueSteerBtn" className="pending-queue-steer" onClick={handleQueueSteer}>
-            引导
-          </button>
-          <button type="button" id="pendingQueueCancelBtn" className="pending-queue-cancel" title="取消排队" onClick={handleQueueCancel}>
-            ✕
-          </button>
+        <div id="pendingQueueBar" className={`pending-queue-bar${isEditingQueue ? ' pending-queue-bar-editing' : ''}`}>
+          {isEditingQueue ? (
+            <div className="pending-queue-edit-area">
+              <textarea
+                id="pendingQueueEditInput"
+                className="pending-queue-edit-input"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleConfirmEdit();
+                  }
+                  if (e.key === 'Escape') {
+                    handleCancelEdit();
+                  }
+                }}
+                rows={2}
+                autoFocus
+              />
+              <div className="pending-queue-edit-actions">
+                <button type="button" id="pendingQueueConfirmEditBtn" className="pending-queue-edit-confirm" onClick={handleConfirmEdit}>
+                  发送
+                </button>
+                <button type="button" id="pendingQueueCancelEditBtn" className="pending-queue-edit-cancel" onClick={handleCancelEdit}>
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <span id="pendingQueueText" className="pending-queue-text">{pendingQueueMessage}</span>
+              <button type="button" id="pendingQueueEditBtn" className="pending-queue-edit" onClick={handleEditQueue} title="编辑排队消息">
+                ✎
+              </button>
+              <button type="button" id="pendingQueueSteerBtn" className="pending-queue-steer" onClick={handleQueueSteer}>
+                引导
+              </button>
+              <button type="button" id="pendingQueueCancelBtn" className="pending-queue-cancel" title="取消排队" onClick={handleQueueCancel}>
+                ✕
+              </button>
+            </>
+          )}
         </div>
       )}
       {images.length > 0 && (
