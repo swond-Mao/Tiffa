@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "computer-use": {
+      "type": "stdio",
+      "command": "{{PORTABLE_ROOT}}/python/python.exe",
+      "args": [
+        "-u",
+        "{{PORTABLE_ROOT}}/data/agent/managed-skills/computer-use/computer_use_mcp.py"
+      ],
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "enabled": false,
+      "timeout": 300000
+    }
+  }
+}

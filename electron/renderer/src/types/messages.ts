@@ -39,9 +39,14 @@ export interface ToolPart {
 export type MessagePart = TextPart | ThinkingPart | ToolPart;
 
 export interface MessageImage {
-  data: string; // base64
+  /** base64（发送版，自动压缩 ≤1568px/≤2MB；小图直通） */
+  data: string;
   mimeType: string;
   name?: string;
+  /** 原图磁盘路径（仅拖入/附件有；消息文本带路径引用，agent 可 read 原图取像素级细节） */
+  path?: string;
+  /** 输入框 chip 预览用完整 data URL（JPEG，最长边 480px） */
+  thumbnail?: string;
 }
 
 export interface ChatMessage {

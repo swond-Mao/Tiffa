@@ -4,7 +4,7 @@
  * - 多行自适应 textarea（max 160px）、Enter 发送 / Shift+Enter 换行
  * - 生成中：Enter 排队（pendingQueueMessage）+ 排队栏（引导发送 / 取消）
  * - 发送/中止按钮按 agentRunning 切换；未就绪/切换中禁用输入
- * - 图片：附件按钮 / 粘贴 / 拖放（图片 → base64 预览 chips；非图片 → 路径文本插入）
+ * - 图片：附件按钮 / 粘贴 / 拖放（图片 → 压缩管线（发送版 ≤1568px + 缩略图，拖入/附件带原图路径）预览 chips；非图片 → 路径文本插入）
  * - slash 命令自动补全（键盘导航 ArrowDown/Up、Tab/Enter 选中、Esc 关闭）
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,6 +17,7 @@ import ModelPicker from './ModelPicker';
 import ThinkingPicker from './ThinkingPicker';
 import type { MessageImage } from '../types/messages';
 import { dbgLog } from '../services/utils';
+import { compressImageBase64, compressImageFile } from '../services/imageUtils';
 
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -92,9 +93,14 @@ export default function InputBox() {
     dbgLog('snapshot', '快照监听已挂载');
     const off = window.tiffaDesktop.onWindowSnapshot((p) => {
       dbgLog('snapshot', `收到快照事件: ${p.title} dataLen=${p.data.length}`);
-      const img: MessageImage = { data: p.data, mimeType: p.mimeType || 'image/png', name: p.title };
-      setImages((prev) => [...prev, img]);
-      useUiStore.getState().addToast('info', `已捕获窗口快照：${p.title}`);
+      void compressImageBase64(p.data, p.mimeType || 'image/png', p.title).then((img) => {
+        if (!img) {
+          useUiStore.getState().addToast('error', '窗口快照处理失败');
+          return;
+        }
+        setImages((prev) => [...prev, img]);
+        useUiStore.getState().addToast('info', `已捕获窗口快照：${p.title}`);
+      });
     });
     const offErr = window.tiffaDesktop.onWindowSnapshotError((p) => {
       dbgLog('snapshot', `快照错误事件: ${p.error}`);
@@ -129,7 +135,7 @@ export default function InputBox() {
     taRef.current?.focus();
   };
 
-  // ── 图片处理 ──
+  // ── 图片处理（统一走压缩管线：发送版 ≤1568px + 缩略图；拖入/附件附带原图路径）──
 
   const readImageFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -140,14 +146,15 @@ export default function InputBox() {
       useUiStore.getState().addToast('warning', `图片过大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大支持 20MB`);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = String(e.target?.result || '');
-      const base64 = dataUrl.split(',')[1];
-      if (!base64) return;
-      setImages((prev) => [...prev, { data: base64, mimeType: file.type, name: file.name || 'clipboard.png' }]);
-    };
-    reader.readAsDataURL(file);
+    void compressImageFile(file).then((img) => {
+      if (!img) {
+        useUiStore.getState().addToast('error', `无法识别的图片格式，无法处理${file.name ? `：${file.name}` : ''}`);
+        return;
+      }
+      setImages((prev) => [...prev, img]);
+    }).catch((err) => {
+      useUiStore.getState().addToast('error', `图片处理失败: ${(err as Error).message}`);
+    });
   };
 
   const insertFilePaths = (files: File[]) => {
@@ -170,6 +177,14 @@ export default function InputBox() {
 
   // ── 发送 / 排队 / 中止 ──
 
+  // 拖入/附件图片追加原图路径引用（附件为压缩版，agent 需要像素级细节时 read 原图）
+  const messageWithImageRefs = (t: string): string => {
+    const paths = images.map((img) => img.path).filter((p): p is string => !!p);
+    if (paths.length === 0) return t;
+    const note = `[图片原图路径（附件为压缩版，需要像素级细节时请 read 原图）\n${paths.join('\n')}]`;
+    return t ? `${t}\n\n${note}` : note;
+  };
+
   const handleSend = () => {
     const t = text.trim();
     if (!t && images.length === 0) return;
@@ -180,7 +195,7 @@ export default function InputBox() {
       setPendingQueueMessage(t);
       setText('');
     } else {
-      void sendMessage(t, images);
+      void sendMessage(messageWithImageRefs(t), images);
       setText('');
       setImages([]);
     }
@@ -295,7 +310,7 @@ export default function InputBox() {
         <div id="imagePreview" className="image-preview">
           {images.map((img, i) => (
             <div key={i} className="image-preview-item">
-              <img src={`data:${img.mimeType};base64,${img.data}`} alt={img.name || 'image'} title={img.name} />
+              <img src={img.thumbnail || `data:${img.mimeType};base64,${img.data}`} alt={img.name || 'image'} title={img.name} />
               <button
                 type="button"
                 className="image-preview-remove"

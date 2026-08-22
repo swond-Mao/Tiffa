@@ -19,6 +19,7 @@ import {
 import { loadAndRenderHistory, autoRenameWithLightModel, setHistoryPreload } from './historyService';
 import { dirNameFromSessionPath, extractSessionId, dbgLog, localizeKernelMessage, msgFingerprint } from './utils';
 import { normalizeUserContent } from './messageBuilders';
+import type { MessageImage } from '../types/messages';
 
 // ── 模块级状态 ──
 
@@ -323,7 +324,7 @@ async function resolveClosestModel(
     const sameProvider = list.find((m) => m.provider === provider && m.id && norm(m.id) === target);
     if (sameProvider) return { provider, modelId: sameProvider.id };
     const anyProvider = list.find((m) => m.id && norm(m.id) === target);
-    if (anyProvider) return { provider: anyProvider.provider, modelId: anyProvider.id };
+    if (anyProvider?.provider) return { provider: anyProvider.provider, modelId: anyProvider.id };
     return null;
   } catch {
     return null;
@@ -1004,7 +1005,7 @@ export async function switchToSession(sessionPath: string): Promise<void> {
 // ── 发送 ──
 
 /** 发送消息（/ask 拦截 / 等待就绪 / __new__ 创建 / firstMessage / 立即渲染 / 失败复位） */
-export async function sendMessage(text: string, images?: Array<{ data: string; mimeType: string; name?: string }>): Promise<void> {
+export async function sendMessage(text: string, images?: MessageImage[]): Promise<void> {
   const message = text.trim();
   if (!message && (!images || images.length === 0)) return;
   const sessions = useSessionsStore.getState();
