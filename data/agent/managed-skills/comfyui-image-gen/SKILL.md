@@ -3,6 +3,8 @@ name: comfyui-image-gen
 description: Generate or edit images via a remote ComfyUI instance (RTX 5090). Five pipelines: Krea2 (best artistic/anime), Ernie-Image-Turbo (best text), Z-image (best portrait), Klein (fast realistic), and instruction-based image editing. Routes by user intent. Use for 生图/画图/出图/海报/带文字/编辑图片/P图/改图.
 name_cn: "ComfyUI 文生图与图编辑"
 description_cn: "调用远程 ComfyUI（RTX5090）文生图与图编辑，免费本地算力，按意图路由到五套流程。"
+must_ask:
+  - 管线选择（krea2/ernie/zimage/klein/edit）与画幅
 ---
 
 # ComfyUI Image Generation & Editing

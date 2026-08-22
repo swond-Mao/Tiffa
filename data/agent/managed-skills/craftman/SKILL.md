@@ -3,6 +3,9 @@ name: craftman
 description: "多 skill 工作流编排：评估需求→设计方案→确认→按方案调用 skill→合并成品。当用户需要组合多个能力（如做交互式网页+生图+视觉设计）时使用。"
 name_cn: "工匠模式 — 多 skill 工作流编排"
 description_cn: "评估用户需求，设计多 skill 协作方案，询问用户确认后依次调用技能，最后合并输出。典型场景：\n- '帮我做一份民航史的交互式网页演示，封面用canvas设计'\n- '做一个产品发布会海报+交互式网页'\n支持 pptgen（交互式 HTML 网页）、comfyui（AI生图）、canvas-design（视觉设计）三种技能。需要生成 PPT 文件请用 dashiai-ppt skill。"
+must_ask:
+  - 要不要生图
+  - 主题/风格选择
 ---
 
 # craftman — 多 skill 工作流编排

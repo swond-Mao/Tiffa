@@ -137,7 +137,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.2.2 的便携 AI 工作台，Elec
 
 路径：`data/memory/constraints-inject.md`，TTSR 覆盖不了的语义/行为约束，通过扩展 `before_agent_start` hook 注入 systemPrompt 前缀。
 
-涵盖：读文件规范、3 次失败换方法、先计划再执行、skill 工具铁律、沟通风格、安全铁律。
+涵盖：读文件规范、3 次失败换方法、先计划再执行、skill 铁律（技能目录感知 + 先读再规划）、沟通风格、安全铁律。
 
 ### 第 3 层：tool_call 运行时拦截 + 熔断
 
@@ -145,7 +145,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.2.2 的便携 AI 工作台，Elec
 - 配置文件自改拦截（config.yml、models.yml、claude-mode-extension.ts）
 - 密钥文件读取拦截、反斜杠路径纠正
 - workspace 根目录新建一级子目录拦截
-- 技能强制：调 `comfy.py` / `craftman.py` 前必须先 `read skill://` 加载步骤 + 先 `ask` 询问用户，否则 block
+- 技能强制：调技能脚本前必须先 `read skill://` 加载步骤 + `ask` 询问用户，否则 block；pptx-designer 的 build.js 额外要求「主题」关键词的新鲜 ask；支持 SKILL.md frontmatter `gates:` 声明（新技能免改插件代码，见「技能感知与门禁」节）
 - 内联 pyautogui 拦截
 - 静默工具调用检测（连续 3 次无文字说明 → steer 提醒）
 - **熔断**：同一轮内被 block 累计 3 次 → 强制终止并要求换方法，防止弱模型反复重试撑爆 context
@@ -154,14 +154,14 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.2.2 的便携 AI 工作台，Elec
 
 ## Claude 化扩展 (v6.2)
 
-扩展文件：`plugins/claude-mode-extension.ts`（1477 行），通过 `-e` 参数加载。
+扩展文件：`plugins/claude-mode-extension.ts`（2071 行），通过 `-e` 参数加载。
 
 ### 6 个 Hooks
 
 | # | 事件 | 功能 |
 |---|------|------|
 | 0 | `session_start` | 移除 eval/hub 工具 |
-| 1 | `before_agent_start` | 注入 USER.md + PROJECT.md（含脚手架自动生成）+ 进度聚合（跨天/周/月 → 日报/周报/月报）+ 项目目标推演提示 + 静默工具调用计数重置 |
+| 1 | `before_agent_start` | 注入 USER.md + PROJECT.md（含脚手架自动生成）+ 进度聚合（跨天/周/月 → 日报/周报/月报）+ 项目目标推演提示 + 静默工具调用计数重置 + 技能目录注入 + 技能会话必问重注入 |
 | 2 | `tool_call` | 危险拦截 + 熔断 + 技能强制 + 静默检测 + git commit 检测（记录 pendingGitCommit）（见第 3 层约束） |
 | 3 | `session.compacting` | 压缩路由：① 本地视觉 snapcompact → ② 主模型视觉 snapcompact → ③ 旁路模型结构化总结（9 段）→ ④ 内核自压兜底（gap-fill 已废弃） |
 | 4 | `session_stop` | error 续行一次（最多一次，5 秒延迟），其他不干预 |
@@ -196,6 +196,17 @@ Tiffa 无自定义 `skill` 工具。技能通过内核原生 `read skill://<name
 - 模型用 `read` 工具读取 `skill://<技能名>` → 内核解析到 `data/agent/managed-skills/<技能名>/SKILL.md` → 返回完整内容
 - `skills.customDirectories` 设置（agent.db settings 表）指向 `$ROOT/skills`
 - `constraints-inject.md` 中列出触发词到 `read skill://` 路径的映射
+
+### 技能感知与门禁（2026-08-21）
+
+**问题**：非确定性管线技能（skill 内有主题/图片来源等用户选择点）曾出现：规划阶段不知道技能存在、不读 SKILL.md、跳必问确认。
+
+**三个机制**（均在 claude-mode-extension.ts）：
+1. **技能目录注入**（before_agent_start）：扫描各技能 SKILL.md frontmatter（name/description_cn/triggers/must_ask/gates，mtime 缓存），每轮注入「技能目录」表（技能｜用途｜触发词）——规划期按用途选技能（约束见 constraints-inject.md「先读再规划铁律」）
+2. **gates frontmatter 声明**：SKILL.md 的 `gates:`（pattern/requireAsk/requireAskKeywords）合并进 tool_call 门禁——新技能受保护免改插件代码；内置白名单（comfy.py/craftman.py/pptgen.py/computer_use.py）优先，首个命中即停
+3. **技能会话必问重注入**：SKILL.md 已加载（TTL 10 分钟）期间，每轮重注入该技能 must_ask 清单，防上下文压缩后纪律丢失
+
+ask 关键词组检测：`ASK_KEYWORD_GROUPS`（style/theme），门禁 `requireAskKeywords` 按组要求新鲜 ask。
 
 ### /omfg 命令
 

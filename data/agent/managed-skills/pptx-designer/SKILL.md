@@ -16,6 +16,18 @@ triggers:
   - 按模板做
   - 上传模板做PPT
   - 按这个模板的风格
+must_ask:
+  - 文字稿有没有
+  - 图片怎么来
+  - 大纲确认
+  - 主题选择
+  - 导出确认
+gates:
+  - pattern: "scripts/build\.js"
+    requireAsk: true
+    requireAskKeywords: "theme"
+  - pattern: "scripts/(preview|render-editor|profile_template|extract_assets)\.(?:js|cjs)"
+    requireAsk: true
 ---
 
 # pptx-designer

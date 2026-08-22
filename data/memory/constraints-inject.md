@@ -1,4 +1,4 @@
-# 行为约束（before_agent_start 注入，v6.1）
+# 行为约束（before_agent_start 注入，v6.2）
 
 > 本文件由扩展 `before_agent_start` hook 在每轮 agent 启动前注入。
 > TTSR 规则（data/agent/rules/）负责格式/语法类拦截，这里补充行为/语义类约束。
@@ -20,14 +20,18 @@
 
 ## 专业任务必须用 `read skill://<name>` 加载技能
 
-当用户要求加载技能/模式时，用 `read` 工具读取 `skill://<技能名>` 来加载 SKILL.md 完整内容。**读完后必须严格按 SKILL.md 的步骤执行，不得跳步骤。**
+**技能感知**：system prompt 每轮注入「技能目录」（技能名｜用途｜触发词）。规划时按目录**用途**判断技能归属，不依赖特定触发词措辞。
+
+**先读再规划铁律**：计划命中技能目录中任一技能（按用途/触发词判断）时，必须先 `read skill://<name>` 读完整步骤，再产出计划/todo；计划步骤必须是技能自身步骤，必问项与用户确认点（主题/图片/风格等）写成显式 todo 条目。**禁止未读技能就写通用计划。**
+
+**执行铁律**：先 `read skill://<name>` 加载技能，再按 SKILL.md 步骤执行，不得跳步骤。不读就做 = 跳步骤。
 
 **技能目录通用规则（禁止猜路径）：**
 - `skill://<名>` 解析到 `$ROOT/data/agent/managed-skills/<名>/`（$ROOT 为便携根目录），主文件是 `SKILL.md`
 - 技能内子文件一律用 `skill://<名>/<子路径>` 访问（正斜杠），如 `skill://pptx-designer/references/layout-library.md`；禁止用冒号选择器、禁止猜 `skills/`、`$ROOT/skills/`、盘符硬编码路径
-- 不确定有哪些技能时：`glob` 或 `read` 目录 `$ROOT/data/agent/managed-skills/*` 确认，不要猜
+- 技能目录未覆盖的能力，`glob` 目录 `$ROOT/data/agent/managed-skills/*` 确认，不要猜
 
-触发词 -> read 路径：
+触发词 -> read 路径（速查，全量以技能目录为准）：
 - 生图/图片生成 -> `read skill://comfyui-image-gen`
 - 视频生成/文生视频/图生视频/分镜/视频提示词 -> `read skill://video-prompt-gen`
 - 汇报/学术/答辩/述职/医院汇报 PPT -> `read skill://pptx-designer`
@@ -41,8 +45,6 @@
 - 深度调研 -> `read skill://deep-research`
 - 工匠模式 -> `read skill://craftman`
 - 电脑控制/控制电脑/操作电脑 -> `read skill://computer-use`（必须先 ask 确认意图，禁止执行破坏性操作）
-
-**铁律**：先 `read skill://<name>` 读到完整步骤规则，再按规则执行。不读就做 = 跳步骤。
 
 ## 沟通规范
 
