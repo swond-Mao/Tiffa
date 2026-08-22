@@ -63,6 +63,18 @@ try {
 catch (e) {
     console.warn('[config] 恢复 config.yml 失败:', e.message);
 }
+// ── 确保 mcp.json 存在（机器运行时状态不入库；syncComputerUseMcp 每次启动会把 {{PORTABLE_ROOT}} 写回为真实根目录，故仓库只保留 mcp.json.example 模板）──
+try {
+    const MCP_JSON = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'mcp.json');
+    const MCP_EXAMPLE = MCP_JSON + '.example';
+    if (!fs_1.default.existsSync(MCP_JSON) && fs_1.default.existsSync(MCP_EXAMPLE)) {
+        fs_1.default.copyFileSync(MCP_EXAMPLE, MCP_JSON);
+        console.log('[config] 已自动从 mcp.json.example 恢复 mcp.json');
+    }
+}
+catch (e) {
+    console.warn('[config] 恢复 mcp.json 失败:', e.message);
+}
 // ── 确保 models.yml 存在（git clone 后同样被 gitignore，需从 example 恢复） ──
 try {
     const MODELS_YML = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'models.yml');

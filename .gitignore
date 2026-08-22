@@ -135,6 +135,9 @@ data/agent/current-model.json
 data/agent/last-compact-route.json
 data/agent/last-compact-summary.md
 data/agent/computer-use-enabled
+# mcp.json：Computer Use MCP 运行时状态（syncComputerUseMcp 每次启动写回真实便携根目录，机器相关，不入库）
+# 仓库提供 data/agent/mcp.json.example 模板（{{PORTABLE_ROOT}} 占位符版）；main.ts 启动时缺失自动恢复
+data/agent/mcp.json
 
 # Skill 娓叉煋缂撳啿锛堜复鏃朵骇鐗╋級
 skills/*/project/*_buffer.png
