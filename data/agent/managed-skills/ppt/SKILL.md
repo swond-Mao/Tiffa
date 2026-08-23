@@ -35,6 +35,8 @@ triggers:
 | **B 模板驱动** | `skill://pptx-template-reverse` | 有模板：逆向→主题→按版式填 deck | python-pptx → 原生 .pptx |
 
 > 管线 B 轻量分支：模板版式已够用、只填内容 → `skill://pptx-from-layouts`（不新建版式）。
+> **内容风格改造**（区别于管线 B 母版设计）：用户已有**内容 deck**，要把某几页**视觉高级化**（保留原风格）→ 走 `skill://pptx-designer` 的 `references/deck-restyle.md`（提取原 deck 色板/字体/版式/图片 → build.js 重做内容页视觉）。
+> **关键区分**：管线 B = **基于母版设计**（逆向母版/版式结构做可复用主题）；deck-restyle = **利用现有内容做风格改造**（内容已有，只改内容页视觉）。
 > 快速 HTML 演示（非正式汇报）→ `skill://dashiai-ppt`（即将废弃，仅用户明确要求时）。
 
 ## 路由决策表（Step 0 意图澄清后判定）
@@ -46,6 +48,8 @@ triggers:
 | 只逆向 XX 模板 | **B（Step1-5）** | 纯主题构建，不做 deck |
 | 模仿 XX 模板风格 | **A** | profile_template 提色板/字体作基线，JS 设计 |
 | 模板版式已够，只填内容 | **B 轻量分支** | pptx-from-layouts 直接填充 |
+| 有内容 deck，某几页要高级化 | **A + deck-restyle** | 保留原风格，build.js 重做内容页视觉 |
+| 套原风格改造某页 | **A + deck-restyle** | 提取原色板/字体/版式/图片 → 高级版式 |
 
 ## 标准流程（三确认制：大纲→设计语言→导出）
 
