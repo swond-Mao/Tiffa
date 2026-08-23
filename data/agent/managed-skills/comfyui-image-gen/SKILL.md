@@ -23,6 +23,8 @@ Unified CLI `comfy.py` drives a remote ComfyUI server. Five subcommands, routed 
 | 人物肖像/人像 | `zimage` | Z-image turbo，蒸馏9步，人像最佳 |
 | 编辑已有图片/P图 | `edit` | 指令式编辑，需提供原图路径 |
 
+> **生图实战指南**：读 `image-gen-playbook.md`（管线选择决策/提示词写法/比例预处理[绝不拉伸]/水印处理/批量素材策略/常见踩坑）。商业 deck 批量生图前必读。
+
 ## CLI 用法
 
 所有命令都通过 Python 调用，脚本路径由 [系统注入] 块提供：
