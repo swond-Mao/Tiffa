@@ -18,6 +18,8 @@ triggers:
   - 按这个模板的风格
 ---
 
+> **管线声明**：本技能是大技能 `skill://ppt` 的「从零设计」管线。被大技能委托时跳过需求澄清（Step0-1 由大技能完成），直接进入主题确认与设计。
+
 # pptx-designer
 
 数据驱动页面定义 → `build.js` 编译原生 .pptx + lint 规则校验 → HTML 版式快照预览。
@@ -45,6 +47,7 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 | 从零创建 PPT（只有主题） | Step 0 文字稿 → 标准流程 |
 | 上传模板模仿风格 | Step 2 主题逆向 → 标准流程 |
 | 上传材料（docx/pdf/pptx）生成 | Step 0 材料提取 → 标准流程 |
+| 套原风格/改造某页高级化 | 读 `references/deck-restyle.md` → 提取原色板/字体/版式/图片 → 单页改造 |
 
 ## 需求澄清（钩子模式，必须执行）
 
@@ -128,6 +131,8 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 
 ### Step 3：细化设计稿（DESIGN.md）
 
+> **版式语言强制**：每页必须标注 `L-*`（读 `references/layout-styles.md`，相邻页不重复）。禁止默认回落"左大右小/并列等宽卡"——按内容选 Hero（斜切/全页图/圆形/巨字）或节奏版式（杂志错位/叠层/非对称/时间轴/图表主视觉/表格/金句）。每页 ≥1 视觉锚点。
+
 读 `references/methodology.md` §四 决策矩阵 + `references/design-principle.md`，每页声明：
 - **本页结论**（一句话，说不清这页不过）
 - **文字内容与分布**：标题/正文/数字，哪些字放哪块区域
@@ -139,13 +144,17 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 
 ### Step 4：页级模板匹配（目录查模板，无合适就手搓）
 
-按每页「内容类型 + 布局类型 + 文字量 + 图量」查 `references/layout-catalog.md`（1020 个页级模板，19 类）：
-- **命中合适模板** → 页面定义引用 `layout: 'themeXX_pageNNN'` + 填对应数据
-- **没有合适模板** → 手搓 DSL（正常路径）
-- **红线**：模板与内容冲突时，改模板或手搓，**绝不改内容**
-- 优先在所选主题内选；同 slot 多主题成套（theme01_page006 ↔ theme02_page006）
+按 `references/taxonomy.md` 检索（**先锁主题**→L1→L2→L3→L4，强制，每页候选 3-8 个；选前先查 `references/layout-descriptions.md` 了解模板排布（自然语言）→ `describeLayout` 查字段，按容量规划内容，禁止跨主题混搭/照着格子硬填）：
+1. **L1 定位**：封面/目录/章节/结束 → 直接查对应类
+2. **L2 内容类型**：正文页按内容定位到 19 类
+3. **L3 布局族**：按版式需求选族（纯文字/多卡片/并列/流程/总分/左图右文/图表/大数字/金句/时间轴/画廊/排行表格）——**相邻页防撞**：排除上一页已用 L3 族，全被排除才回退（须换 L4 模板）
+4. **L4 候选**：按卡数/图数/容量匹配，同类多选一（保证页标题等一致性）
+查不到合适 → 手搓 DSL（正常路径）。
+**红线**：模板与内容冲突时，改模板或手搓，**绝不改内容**；优先在所选主题内选；同 slot 多主题成套（theme01_page006 ↔ theme02_page006）
 
 ### Step 5：逐页生成页面定义
+
+> 严格按 DESIGN.md 的 `L-*` 实现（版式语言见 `references/layout-styles.md`）；生成时参考 layout-catalog 选中模板的布局意图，但元素全用 DSL 自控（位置/字号/字体），不填空。
 
 - 引用模板的页：`{ layout: 'themeXX_pageNNN', data: {...} }`，按模板字段要求填内容
 - 手搓页：对照 DESIGN.md 写 DSL（元素：text/rect/roundRect/ellipse/line/image/chart/table + 增强元素）
@@ -181,6 +190,18 @@ node scripts/build.js --project <项目目录> -o <项目目录>/output/最终.p
 > HTML 预览/编辑器用 CSS 完整呈现（渐变/光晕/网格纹理）；`build.js` 导出 .pptx 时降级映射
 > 为原生形状（渐变→双层矩形、光晕→多层半透明椭圆、装饰→透明圆角块）。
 > 主题由 `page.theme` 或 `design.json.theme` 引用，增强视觉语言来自 `scripts/visual/themes.js`。
+
+### Step 7.5：视觉自校验（能看图时必做）
+
+> **读 `references/visual-refinement.md`**。能看图（`inspect_image` 视觉模型可用）时，
+> 编译后**必须**走视觉闭环，别只看 lint 通过就交付：
+
+```bash
+python <pptx-template-reverse>/scripts/qa_render.py <deck.pptx> -o qa.png --cols 3
+```
+`read qa.png` 看图 → 对照"高级感自检清单"诊断（文字对比度/图片圆角渐变/光晕收边/层次）→ 修页面定义 → 重编译重验。
+> **注意**：qa_render 是 .pptx→PNG 简化形状，真实 .pptx 更细腻；看图判布局/可读性，不因渲染简化否定效果。
+> 能看图时这步**不可跳过**——这是"内容正确但视觉不够高级"的最后一环。
 
 ### Step 8：交付
 
@@ -275,3 +296,5 @@ node scripts/extract_assets.js <材料.docx> -o resources/images # 材料图片�
 - `references/layout-patterns.md` — 配图版式库（P1-P10）
 - `references/designs/academic.md` / `consulting.md` / `redgold.md` — 领域预设风格
 - `references/designs/dashiai-styles.md` — dashiai 12 套风格色板
+- `references/visual-refinement.md` — **视觉精修指南**
+- `references/deck-restyle.md` — **从原 deck 逆向风格改造指南**（提取色板/字体/版式/图片 + 单页高级改造 + AI 补图 + 保留原风格，用户要"套原风格/改造某页"时读）（视觉自校验闭环/文字压图底衬/图片处理/光晕收边/增强元素/高级感自检，Step 7.5 读）

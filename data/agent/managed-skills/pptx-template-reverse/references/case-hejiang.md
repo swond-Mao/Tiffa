@@ -1,5 +1,9 @@
 # 案例：合江县人民医院汇报主题（2026-08）
 
+> ⚠️ **路径自包含提示**：文中 `source`/`output` 路径（C:/Users/swond、G:/Tiffa）为案例当时环境，Tiffa 便携安装盘符不固定，实际使用请按当前 PORTABLE_ROOT 替换；`hejiang-config.json` 同理。
+
+
+
 > 完整跑通案例：WPS 导出"完整版式.pptx"（5 示例页 + 2 master）→ 7 版式主题模板 + 20 页 deck。
 > 产物：`合江县人民医院汇报主题.pptx`（7 版式）+ `健康体重管理中心建设项目汇报.pptx`（20 页），WPS 直接套用验证。
 

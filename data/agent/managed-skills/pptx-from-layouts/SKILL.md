@@ -1,3 +1,5 @@
+> **管线声明**：本技能是大技能 `skill://ppt` 的「模板驱动」管线轻量分支（模板版式已够用、只填内容时使用，不新建版式）。
+
 # PPTX from Layouts
 
 Generate consultant-quality PowerPoint presentations from markdown outlines using your template's actual slide master layouts.
