@@ -151,6 +151,7 @@ function renderElement(slide, pptx, el, page) {
         fit: el.fit === undefined ? 'shrink' : el.fit,
       };
       if (el.transparency !== undefined) opts.transparency = el.transparency;
+      if (el.rotate !== undefined) opts.rotate = el.rotate;
       const runs = (el.runs || []).map(r => ({
         text: r.text,
         options: {
@@ -172,15 +173,18 @@ function renderElement(slide, pptx, el, page) {
         line: el.lineColor ? { color: hex(el.lineColor), width: px(el.lineWidth || 1) } : { type: 'none' },
       };
       if (el.radius !== undefined) opts.rectRadius = px(el.radius);
+      if (el.rotate !== undefined) opts.rotate = el.rotate;
       slide.addShape(shape, opts);
       break;
     }
     case 'ellipse': {
-      slide.addShape(pptx.ShapeType.ellipse, {
+      const eopts = {
         x: o.x, y: o.y, w: o.w, h: o.h,
         fill: el.fill ? { color: hex(el.fill), transparency: el.opacity !== undefined ? 100 - el.opacity * 100 : undefined } : { color: 'FFFFFF', transparency: 100 },
         line: el.lineColor ? { color: hex(el.lineColor), width: px(el.lineWidth || 1) } : { type: 'none' },
-      });
+      };
+      if (el.rotate !== undefined) eopts.rotate = el.rotate;
+      slide.addShape(pptx.ShapeType.ellipse, eopts);
       break;
     }
     case 'line': {
@@ -212,11 +216,13 @@ function renderElement(slide, pptx, el, page) {
         });
         break;
       }
-      slide.addImage({
+      const imgOpts = {
         path: imgPath,
         x: o.x, y: o.y, w: o.w, h: o.h,
         sizing: { type: el.objectFit === 'contain' ? 'contain' : 'cover', w: o.w, h: o.h },
-      });
+      };
+      if (el.rotate !== undefined) imgOpts.rotate = el.rotate;
+      slide.addImage(imgOpts);
       break;
     }
     case 'chart': {
