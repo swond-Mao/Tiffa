@@ -130,6 +130,8 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 
 ### Step 3：细化设计稿（DESIGN.md）
 
+> **版式语言强制**：每页必须标注 `L-*`（读 `references/layout-styles.md`，相邻页不重复）。禁止默认回落"左大右小/并列等宽卡"——按内容选 Hero（斜切/全页图/圆形/巨字）或节奏版式（杂志错位/叠层/非对称/时间轴/图表主视觉/表格/金句）。每页 ≥1 视觉锚点。
+
 读 `references/methodology.md` §四 决策矩阵 + `references/design-principle.md`，每页声明：
 - **本页结论**（一句话，说不清这页不过）
 - **文字内容与分布**：标题/正文/数字，哪些字放哪块区域
@@ -150,6 +152,8 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 **红线**：模板与内容冲突时，改模板或手搓，**绝不改内容**；优先在所选主题内选；同 slot 多主题成套（theme01_page006 ↔ theme02_page006）
 
 ### Step 5：逐页生成页面定义
+
+> 严格按 DESIGN.md 的 `L-*` 实现（版式语言见 `references/layout-styles.md`）；生成时参考 layout-catalog 选中模板的布局意图，但元素全用 DSL 自控（位置/字号/字体），不填空。
 
 - 引用模板的页：`{ layout: 'themeXX_pageNNN', data: {...} }`，按模板字段要求填内容
 - 手搓页：对照 DESIGN.md 写 DSL（元素：text/rect/roundRect/ellipse/line/image/chart/table + 增强元素）
