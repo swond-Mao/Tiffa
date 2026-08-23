@@ -47,6 +47,7 @@ npm install    # 自动命中仓库根 .npmrc 国内镜像（npmmirror）
 | 从零创建 PPT（只有主题） | Step 0 文字稿 → 标准流程 |
 | 上传模板模仿风格 | Step 2 主题逆向 → 标准流程 |
 | 上传材料（docx/pdf/pptx）生成 | Step 0 材料提取 → 标准流程 |
+| 套原风格/改造某页高级化 | 读 `references/deck-restyle.md` → 提取原色板/字体/版式/图片 → 单页改造 |
 
 ## 需求澄清（钩子模式，必须执行）
 
@@ -295,4 +296,5 @@ node scripts/extract_assets.js <材料.docx> -o resources/images # 材料图片�
 - `references/layout-patterns.md` — 配图版式库（P1-P10）
 - `references/designs/academic.md` / `consulting.md` / `redgold.md` — 领域预设风格
 - `references/designs/dashiai-styles.md` — dashiai 12 套风格色板
-- `references/visual-refinement.md` — **视觉精修指南**（视觉自校验闭环/文字压图底衬/图片处理/光晕收边/增强元素/高级感自检，Step 7.5 读）
+- `references/visual-refinement.md` — **视觉精修指南**
+- `references/deck-restyle.md` — **从原 deck 逆向风格改造指南**（提取色板/字体/版式/图片 + 单页高级改造 + AI 补图 + 保留原风格，用户要"套原风格/改造某页"时读）（视觉自校验闭环/文字压图底衬/图片处理/光晕收边/增强元素/高级感自检，Step 7.5 读）
