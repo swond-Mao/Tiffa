@@ -13,6 +13,8 @@ triggers:
   - 把模板做成可套用的
 ---
 
+> **管线声明**：本技能是大技能 `skill://ppt` 的「模板驱动」管线。被大技能委托时跳过需求澄清（Step0-1 由大技能完成），直接进入设计系统提取。
+
 # pptx-template-reverse
 
 从用户上传的 .pptx 模板（通常是 WPS 导出的"完整版式"，含示例页）逆向出**完整可复用主题模板**，并基于它构建汇报 deck。python-pptx 原生路线，产物 WPS/Office 直接打开套用。
@@ -106,6 +108,8 @@ python scripts/check_parts.py <主题模板.pptx>
 验收三条：① `dups=无`；② 版式列表含全部新建版式且各归其位；③ 各版式 ph idx 与配置一致。任一条不过 → 读 `references/clone-recipe.md` 按疑点清单排查后重跑。
 
 ### Step 6（可选）：构建 deck + QA 渲染
+
+> **设计指导强约束**：构建 deck 前必须先按大技能 `skill://ppt` 方法论产出大纲（每页结论）与设计语言（色板/字号阶梯/横幅/目标带），只把本技能逆向出的主题模板当「主题容器」。禁止脱离设计指导直接手搓几何/配色；模板版式与内容冲突时改版式或拆页，绝不改内容。
 
 deck 构建：python-pptx 基于主题模板逐页填充占位符（helper 模式见 `references/ph-conventions.md` §deck 构建）。
 QA 目检：
