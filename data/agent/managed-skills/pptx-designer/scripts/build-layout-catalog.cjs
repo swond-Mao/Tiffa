@@ -135,15 +135,35 @@ function capOf(fam) {
   return CAP_BY_FAM[base] || '待评估';
 }
 
+/* ── 版式设计语言（L-*，用于吸收模板排布） ─────────── */
+function classifyStyle(l, cat) {
+  const slot = (l.slot || '').toLowerCase();
+  const label = l.label || '';
+  const ctx = slot + ' ' + label;
+  if (['封面', '目录/议程', '章节过渡', '附录/收尾'].includes(cat)) return 'L-定位';
+  if (/quote|statement|manifesto|conclusion|outlook|verdict|lede|金句|结论|观点|主张|展望|宣言|证言/i.test(ctx)) return 'L-quote';
+  if (/timeline|gantt|milestone|monthly|calendar|journey|era|排期|时间轴|里程碑|月历|旅程|路线图|roadmap/i.test(ctx)) return 'L-rail';
+  if (/donut|pie|waterfall|trend|bar|column|radar|heatmap|treemap|funnel|sankey|line|area|scatter|bubble|gauge|占比|趋势|柱状|雷达|热力|漏斗|桑基|气泡|仪表|象限|矩阵/i.test(ctx)) return 'L-chart';
+  if (/cover|masthead|poster|banner|hero|showcase|feature|plate|immersive|全景|海报|满版|影像|画廊|大图/i.test(ctx)) return 'L-fullbleed';
+  if (/split|diptych|triptych|versus|对比|对决|分屏|双联|三联|斜切|前后/i.test(ctx)) return 'L-asym';
+  if (/bento|grid|statgrid|cards|cardgrid|便当|网格|卡片|速览|bento/i.test(ctx)) return 'L-bento';
+  if (/bignum|big|monolith|megafigure|bigstat|大数字|量级|巨/i.test(ctx)) return 'L-ghost';
+  if (/table|ranking|ledger|register|表格|排行|榜单|台账|账本/i.test(ctx)) return 'L-table';
+  if (/process|flow|chain|method|steps|swimlane|cycle|route|流程|方法|闭环|路径|飞轮|链路/i.test(ctx)) return 'L-rail';
+  return 'L-asym';
+}
+
 /* ── 生成目录 ─────────────────────────────────────────── */
 const byCat = {};
 keys.forEach(k => {
   const l = layouts[k];
   const cat = categorize(l);
   const l3 = classifyL3(l, cat);
+  const st = classifyStyle(l, cat);
   (byCat[cat] = byCat[cat] || []).push({
     key: k, label: l.label || '', slot: l.slot || '', theme: l.themePack,
     fam: l3.fam, cards: l3.cards, imgs: l3.imgs, cap: l3.cap === '-' ? '-' : l3.cap,
+    style: st,
   });
 });
 
@@ -212,9 +232,9 @@ allCats.forEach(cat => {
   const items = byCat[cat].sort((a, b) => a.key.localeCompare(b.key));
   const themes = [...new Set(items.map(i => i.theme))];
   md += `## ${cat}（${items.length} 个 · ${themes.length} 套主题覆盖）\n\n`;
-  md += `| key | label | slot | L3族 | 卡数 | 图数 | 容量 |\n| --- | --- | --- | --- | --- | --- | --- |\n`;
+  md += `| key | label | slot | L3族 | 版式语言 | 卡数 | 图数 | 容量 |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n`;
   items.forEach(i => {
-    md += `| ${i.key} | ${i.label} | ${i.slot} | ${i.fam} | ${i.cards} | ${i.imgs} | ${i.cap} |\n`;
+    md += `| ${i.key} | ${i.label} | ${i.slot} | ${i.fam} | ${i.style} | ${i.cards} | ${i.imgs} | ${i.cap} |\n`;
   });
   md += '\n';
 });
