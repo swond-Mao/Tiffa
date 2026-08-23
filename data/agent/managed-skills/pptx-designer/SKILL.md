@@ -190,6 +190,18 @@ node scripts/build.js --project <项目目录> -o <项目目录>/output/最终.p
 > 为原生形状（渐变→双层矩形、光晕→多层半透明椭圆、装饰→透明圆角块）。
 > 主题由 `page.theme` 或 `design.json.theme` 引用，增强视觉语言来自 `scripts/visual/themes.js`。
 
+### Step 7.5：视觉自校验（能看图时必做）
+
+> **读 `references/visual-refinement.md`**。能看图（`inspect_image` 视觉模型可用）时，
+> 编译后**必须**走视觉闭环，别只看 lint 通过就交付：
+
+```bash
+python <pptx-template-reverse>/scripts/qa_render.py <deck.pptx> -o qa.png --cols 3
+```
+`read qa.png` 看图 → 对照"高级感自检清单"诊断（文字对比度/图片圆角渐变/光晕收边/层次）→ 修页面定义 → 重编译重验。
+> **注意**：qa_render 是 .pptx→PNG 简化形状，真实 .pptx 更细腻；看图判布局/可读性，不因渲染简化否定效果。
+> 能看图时这步**不可跳过**——这是"内容正确但视觉不够高级"的最后一环。
+
 ### Step 8：交付
 
 用面向用户语言说明主题、页数、风格要点，提示 .pptx 与 editor.html 路径。
@@ -283,3 +295,4 @@ node scripts/extract_assets.js <材料.docx> -o resources/images # 材料图片�
 - `references/layout-patterns.md` — 配图版式库（P1-P10）
 - `references/designs/academic.md` / `consulting.md` / `redgold.md` — 领域预设风格
 - `references/designs/dashiai-styles.md` — dashiai 12 套风格色板
+- `references/visual-refinement.md` — **视觉精修指南**（视觉自校验闭环/文字压图底衬/图片处理/光晕收边/增强元素/高级感自检，Step 7.5 读）
