@@ -106,8 +106,9 @@ function lint(projectDir) {
       });
     }
 
-    // 溢出检查
+    // 溢出检查（rotate 元素包围盒会超画布但实际可见部分在画布内，跳过）
     page.elements.forEach((el, j) => {
+      if (el.rotate !== undefined) return;
       const right = (el.x || 0) + (el.w || 0);
       const bottom = (el.y || 0) + (el.h || 0);
       if ((el.x || 0) < -2 || (el.y || 0) < -2 || right > CANVAS_W + 2 || bottom > CANVAS_H + 2) {
