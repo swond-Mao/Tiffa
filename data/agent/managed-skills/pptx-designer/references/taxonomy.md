@@ -12,6 +12,7 @@
 5. **容量**：卡数/图数/文本量
 
 > 版式语言定义见 `skill://pptx-designer/references/layout-styles.md`（Hero 6 种 + 内容 8 种 + 选择规则）
+> **模板排布描述**：`skill://pptx-designer/references/layout-descriptions.md`（1020 模板自然语言排布，选模板前先查排布，再 describeLayout 确认字段）
 
 ## 四层分类体系（旧，保留参照）
 
