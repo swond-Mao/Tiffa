@@ -6,7 +6,7 @@
  * 当前模型列表（筛选 + 隐藏）/ 主题风格（7 预设 + 日夜）/ Computer Use /
  * 约束规则 / AI 身份 / 关于
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useUiStore } from '../stores/useUiStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
@@ -16,6 +16,90 @@ import { showModalConfirm } from '../services/tabActions';
 import { escapeHtml } from '../services/utils';
 import { PERSONA_KEYWORDS, buildFallbackPersona, buildPersonaPrompt } from '../services/personaTemplate';
 import type { TiffaModelsConfig, TiffaProviderConfig } from '../types/tiffaDesktop';
+
+// ── 供应商预置（从 dim/oh-my-pi-UI 的 AddModelModal 抄回：已知提供商网格，自动带出 baseUrl/api）──
+interface ProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  api: string;
+  authUrl?: string;
+  hint: string;
+  cat: 'popular' | 'chinese' | 'local' | 'other';
+}
+
+const PRESET_GROUPS: { label: string; cat: ProviderPreset['cat']; items: ProviderPreset[] }[] = [
+  {
+    label: '热门',
+    cat: 'popular',
+    items: [
+      { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', api: 'openai-completions', authUrl: 'https://platform.deepseek.com/api_keys', hint: 'sk-...', cat: 'popular' },
+      { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-responses', authUrl: 'https://platform.openai.com/api-keys', hint: 'sk-...', cat: 'popular' },
+      { id: 'anthropic', name: 'Anthropic (Claude)', baseUrl: 'https://api.anthropic.com', api: 'anthropic-messages', authUrl: 'https://console.anthropic.com/settings/keys', hint: 'sk-ant-...', cat: 'popular' },
+      { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openrouter', authUrl: 'https://openrouter.ai/keys', hint: 'sk-or-...', cat: 'popular' },
+      { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', api: 'openai-completions', authUrl: 'https://console.groq.com/keys', hint: 'gsk_...', cat: 'popular' },
+      { id: 'xai', name: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', api: 'openai-completions', authUrl: 'https://console.x.ai/', hint: 'xai-...', cat: 'popular' },
+      { id: 'moonshot', name: 'Moonshot / Kimi', baseUrl: 'https://api.moonshot.ai/v1', api: 'openai-completions', authUrl: 'https://platform.moonshot.ai/console/api-keys', hint: 'sk-...', cat: 'popular' },
+      { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', api: 'openai-completions', authUrl: 'https://cloud.cerebras.ai/platform/', hint: 'csk-...', cat: 'popular' },
+      { id: 'fireworks', name: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', api: 'openai-completions', authUrl: 'https://fireworks.ai/account/api-keys', hint: 'fw_...', cat: 'popular' },
+      { id: 'mistral', name: 'Mistral AI', baseUrl: 'https://api.mistral.ai/v1', api: 'openai-completions', authUrl: 'https://console.mistral.ai/api-keys/', hint: '...', cat: 'popular' },
+      { id: 'together', name: 'Together AI', baseUrl: 'https://api.together.xyz/v1', api: 'openai-completions', authUrl: 'https://api.together.xyz/settings/api-keys', hint: '...', cat: 'popular' },
+      { id: 'nvidia', name: 'NVIDIA NIM', baseUrl: 'https://integrate.api.nvidia.com/v1', api: 'openai-completions', authUrl: 'https://build.nvidia.com/', hint: 'nvapi-...', cat: 'popular' },
+      { id: 'huggingface', name: 'Hugging Face', baseUrl: 'https://router.huggingface.co/v1', api: 'openai-completions', authUrl: 'https://huggingface.co/settings/tokens', hint: 'hf_...', cat: 'popular' },
+      { id: 'google', name: 'Google (Gemini)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', api: 'google-generative-ai', authUrl: 'https://aistudio.google.com/app/apikey', hint: 'AIza...', cat: 'popular' },
+    ],
+  },
+  {
+    label: '国内服务商',
+    cat: 'chinese',
+    items: [
+      { id: 'zhipu-coding-plan', name: '智谱 GLM (Coding Plan)', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', api: 'openai-completions', authUrl: 'https://open.bigmodel.cn/usercenter/apikeys', hint: '...', cat: 'chinese' },
+      { id: 'zai', name: '智谱 zAI (GLM)', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', api: 'openai-completions', authUrl: 'https://open.bigmodel.cn/usercenter/apikeys', hint: '...', cat: 'chinese' },
+      { id: 'qianfan', name: '百度千帆 (Qianfan)', baseUrl: 'https://qianfan.baidubce.com/v2', api: 'openai-completions', authUrl: 'https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application', hint: '...', cat: 'chinese' },
+      { id: 'firepass', name: 'Fire Pass (Kimi K2 Turbo)', baseUrl: 'https://api.fireworks.ai/inference/v1', api: 'openai-completions', authUrl: 'https://fireworks.ai/firepass', hint: 'fpk_...', cat: 'chinese' },
+      { id: 'xiaomi', name: '小米 (Xiaomi)', baseUrl: 'https://api.xiaomi.com/v1', api: 'openai-completions', authUrl: 'https://platform.mi.com/', hint: '...', cat: 'chinese' },
+      { id: 'minimax-code', name: 'MiniMax Code', baseUrl: 'https://api.minimax.chat/v1', api: 'openai-completions', authUrl: 'https://platform.minimaxi.com/document/Account%20&%20Keys', hint: '...', cat: 'chinese' },
+      { id: 'minimax-code-cn', name: 'MiniMax Code CN', baseUrl: 'https://api.minimaxi.chat/v1', api: 'openai-completions', authUrl: 'https://platform.minimaxi.com/document/Account%20&%20Keys', hint: '...', cat: 'chinese' },
+      { id: 'sakana', name: 'Sakana AI (Fugu/GLM)', baseUrl: 'https://api.sakana.ai/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'chinese' },
+      { id: 'siliconflow', name: 'SiliconFlow (硅基流动)', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', authUrl: 'https://cloud.siliconflow.cn/account/ak', hint: 'sk-...', cat: 'chinese' },
+      { id: 'dashscope', name: '阿里 DashScope (通义)', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', api: 'openai-completions', authUrl: 'https://dashscope.console.aliyun.com/apiKey', hint: 'sk-...', cat: 'chinese' },
+    ],
+  },
+  {
+    label: '本地 / 自托管',
+    cat: 'local',
+    items: [
+      { id: 'ollama', name: 'Ollama (本地)', baseUrl: 'http://127.0.0.1:11434', api: 'ollama-chat', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
+      { id: 'lm-studio', name: 'LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', api: 'openai-completions', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
+      { id: 'vllm', name: 'vLLM', baseUrl: 'http://127.0.0.1:8000/v1', api: 'openai-completions', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
+      { id: 'llama-cpp', name: 'llama.cpp', baseUrl: 'http://127.0.0.1:8080', api: 'ollama-chat', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
+      { id: 'ollama-cloud', name: 'Ollama Cloud', baseUrl: 'https://cloud.ollama.com', api: 'ollama-chat', authUrl: '', hint: '...', cat: 'local' },
+    ],
+  },
+  {
+    label: '其他',
+    cat: 'other',
+    items: [
+      { id: 'novita', name: 'Novita', baseUrl: 'https://api.novita.ai/openai/v1', api: 'openai-completions', authUrl: 'https://novita.ai/playground/key', hint: '...', cat: 'other' },
+      { id: 'aimlapi', name: 'AIML API', baseUrl: 'https://api.aimlapi.com/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'synthetic', name: 'Synthetic (zAI)', baseUrl: 'https://api.synthetic.ai/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'nanogpt', name: 'NanoGPT', baseUrl: 'https://api.nanogpt.com/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'perplexity', name: 'Perplexity', baseUrl: 'https://api.perplexity.ai', api: 'openai-completions', authUrl: '', hint: 'ppl-...', cat: 'other' },
+      { id: 'vercel-ai-gateway', name: 'Vercel AI Gateway', baseUrl: 'https://gateway.vercel.sh/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'cloudflare-ai-gateway', name: 'Cloudflare AI Gateway', baseUrl: 'https://gateway.ai.cloudflare.com/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'litellm', name: 'LiteLLM Proxy', baseUrl: 'http://127.0.0.1:4000/v1', api: 'openai-completions', authUrl: '', hint: '（本地代理可留空）', cat: 'other' },
+      { id: 'kilo', name: 'Kilo Gateway', baseUrl: 'https://kilo.run/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'zenmux', name: 'ZenMux', baseUrl: 'https://api.zenmux.app/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'umans', name: 'Umans AI', baseUrl: 'https://api.code.umans.ai', api: 'anthropic-messages', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'coreweave', name: 'CoreWeave Serverless', baseUrl: 'https://api.coreweave.com/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'wafer-serverless', name: 'Wafer Serverless', baseUrl: 'https://pass.wafer.ai/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'baseten', name: 'Baseten', baseUrl: 'https://app.baseten.co/v1', api: 'openai-completions', authUrl: '', hint: '...', cat: 'other' },
+      { id: 'amazon-bedrock', name: 'AWS Bedrock', baseUrl: '', api: 'bedrock-converse-stream', authUrl: '', hint: '（需 AWS 凭证）', cat: 'other' },
+      { id: 'azure', name: 'Azure OpenAI', baseUrl: '', api: 'azure-openai-responses', authUrl: '', hint: '（需 Azure 凭证）', cat: 'other' },
+      { id: 'google-vertex', name: 'Google Vertex AI', baseUrl: '', api: 'google-vertex', authUrl: '', hint: '（需 GCP 凭证）', cat: 'other' },
+    ],
+  },
+];
 
 // ── 工具 ──
 
@@ -68,6 +152,7 @@ function ModelConfigSection() {
   const [cfg, setCfg] = useState<TiffaModelsConfig | null>(null);
   const [status, setStatus] = useState('');
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
   const addToast = useUiStore((s) => s.addToast);
 
   const load = useCallback(async () => {
@@ -292,9 +377,7 @@ function ModelConfigSection() {
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 14px' }}>
-        <button type="button" className="btn-add-model" style={{ borderStyle: 'dashed' }} onClick={() => addProviderDialog(providers, (key, p) => {
-          setCfg((c) => (c ? { ...c, providers: { ...c.providers, [key]: p } } : c));
-        })}>
+        <button type="button" className="btn-add-model" style={{ borderStyle: 'dashed' }} onClick={() => setAddProviderOpen(true)}>
           + 添加供应商
         </button>
         <button type="button" className="settings-btn" style={{ background: 'var(--accent)', color: 'white', borderColor: 'var(--accent)' }} onClick={() => void save()}>
@@ -305,6 +388,17 @@ function ModelConfigSection() {
         </button>
         <span className={`config-status${status ? (status.startsWith('保存') ? ' saved' : '') : ''}`}>{status}</span>
       </div>
+      {addProviderOpen && createPortal(
+        <AddProviderModal
+          existing={providers}
+          onAdd={(key, p) => {
+            setCfg((c) => (c ? { ...c, providers: { ...c.providers, [key]: p } } : c));
+            setAddProviderOpen(false);
+          }}
+          onClose={() => setAddProviderOpen(false)}
+        />,
+        document.body,
+      )}
     </div>
   );
 }
@@ -482,71 +576,259 @@ function addModelDialog(prov: TiffaProviderConfig | undefined, onAdd: (m: ModelE
   });
 }
 
-/** 添加供应商对话框（DOM 方式，复用旧版 addProviderUI 字段：名称/API 地址/API Key/API 类型） */
-function addProviderDialog(
-  providers: Record<string, TiffaProviderConfig>,
-  onAdd: (key: string, p: TiffaProviderConfig) => void,
-): void {
-  const backdrop = document.createElement('div');
-  backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1100;display:flex;align-items:center;justify-content:center;';
-  backdrop.innerHTML = `
-    <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:20px;width:360px;">
-      <div style="font-size:14px;font-weight:600;margin-bottom:12px;">添加供应商</div>
-      <label style="font-size:12px;color:var(--text-muted);">供应商名称（唯一标识）</label>
-      <input id="dlgProvKey" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" placeholder="my-provider">
-      <label style="font-size:12px;color:var(--text-muted);">API 地址</label>
-      <input id="dlgProvUrl" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" placeholder="https://api.example.com/v1">
-      <label style="font-size:12px;color:var(--text-muted);">API Key（可选）</label>
-      <input id="dlgProvKeyApi" type="password" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" placeholder="sk-xxx">
-      <label style="font-size:12px;color:var(--text-muted);">API 类型</label>
-      <select id="dlgProvApi" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;">
-        <option value="openai-completions">openai-completions（OpenAI 兼容 /chat/completions，最常用）</option>
-        <option value="openai-responses">openai-responses（OpenAI Responses API）</option>
-        <option value="openai-codex-responses">openai-codex-responses（Codex Responses）</option>
-        <option value="azure-openai-responses">azure-openai-responses（Azure OpenAI）</option>
-        <option value="anthropic-messages">anthropic-messages（Claude Messages API）</option>
-        <option value="google-generative-ai">google-generative-ai（Gemini API）</option>
-        <option value="google-gemini-cli">google-gemini-cli（Gemini CLI）</option>
-        <option value="google-vertex">google-vertex（Vertex AI）</option>
-        <option value="bedrock-converse-stream">bedrock-converse-stream（AWS Bedrock）</option>
-      </select>
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button id="dlgProvCancel" style="padding:6px 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;">取消</button>
-        <button id="dlgProvOk" style="padding:6px 16px;border:none;border-radius:4px;background:var(--accent);color:white;cursor:pointer;">添加</button>
-      </div>
-    </div>`;
-  document.body.appendChild(backdrop);
-  const keyInput = backdrop.querySelector('#dlgProvKey') as HTMLInputElement;
-  setTimeout(() => keyInput.focus(), 50);
-  const close = () => backdrop.remove();
-  backdrop.querySelector('#dlgProvCancel')?.addEventListener('click', close);
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close();
-  });
-  const submit = () => {
-    const key = keyInput.value.trim();
-    if (!key) {
-      useUiStore.getState().addToast('error', '供应商名称不能为空');
-      return;
-    }
-    if (providers[key]) {
-      useUiStore.getState().addToast('error', `供应商 "${key}" 已存在`);
-      return;
-    }
-    const baseUrl = (backdrop.querySelector('#dlgProvUrl') as HTMLInputElement).value.trim();
-    const apiKey = (backdrop.querySelector('#dlgProvKeyApi') as HTMLInputElement).value.trim();
-    const api = (backdrop.querySelector('#dlgProvApi') as HTMLSelectElement).value;
-    if (!baseUrl) {
-      useUiStore.getState().addToast('error', 'API 地址不能为空');
-      return;
-    }
-    onAdd(key, { baseUrl, api, apiKey: apiKey || undefined, models: [] });
-    close();
+/**
+ * AddProviderModal — 「添加供应商」弹窗（从 dim/oh-my-pi-UI 的 AddModelModal 抄回的预置网格）：
+ *   第 1 步：从内置 provider 预设列表选择（自动填充 baseUrl / api 类型，只需填 API Key），或选「自定义」手动填写；
+ *   第 2 步：表单确认（可改 ID / 显示名 / baseUrl / api / Key），点击「添加」并入 models.yml 内存配置。
+ *   样式复用 styles.css 中已有的 .add-model-* / .preset-*（当年 CSS 已抄、组件在重构时丢了，这里补回）。
+ */
+function AddProviderModal({
+  existing,
+  onAdd,
+  onClose,
+}: {
+  existing: Record<string, TiffaProviderConfig>;
+  onAdd: (key: string, p: TiffaProviderConfig) => void;
+  onClose: () => void;
+}) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<ProviderPreset | 'custom' | null>(null);
+  const [key, setKey] = useState('');
+  const [name, setName] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [api, setApi] = useState('openai-completions');
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [error, setError] = useState('');
+
+  const filteredGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return PRESET_GROUPS;
+    return PRESET_GROUPS
+      .map((g) => ({ ...g, items: g.items.filter((p) => `${p.id} ${p.name}`.toLowerCase().includes(q)) }))
+      .filter((g) => g.items.length > 0);
+  }, [search]);
+
+  const selectPreset = (p: ProviderPreset) => {
+    setSelected(p);
+    setKey(p.id);
+    setName(p.name);
+    setBaseUrl(p.baseUrl);
+    setApi(p.api);
+    setApiKey('');
+    setError('');
+    setStep(2);
   };
-  backdrop.querySelector('#dlgProvOk')?.addEventListener('click', submit);
-  backdrop.querySelector('#dlgProvKey')?.addEventListener('keydown', (e) => {
-    if ((e as KeyboardEvent).key === 'Enter') submit();
-  });
+  const selectCustom = () => {
+    setSelected('custom');
+    setKey('');
+    setName('');
+    setBaseUrl('');
+    setApi('openai-completions');
+    setApiKey('');
+    setError('');
+    setStep(2);
+  };
+  const goBack = useCallback(() => {
+    setSelected(null);
+    setStep(1);
+  }, []);
+
+  const keyValid = /^[a-zA-Z0-9_-]+$/.test(key);
+  const isDup = !!key.trim() && !!existing[key.trim()];
+  const canSave = keyValid && !isDup && baseUrl.trim().length > 0;
+
+  const submit = () => {
+    const k = key.trim();
+    if (!k) {
+      setError('供应商名称不能为空');
+      return;
+    }
+    if (existing[k]) {
+      setError(`供应商 "${k}" 已存在`);
+      return;
+    }
+    if (!baseUrl.trim()) {
+      setError('API 地址不能为空');
+      return;
+    }
+    onAdd(k, { baseUrl: baseUrl.trim(), api, apiKey: apiKey.trim() || undefined, models: [] });
+    onClose();
+  };
+
+  const openAuth = useCallback((url: string) => {
+    if (url && window.tiffaDesktop?.openExternal) void window.tiffaDesktop.openExternal(url);
+  }, []);
+
+  const preset = selected !== 'custom' && selected !== null ? (selected as ProviderPreset) : null;
+
+  return createPortal(
+    <div className="add-model-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="add-model-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="add-model-head">
+          <span className="modal-title">添加供应商</span>
+          <span className="add-model-subtitle">
+            {step === 1
+              ? '选择已知提供商或自定义'
+              : preset
+                ? `配置「${preset.name}」`
+                : '自定义提供商（手动填写所有字段）'}
+          </span>
+          <button type="button" className="settings-close" onClick={onClose}>✕</button>
+        </div>
+
+        {step === 1 && (
+          <div className="add-model-form">
+            <div className="preset-search">
+              <input
+                className="form-input"
+                placeholder="🔍 搜索提供商（如 deepseek、kimi、ollama）…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="preset-grid">
+              {filteredGroups.map((g) => (
+                <div key={g.cat} className="preset-group">
+                  <div className="preset-group-label">{g.label}</div>
+                  <div className="preset-items">
+                    {g.items.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`preset-card ${p.cat}`}
+                        onClick={() => selectPreset(p)}
+                        title={`${p.name}\n${p.baseUrl}\nAPI: ${p.api}${p.authUrl ? '\n点击前往获取 API Key' : ''}`}
+                      >
+                        <span className="preset-name">{p.name}</span>
+                        <span className="preset-id">{p.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {filteredGroups.every((g) => g.items.length === 0) && (
+              <div className="settings-placeholder">没有匹配的提供商</div>
+            )}
+            <div className="preset-custom-divider">
+              <span>或</span>
+            </div>
+            <button type="button" className="btn btn-block preset-custom-btn" onClick={selectCustom}>
+              + 自定义提供商（手动填写所有字段）
+            </button>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="add-model-form">
+            {preset && (
+              <div className="preset-selected-bar">
+                <span className="preset-selected-name">{preset.name}</span>
+                <span className="preset-selected-id">ID: {preset.id}</span>
+                {preset.authUrl && (
+                  <button type="button" className="btn btn-sm btn-link preset-auth-btn" onClick={() => openAuth(preset.authUrl!)}>
+                    🔑 获取 API Key
+                  </button>
+                )}
+                <button type="button" className="btn btn-sm btn-link preset-change-btn" onClick={goBack}>
+                  ← 换一个
+                </button>
+              </div>
+            )}
+            {selected === 'custom' && (
+              <div className="preset-selected-bar">
+                <span className="preset-selected-name">自定义提供商</span>
+                <button type="button" className="btn btn-sm btn-link preset-change-btn" onClick={goBack}>
+                  ← 从预设选择
+                </button>
+              </div>
+            )}
+
+            <label className="form-field">
+              <span className="form-label">供应商 ID *</span>
+              <input
+                className="form-input"
+                placeholder="如 deepseek（字母/数字/-/_）"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                disabled={selected !== 'custom'}
+              />
+              {key && !keyValid && <span className="form-error">只允许字母、数字、- 和 _</span>}
+              {isDup && <span className="form-error">供应商 &quot;{key}&quot; 已存在</span>}
+            </label>
+
+            <label className="form-field">
+              <span className="form-label">显示名</span>
+              <input
+                className="form-input"
+                placeholder="如 深度求索 / DeepSeek（可选）"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+
+            <label className="form-field">
+              <span className="form-label">API 地址 (baseUrl) *</span>
+              <input
+                className="form-input"
+                placeholder="如 https://api.deepseek.com/v1"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+              />
+            </label>
+
+            <label className="form-field">
+              <span className="form-label">API 类型</span>
+              <select className="form-input" value={api} onChange={(e) => setApi(e.target.value)}>
+                <option value="openai-completions">OpenAI 兼容 (openai-completions)</option>
+                <option value="openai-responses">OpenAI Responses API (openai-responses)</option>
+                <option value="openai-codex-responses">OpenAI Codex Responses (openai-codex-responses)</option>
+                <option value="anthropic-messages">Anthropic Claude (anthropic-messages)</option>
+                <option value="openrouter">OpenRouter (openrouter)</option>
+                <option value="google-generative-ai">Google Gemini (google-generative-ai)</option>
+                <option value="google-gemini-cli">Google Gemini CLI (google-gemini-cli)</option>
+                <option value="google-vertex">Google Vertex (google-vertex)</option>
+                <option value="azure-openai-responses">Azure OpenAI (azure-openai-responses)</option>
+                <option value="bedrock-converse-stream">AWS Bedrock (bedrock-converse-stream)</option>
+                <option value="ollama-chat">Ollama (ollama-chat)</option>
+              </select>
+            </label>
+
+            <label className="form-field">
+              <span className="form-label">API Key（可选）</span>
+              <div className="form-input-group">
+                <input
+                  className="form-input"
+                  type={showKey ? 'text' : 'password'}
+                  placeholder={preset ? `输入 ${preset.name} API Key（明文存于 models.yml）` : '输入 API Key（明文存于 models.yml）'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+                <button type="button" className="btn btn-sm form-eye" onClick={() => setShowKey((v) => !v)} title={showKey ? '隐藏' : '显示'}>
+                  {showKey ? '🙈' : '👁'}
+                </button>
+              </div>
+              {preset && preset.hint && <span className="form-hint">格式提示：{preset.hint}</span>}
+            </label>
+
+            {error && <div className="model-config-error">{error}</div>}
+
+            <div className="add-model-actions">
+              <button type="button" className="btn" onClick={goBack}>返回</button>
+              <button type="button" className="btn" onClick={onClose}>取消</button>
+              <button type="button" className="btn btn-primary" onClick={submit} disabled={!canSave}>
+                添加
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 // ── 旁路模型节 ──
