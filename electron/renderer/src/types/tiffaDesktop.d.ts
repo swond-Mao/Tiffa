@@ -180,6 +180,7 @@ export interface TiffaDesktopApi {
   deleteSession: (sessionPath: string) => Promise<unknown>;
   renameSession: (sessionPath: string, newTitle: string) => Promise<unknown>;
   restoreSession: (sessionPath: string) => Promise<unknown>;
+  deleteArchivedSession: (sessionPath: string) => Promise<unknown>;
   listArchivedSessions: (projectDirName: string) => Promise<TiffaSessionSummary[]>;
   getUserEntries: (sessionPath: string) => Promise<unknown>;
   exportSessionHtml: (sessionPath: string) => Promise<unknown>;

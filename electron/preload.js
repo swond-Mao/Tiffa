@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   completeWithLightModel: (prompt, maxTokens, providerHint, modelHint) => ipcRenderer.invoke('ai:complete', { prompt, maxTokens, providerHint, modelHint }),
   listArchivedSessions: (projectDirName) => ipcRenderer.invoke('sessions:listArchivedSessions', projectDirName),
   restoreSession: (sessionPath) => ipcRenderer.invoke('sessions:restoreSession', sessionPath),
+  deleteArchivedSession: (sessionPath) => ipcRenderer.invoke('sessions:deleteArchivedSession', sessionPath),
   getUserEntries: (sessionPath) => ipcRenderer.invoke('sessions:getUserEntries', sessionPath),
   exportSessionHtml: (sessionPath) => ipcRenderer.invoke('sessions:exportHtml', sessionPath),
   recallMemory: (query) => ipcRenderer.invoke('memory:recall', query),

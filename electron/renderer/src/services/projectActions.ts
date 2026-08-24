@@ -14,7 +14,7 @@ import { useUiStore } from '../stores/useUiStore';
 import { loadProjects, selectProject, switchToSession, loadSessions } from './sessionController';
 import { showModalConfirm } from './tabActions';
 import { dirNameFromSessionPath, extractSessionId } from './utils';
-import type { TiffaProjectSummary } from '../types/tiffaDesktop';
+import type { TiffaProjectSummary, TiffaSessionSummary } from '../types/tiffaDesktop';
 
 /** 清理某项目的全局 tab（其他项目不受影响） */
 function cleanupProjectTabs(dirName: string): void {
@@ -259,6 +259,73 @@ export async function toggleExpandProject(dirName: string, forceOpen?: boolean):
     }
   } else {
     useProjectsStore.getState().toggleExpandedProject(dirName);
+  }
+}
+
+// ── 归档对话：懒加载 / 恢复 / 永久删除 ──
+/** 懒加载某项目的归档对话列表（展开"已归档对话"分组时调用） */
+export async function loadArchivedSessions(dirName: string): Promise<void> {
+  try {
+    const result = (await window.tiffaDesktop.listArchivedSessions(dirName)) as
+      | Array<Record<string, unknown>>
+      | { error?: string };
+    if (!Array.isArray(result)) return;
+    const sessions = result.map((s) => ({
+      path: String(s.path || ''),
+      title: s.title ? String(s.title) : undefined,
+      firstMessage: s.firstMessage ? String(s.firstMessage) : undefined,
+      messageCount: typeof s.messageCount === 'number' ? s.messageCount : undefined,
+      sessionId: s.sessionId ? String(s.sessionId) : undefined,
+      lastActiveAt: typeof s.modified === 'number' ? s.modified : undefined,
+    })) as TiffaSessionSummary[];
+    useProjectsStore.getState().setArchivedSessions(dirName, sessions);
+  } catch {
+    // 静默失败：归档目录不存在等场景返回空即可
+  }
+}
+
+/** 恢复归档对话：移回活跃区并刷新两侧列表 */
+export async function restoreArchivedSession(sessionPath: string): Promise<void> {
+  const ui = useUiStore.getState();
+  const dirName = dirNameFromSessionPath(sessionPath);
+  try {
+    const result = (await window.tiffaDesktop.restoreSession(sessionPath)) as { error?: string } | undefined;
+    if (result && result.error) {
+      ui.addToast('error', `恢复失败: ${result.error}`);
+      return;
+    }
+    ui.addToast('info', '对话已恢复');
+    if (dirName) {
+      // 从归档列表移除 + 刷新活跃会话树
+      useProjectsStore.getState().removeArchivedSession(dirName, sessionPath);
+      await loadSessions(dirName);
+    }
+  } catch (err) {
+    ui.addToast('error', `恢复失败: ${(err as Error).message}`);
+  }
+}
+
+/** 永久删除归档对话（不可恢复） */
+export async function hardDeleteArchivedSession(sessionPath: string): Promise<void> {
+  const ui = useUiStore.getState();
+  const ok = await showModalConfirm(
+    '永久删除归档对话',
+    '永久删除该归档对话？所有记录将丢失，无法恢复！',
+  );
+  if (!ok) return;
+  try {
+    const result = (await window.tiffaDesktop.deleteArchivedSession(sessionPath)) as
+      | { error?: string }
+      | undefined;
+    if (result && result.error) {
+      ui.addToast('error', `删除失败: ${result.error}`);
+      return;
+    }
+    ui.addToast('info', '已永久删除');
+    const dirName = dirNameFromSessionPath(sessionPath);
+    if (dirName) useProjectsStore.getState().removeArchivedSession(dirName, sessionPath);
+  } catch (err) {
+    ui.addToast('error', `删除失败: ${(err as Error).message}`);
   }
 }
 

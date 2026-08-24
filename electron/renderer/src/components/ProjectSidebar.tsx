@@ -22,6 +22,9 @@ import {
   hardDeleteArchivedProject,
   openSessionFromTree,
   toggleExpandProject,
+  loadArchivedSessions,
+  restoreArchivedSession,
+  hardDeleteArchivedSession,
 } from '../services/projectActions';
 import { relTime, extractSessionId, escapeHtml } from '../services/utils';
 import { useTabContextMenu } from '../hooks/useTabContextMenu';
@@ -144,8 +147,106 @@ function SessionTree({ dirName }: { dirName: string }) {
           {expanded ? '收起对话列表' : `展开剩余 ${real.length - SESSION_TREE_LIMIT} 条对话`}
         </div>
       )}
+      <ArchivedSessionsGroup dirName={dirName} />
     </div>
   );
+}
+
+/** 项目树内的"已归档对话"折叠分组：懒加载 + 灰显条目 + 右键恢复/永久删除 */
+function ArchivedSessionsGroup({ dirName }: { dirName: string }) {
+  const archived = useProjectsStore((s) => s.archivedSessions[dirName]);
+  const expanded = useProjectsStore((s) => !!s.expandedArchivedTrees[dirName]);
+
+  const toggle = useCallback(() => {
+    const store = useProjectsStore.getState();
+    const willOpen = !store.expandedArchivedTrees[dirName];
+    store.toggleExpandedArchivedTree(dirName);
+    if (willOpen && !store.archivedSessions[dirName]) {
+      void loadArchivedSessions(dirName);
+    }
+  }, [dirName]);
+
+  return (
+    <>
+      <div className="archived-sessions-toggle" onClick={toggle}>
+        <span className={`project-item-arrow${expanded ? ' expanded' : ''}`}>{expanded ? '▾' : '▸'}</span>
+        <span>已归档对话</span>
+        {archived && archived.length > 0 && <span className="archive-count">{archived.length}</span>}
+      </div>
+      {expanded && (
+        <div className="archived-sessions-list">
+          {archived === undefined ? (
+            <div className="session-tree-empty">加载中...</div>
+          ) : archived.length === 0 ? (
+            <div className="session-tree-empty">无归档对话</div>
+          ) : (
+            archived.map((s) => {
+              const title = s.title || s.firstMessage || '归档对话';
+              const ts = s.lastActiveAt;
+              const timeStr = ts ? relTime(ts) : '';
+              return (
+                <div
+                  key={s.path}
+                  className="session-item archived-session"
+                  title={title}
+                  onContextMenu={(e) => showArchivedSessionMenu(e, s, dirName)}
+                >
+                  <span className="session-item-title">{title.length > 18 ? `${title.substring(0, 18)}...` : title}</span>
+                  {timeStr && <span className="session-item-meta">{timeStr}</span>}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 归档对话右键菜单：恢复 / 永久删除（DOM 方式，复用 .context-menu 样式） */
+function showArchivedSessionMenu(e: React.MouseEvent, session: TiffaSessionSummary, dirName: string): void {
+  e.preventDefault();
+  document.querySelector('.context-menu')?.remove();
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.innerHTML = [
+    menuItem(
+      'restore',
+      '恢复对话',
+      '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
+    ),
+    '<div class="context-menu-divider"></div>',
+    menuItem(
+      'hard-delete',
+      '永久删除',
+      '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+      true,
+    ),
+  ].join('');
+  document.body.appendChild(menu);
+  let x = e.clientX;
+  let y = e.clientY;
+  if (x + 160 > window.innerWidth) x = window.innerWidth - 164;
+  if (y + 120 > window.innerHeight) y = window.innerHeight - 124;
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.addEventListener('click', (ev) => {
+    const item = (ev.target as HTMLElement).closest('.context-menu-item') as HTMLElement | null;
+    if (!item) return;
+    const action = item.dataset.action;
+    menu.remove();
+    if (action === 'restore') void restoreArchivedSession(session.path);
+    else if (action === 'hard-delete') void hardDeleteArchivedSession(session.path);
+  });
+  setTimeout(() => {
+    document.addEventListener(
+      'click',
+      (ev) => {
+        if (!menu.contains(ev.target as Node)) menu.remove();
+      },
+      { once: true },
+    );
+  }, 0);
 }
 
 function ProjectItem({ project, showMenu }: { project: TiffaProjectSummary; showMenu: (e: React.MouseEvent, p: TiffaProjectSummary) => void }) {

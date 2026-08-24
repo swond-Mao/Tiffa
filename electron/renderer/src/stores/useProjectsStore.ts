@@ -14,7 +14,10 @@ export interface ProjectsState {
   activeProjectDirName: string | null;
   /** 每个项目的会话列表（左侧树数据源） */
   projectSessions: Record<string, TiffaSessionSummary[]>;
+  /** 每个项目的归档对话列表（树内"已归档对话"分组数据源，懒加载） */
+  archivedSessions: Record<string, TiffaSessionSummary[]>;
   expandedProjects: Record<string, true>;
+  expandedArchivedTrees: Record<string, true>;
   archivedProjects: TiffaProjectSummary[];
   archiveCollapsed: boolean;
   removedCwds: string[];
@@ -23,7 +26,10 @@ export interface ProjectsState {
   setProjects: (list: TiffaProjectSummary[]) => void;
   setActiveProject: (dirName: string | null) => void;
   setProjectSessions: (dirName: string, sessions: TiffaSessionSummary[]) => void;
+  setArchivedSessions: (dirName: string, sessions: TiffaSessionSummary[]) => void;
+  removeArchivedSession: (dirName: string, sessionPath: string) => void;
   toggleExpandedProject: (dirName: string) => void;
+  toggleExpandedArchivedTree: (dirName: string) => void;
   /** 强制展开（等价旧版 selectProject 的 expandedProjects.add，切换项目时用） */
   expandProject: (dirName: string) => void;
   setArchivedProjects: (list: TiffaProjectSummary[]) => void;
@@ -36,7 +42,9 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
   projects: [],
   activeProjectDirName: null,
   projectSessions: {},
+  archivedSessions: {},
   expandedProjects: {},
+  expandedArchivedTrees: {},
   archivedProjects: [],
   archiveCollapsed: false,
   removedCwds: [],
@@ -46,12 +54,28 @@ export const useProjectsStore = create<ProjectsState>((set) => ({
   setActiveProject: (dirName) => set({ activeProjectDirName: dirName }),
   setProjectSessions: (dirName, sessions) =>
     set((s) => ({ projectSessions: { ...s.projectSessions, [dirName]: sessions } })),
+  setArchivedSessions: (dirName, sessions) =>
+    set((s) => ({ archivedSessions: { ...s.archivedSessions, [dirName]: sessions } })),
+  removeArchivedSession: (dirName, sessionPath) =>
+    set((s) => ({
+      archivedSessions: {
+        ...s.archivedSessions,
+        [dirName]: (s.archivedSessions[dirName] || []).filter((x) => x.path !== sessionPath),
+      },
+    })),
   toggleExpandedProject: (dirName) =>
     set((s) => {
       const expandedProjects = { ...s.expandedProjects };
       if (expandedProjects[dirName]) delete expandedProjects[dirName];
       else expandedProjects[dirName] = true;
       return { expandedProjects };
+    }),
+  toggleExpandedArchivedTree: (dirName) =>
+    set((s) => {
+      const expandedArchivedTrees = { ...s.expandedArchivedTrees };
+      if (expandedArchivedTrees[dirName]) delete expandedArchivedTrees[dirName];
+      else expandedArchivedTrees[dirName] = true;
+      return { expandedArchivedTrees };
     }),
   expandProject: (dirName) =>
     set((s) => {

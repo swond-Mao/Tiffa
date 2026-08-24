@@ -2638,6 +2638,22 @@ function setupIpc() {
       return { error: err.message };
     }
   });
+  // ── 永久删除归档的会话（单会话级别，幂等）──
+  ipcMain.handle('sessions:deleteArchivedSession', async (event, sessionPath) => {
+    try {
+      const resolved = path.resolve(sessionPath);
+      if (!resolved.endsWith('.jsonl')) {
+        return { error: 'Session file not found' };
+      }
+      if (fs.existsSync(resolved)) {
+        fs.unlinkSync(resolved);
+      }
+      // 幂等：文件已不存在也视为成功
+      return { success: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
 
   // ── 读取用户消息列表（用于分支功能） ──
   ipcMain.handle('sessions:getUserEntries', async (event, sessionPath) => {

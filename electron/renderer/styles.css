@@ -4406,6 +4406,36 @@ html[data-mode="light"] .muse-tint {
 .archive-list .project-item:hover {
   opacity: 0.85;
 }
+/* ── 项目树内"已归档对话"分组 ── */
+.archived-sessions-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: hsl(var(--text-400));
+  cursor: pointer;
+  user-select: none;
+  border-radius: 5px;
+  transition: color 0.15s ease, background 0.12s;
+}
+.archived-sessions-toggle:hover {
+  color: hsl(var(--text-200));
+  background: hsl(var(--bg-300));
+}
+.archived-sessions-toggle .project-item-arrow {
+  font-size: 10px;
+}
+.archived-sessions-list {
+  padding-left: 8px;
+}
+.session-item.archived-session {
+  opacity: 0.55;
+}
+.session-item.archived-session:hover {
+  opacity: 0.9;
+}
 
 /* ── 历史面板 meta ── */
 .history-item-meta {
