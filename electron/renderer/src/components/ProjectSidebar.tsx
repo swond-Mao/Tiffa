@@ -87,7 +87,14 @@ function SessionTree({ dirName }: { dirName: string }) {
   const { showTabMenu } = useTabContextMenu();
 
   const real = (sessions || []).filter((s) => !s.path.startsWith('__new__'));
-  if (real.length === 0) return <div className="session-tree-empty">暂无对话</div>;
+  if (real.length === 0) {
+    // 无活跃对话也要渲染归档分组（否则"只归档过对话的项目"永远看不到已归档内容）
+    return (
+      <div className="session-tree" data-dirname={dirName}>
+        <ArchivedSessionsGroup dirName={dirName} />
+      </div>
+    );
+  }
 
   // 活跃（已打开 tab）的会话排前面，避免被折叠隐藏；其余保持原序（稳定排序）
   const sorted = [...real].sort((a, b) => {
