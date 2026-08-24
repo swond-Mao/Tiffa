@@ -9,6 +9,7 @@ interruptMode: "always"
 
 **正确做法**：
 - 使用 `recall` 工具进行语义检索
+- 跨项目语义检索使用 `wide_recall` 工具（MCP），它扫描全部项目 bank + 全局库，是合法通道；不要因为 recall 无果就退回直接查库
 - 用自然语言报告 recall 的返回结果
 - 如果 recall 没有结果，说明原因并建议用户尝试其他关键词
 

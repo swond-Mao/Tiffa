@@ -1,18 +1,32 @@
 {
-  "mcpServers": {
-    "computer-use": {
-      "type": "stdio",
-      "command": "{{PORTABLE_ROOT}}/python/python.exe",
-      "args": [
-        "-u",
-        "{{PORTABLE_ROOT}}/data/agent/managed-skills/computer-use/computer_use_mcp.py"
-      ],
-      "env": {
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONUNBUFFERED": "1"
-      },
-      "enabled": false,
-      "timeout": 300000
-    }
-  }
+    "mcpServers":  {
+                       "computer-use":  {
+                                            "type":  "stdio",
+                                            "command":  "{{PORTABLE_ROOT}}/python/python.exe",
+                                            "args":  [
+                                                         "-u",
+                                                         "{{PORTABLE_ROOT}}/data/agent/managed-skills/computer-use/computer_use_mcp.py"
+                                                     ],
+                                            "env":  {
+                                                        "PYTHONIOENCODING":  "utf-8",
+                                                        "PYTHONUNBUFFERED":  "1"
+                                                    },
+                                            "enabled":  false,
+                                            "timeout":  300000
+                                        },
+                       "memory-wide":  {
+                                           "type":  "stdio",
+                                           "command":  "{{PORTABLE_ROOT}}/npm-global/node_modules/bun/bin/bun.exe",
+                                           "args":  [
+                                                        "{{PORTABLE_ROOT}}/data/agent/mcp-servers/wide-recall.ts"
+                                                    ],
+                                           "env":  {
+                                                       "PI_CODING_AGENT_DIR":  "{{PORTABLE_ROOT}}/data/agent",
+                                                       "PORTABLE_ROOT":  "{{PORTABLE_ROOT}}",
+                                                       "HOME":  "{{PORTABLE_ROOT}}/home"
+                                                   },
+                                           "enabled":  true,
+                                           "timeout":  600000
+                                       }
+                   }
 }

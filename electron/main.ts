@@ -94,6 +94,22 @@ try {
 } catch (e) {
   console.warn('[config] 恢复 mcp.json 失败:', e.message);
 }
+// ── mcp.json 盘符自愈：便携换盘符后，把残留的旧盘符 Tiffa 路径刷成当前根目录 ──
+try {
+  const MCP_JSON_HEAL = path.join(PORTABLE_ROOT, 'data', 'agent', 'mcp.json');
+  if (fs.existsSync(MCP_JSON_HEAL)) {
+    let rawHeal = fs.readFileSync(MCP_JSON_HEAL, 'utf8');
+    const rootSlash = PORTABLE_ROOT.replace(/\\/g, '/');
+    const fixed = rawHeal.replace(/[A-Za-z]:[\/\\]Tiffa[\/\\]/g, rootSlash + '/');
+    if (fixed !== rawHeal) {
+      fs.writeFileSync(MCP_JSON_HEAL, fixed, 'utf8');
+      console.log('[config] mcp.json 盘符已自愈 ->', rootSlash);
+    }
+  }
+} catch (e) {
+  console.warn('[config] mcp.json 盘符自愈失败:', e.message);
+}
+
 // ── 确保 models.yml 存在（git clone 后同样被 gitignore，需从 example 恢复） ──
 try {
   const MODELS_YML = path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml');
@@ -2747,78 +2763,22 @@ function setupIpc() {
     return { success: true };
   });
 
-  // ── 全局记忆召回：直接查询 mnemopi SQLite FTS，不经过内核 ──
+  // ── 全局记忆召回：跨项目语义检索（bun wide-recall CLI，与 agent 的 wide_recall MCP 同源）──
   ipcMain.handle('memory:recall', async (event, query) => {
     const q = (query || '').trim();
     if (!q) return { results: [], error: '空查询' };
     try {
-      const pythonExe = path.join(PORTABLE_ROOT, 'python', 'python.exe');
-      const banksDir = path.join(AGENT_DIR, 'memories', 'mnemopi', 'banks');
-      const script = `
-import sqlite3, os, glob, json, sys
-
-query = sys.argv[1]
-banks_dir = sys.argv[2]
-results = []
-
-for db_path in glob.glob(os.path.join(banks_dir, '*', 'mnemopi.db')):
-    bank = os.path.basename(os.path.dirname(db_path))
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        fts_ok = False
-        try:
-            cur.execute(
-                "SELECT wm.id, wm.content, wm.source, wm.timestamp, wm.session_id "
-                "FROM fts_working JOIN working_memory wm ON fts_working.id = wm.id "
-                "WHERE fts_working MATCH ? ORDER BY rank LIMIT 20",
-                (query,)
-            )
-            for row in cur.fetchall():
-                results.append({
-                    'id': row['id'],
-                    'content': row['content'][:500],
-                    'source': row['source'] or '',
-                    'timestamp': row['timestamp'] or '',
-                    'session_id': row['session_id'] or '',
-                    'bank': bank,
-                    'score': 1.0,
-                })
-            fts_ok = True
-        except Exception:
-            pass
-        if not fts_ok:
-            cur.execute(
-                "SELECT id, content, source, timestamp, session_id "
-                "FROM working_memory WHERE content LIKE ? "
-                "ORDER BY timestamp DESC LIMIT 20",
-                (f'%{query}%',)
-            )
-            for row in cur.fetchall():
-                results.append({
-                    'id': row['id'],
-                    'content': row['content'][:500],
-                    'source': row['source'] or '',
-                    'timestamp': row['timestamp'] or '',
-                    'session_id': row['session_id'] or '',
-                    'bank': bank,
-                    'score': 0.5,
-                })
-        conn.close()
-    except Exception:
-        pass
-
-results.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-print(json.dumps({'results': results[:30]}, ensure_ascii=False))
-`;
+      const bunExe = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', 'bun', 'bin', 'bun.exe');
+      const cliScript = path.join(AGENT_DIR, 'mcp-servers', 'wide-recall.ts');
       const { execFileSync } = require('child_process');
-      const output = execFileSync(pythonExe, ['-c', script, q, banksDir], {
+      const output = execFileSync(bunExe, [cliScript, '--query', q, '--limit', '20'], {
         encoding: 'utf8',
-        timeout: 10000,
+        timeout: 60000,
         maxBuffer: 5 * 1024 * 1024,
+        env: { ...process.env, PI_CODING_AGENT_DIR: AGENT_DIR, PORTABLE_ROOT },
       });
-      return JSON.parse(output.trim());
+      const parsed = JSON.parse(output.trim()) as { results?: unknown[] };
+      return { results: Array.isArray(parsed.results) ? parsed.results : [] };
     } catch (err) {
       console.error('[memory:recall] error:', err.message);
       return { results: [], error: err.message };
