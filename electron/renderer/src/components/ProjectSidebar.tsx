@@ -274,7 +274,17 @@ function ProjectItem({ project, showMenu }: { project: TiffaProjectSummary; show
         onClick={() => void selectProject(dirName)}
         onContextMenu={(e) => showMenu(e, project)}
       >
-        <span className={`project-item-arrow${expanded ? ' expanded' : ''}`}>{expanded ? '▾' : '▸'}</span>
+        <span
+          className={`project-item-arrow${expanded ? ' expanded' : ''}`}
+          title={expanded ? '折叠' : '展开'}
+          onClick={(e) => {
+            // 箭头 = 纯展开/折叠开关；不触发外层的 selectProject（切项目/切会话）
+            e.stopPropagation();
+            void toggleExpandProject(dirName);
+          }}
+        >
+          {expanded ? '▾' : '▸'}
+        </span>
         <span className="project-item-icon">{escapeHtml(initial)}</span>
         <span className="project-item-name">{escapeHtml(name)}</span>
         {count > 0 && <span className="project-item-sessioncount">{count}</span>}
