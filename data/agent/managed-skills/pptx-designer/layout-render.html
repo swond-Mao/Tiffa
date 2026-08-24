@@ -1,0 +1,82 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+.aip-root{
+  --aip-type-display:128px; --aip-type-title:78px; --aip-type-subtitle:42px;
+  --aip-type-en:28px; --aip-type-body:30px; --aip-type-small:24px; --aip-type-mono:24px;
+  --aip-pad-x:108px; --aip-pad-top:92px; --aip-pad-bottom:84px; --aip-gap:40px;
+  --aip-ink:#2b2b30; --aip-ink-2:#56565c; --aip-ink-3:#9a9ba4;
+  --aip-red:#e8503a; --aip-blue:#5b8def; --aip-green:#46b083; --aip-amber:#e0a23a; --aip-violet:#7a5ae0;
+  position:relative; width:100%; height:100%; overflow:hidden;
+  font-family:'Noto Sans SC',system-ui,sans-serif; color:var(--aip-ink);
+  -webkit-font-smoothing:antialiased;
+}
+.aip-root *{box-sizing:border-box;}
+
+/* backgrounds */
+.aip-bg{position:absolute;inset:0;}
+.aip-bg-a{background:
+  radial-gradient(40% 52% at 16% 20%, rgba(120,150,255,.22), transparent 70%),
+  radial-gradient(34% 44% at 84% 14%, rgba(255,150,195,.18), transparent 72%),
+  radial-gradient(42% 52% at 80% 84%, rgba(110,212,172,.20), transparent 72%),
+  radial-gradient(36% 46% at 22% 88%, rgba(245,202,128,.16), transparent 72%),
+  linear-gradient(135deg, #eef0f5, #e6e7ee);}
+.aip-bg-b{background:
+  radial-gradient(38% 50% at 82% 18%, rgba(245,196,150,.22), transparent 72%),
+  radial-gradient(36% 46% at 14% 26%, rgba(150,170,255,.18), transparent 72%),
+  radial-gradient(44% 54% at 24% 86%, rgba(255,160,190,.16), transparent 72%),
+  radial-gradient(38% 48% at 84% 82%, rgba(120,210,180,.16), transparent 72%),
+  linear-gradient(135deg, #f1efec, #e9e8e6);}
+.aip-bg::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(120% 80% at 50% -10%, rgba(255,255,255,.55), transparent 55%);}
+
+.aip-content{position:absolute;inset:0;
+  padding:var(--aip-pad-top) var(--aip-pad-x) var(--aip-pad-bottom);
+  display:flex;flex-direction:column;}
+
+/* tags / pills */
+.aip-tag{display:inline-block;white-space:nowrap;padding:5px 15px;border-radius:9px;color:#fff;
+  font-weight:700;font-size:var(--aip-type-small);letter-spacing:.04em;line-height:1.3;}
+.aip-tag-red{background:var(--aip-red);} .aip-tag-blue{background:var(--aip-blue);}
+.aip-tag-green{background:var(--aip-green);} .aip-tag-amber{background:var(--aip-amber);}
+.aip-tag-violet{background:var(--aip-violet);}
+
+.aip-mono{font-family:'Space Mono',monospace;color:var(--aip-ink-3);
+  font-size:var(--aip-type-mono);letter-spacing:.02em;margin-top:34px;}
+.aip-en{font-family:'Space Mono',monospace;text-transform:uppercase;letter-spacing:.16em;
+  color:#aaabb4;font-size:var(--aip-type-en);}
+
+/* slide head block */
+.aip-head{display:flex;flex-direction:column;gap:14px;}
+.aip-head .aip-kicker{align-self:flex-start;}
+.aip-head h2{margin:0;font-size:var(--aip-type-title);font-weight:900;color:var(--aip-ink);
+  letter-spacing:.012em;line-height:1.05;}
+.aip-head .aip-sub{display:flex;align-items:baseline;gap:20px;flex-wrap:wrap;}
+.aip-head .aip-sub .aip-cn{font-size:var(--aip-type-subtitle);font-weight:700;color:#7e7f8a;}
+
+.aip-glass{background:rgba(255,255,255,.5);backdrop-filter:blur(28px) saturate(140%);
+  -webkit-backdrop-filter:blur(28px) saturate(140%);
+  border:1px solid rgba(255,255,255,.7);border-radius:24px;
+  box-shadow:0 1px 0 rgba(255,255,255,.75) inset,0 24px 60px rgba(70,72,100,.13);}
+
+/* entrance — transform-only so a frozen/paused timeline or print/reduced-motion
+   can never hide content; the visible end-state is the base style. */
+@media (prefers-reduced-motion:no-preference){
+  [data-deck-active] .aip-content > *{animation:aip-rise .55s both;}
+  [data-deck-active] .aip-content > *:nth-child(2){animation-delay:.05s;}
+  [data-deck-active] .aip-content > *:nth-child(3){animation-delay:.1s;}
+  [data-deck-active] .aip-content > *:nth-child(4){animation-delay:.15s;}
+  @keyframes aip-rise{from{transform:translateY(14px);}to{transform:none;}}
+}
+
+/* Full-bleed media layers (data-aip-media-layer) sit under the typographic
+   layers (z 3-4), and the entrance animation above pins every .aip-content
+   child in its own stacking context — an empty slot's own z-index can never
+   escape it, so under a full-page composition (mag cover) the slot is
+   unclickable everywhere. While the slot is EMPTY and the deck is in edit
+   mode, lift the media layer above the type so click-to-upload works
+   anywhere; once media lands (or in view/present mode) the layer drops back
+   under the text. Same trade-off the theme04 hero cover shipped with, gated
+   tighter. */
+/* !important: some layers carry an inline z-index (hero overlay pins itself
+   at 0); the edit-mode lift must beat inline values too. */
+body[data-mode="edit"] [data-aip-media-layer]:has([data-aip-slot-empty]){z-index:6 !important;}
+</style></head><body><div id="deck"><div class="slide" style="width:1280px;height:720px;position:relative;overflow:hidden"><div class="aip-root"><div class="aip-bg aip-bg-a"></div><div class="aip-content"><div style="position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center"><div style="font-family:&#x27;Space Mono&#x27;, monospace;text-transform:uppercase;letter-spacing:.18em;font-size:30px;color:rgba(232,80,58,0.92);font-weight:700">2024 全年 · 美国 AI 风险投资</div><div style="display:flex;align-items:baseline;gap:18px;margin-top:14px;justify-content:center"><span style="display:inline-block;font-size:400px;font-weight:900;line-height:1;padding-bottom:0.1em;letter-spacing:-.02em;color:var(--aip-ink);background-image:linear-gradient(180deg, var(--aip-ink) 58%, rgba(232,80,58,0.85));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent">970</span><span style="font-size:84px;font-weight:900;color:#e8503a;line-height:1">亿美元</span></div><p style="margin:26px 0 0;max-width:1180px;font-size:40px;line-height:1.45;color:var(--aip-ink-2);font-weight:500;text-wrap:pretty"><span>创历史新高，占全美风险投资<span style="background:linear-gradient(180deg, transparent 0 42%, rgba(232,80,58,0.34) 42% 92%, transparent 92%);padding:0 .08em;border-radius:4px;font-weight:700;color:var(--aip-ink)">近三分之一</span>。</span></p><div style="display:flex;gap:26px;margin-top:56px;justify-content:center;flex-wrap:wrap"><div class="aip-glass " style="width:max-content;padding:28px 40px;text-align:left;border-radius:22px;background:linear-gradient(150deg, rgba(232,80,58,0.16), rgba(232,80,58,0.05));border:1px solid rgba(232,80,58,0.45);box-shadow:0 22px 50px rgba(232,80,58,0.22)"><div style="display:flex;align-items:baseline;gap:4px;white-space:nowrap"><span style="font-size:76px;font-weight:900;color:#e8503a;line-height:1">97</span><span style="font-size:34px;font-weight:700;color:var(--aip-ink-3)"> 笔</span></div><div style="margin-top:10px;font-size:25px;color:var(--aip-ink-2);font-weight:500;white-space:nowrap">单笔 ≥ 1 亿美元事件</div></div><div class="aip-glass " style="width:max-content;padding:28px 40px;text-align:left;border-radius:22px"><div style="display:flex;align-items:baseline;gap:4px;white-space:nowrap"><span style="font-size:76px;font-weight:900;color:var(--aip-ink);line-height:1">≈10</span><span style="font-size:34px;font-weight:700;color:var(--aip-ink-3)"> 亿</span></div><div style="margin-top:10px;font-size:25px;color:var(--aip-ink-2);font-weight:500;white-space:nowrap">平均单笔融资额</div></div><div class="aip-glass " style="width:max-content;padding:28px 40px;text-align:left;border-radius:22px"><div style="display:flex;align-items:baseline;gap:4px;white-space:nowrap"><span style="font-size:76px;font-weight:900;color:var(--aip-ink);line-height:1">43.3</span><span style="font-size:34px;font-weight:700;color:var(--aip-ink-3)">%</span></div><div style="margin-top:10px;font-size:25px;color:var(--aip-ink-2);font-weight:500;white-space:nowrap">通用大模型赛道占比</div></div></div><div class="aip-mono" style="margin-top:52px">*/ 大数字 · 一眼看清资本体量 /*</div></div></div></div></div></div></body></html>

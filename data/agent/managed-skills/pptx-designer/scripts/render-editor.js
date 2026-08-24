@@ -58,7 +58,8 @@ function elHtml(el, page, theme) {
         inner = esc(el.text || '');
       }
       const lineHpx = lineH ? `line-height:${lineH / fs};` : '';
-      return `<div style="position:absolute;${style}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
+      const op = el.transparency !== undefined ? `opacity:${((100 - el.transparency) / 100).toFixed(2)};` : '';
+      return `<div style="position:absolute;${style}${op}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
     }
     case 'rect':
     case 'roundRect': {
@@ -411,7 +412,8 @@ function elHtml(el, page, theme){
       if(el.runs && el.runs.length){
         inner = el.runs.map(r=>'<span style="font-weight:'+(r.bold?'bold':'normal')+';color:'+(r.color||color)+';font-size:'+((r.fontSize||fs))+'px">'+esc(r.text)+'</span>').join('');
       } else inner = esc(el.text||'');
-      return '<div style="position:absolute;'+style+'font-size:'+fs+'px;font-weight:'+(el.bold?'bold':'normal')+';color:'+color+';text-align:'+align+';display:flex;align-items:'+(valign==='middle'?'center':valign==='bottom'?'flex-end':'flex-start')+';white-space:pre-wrap">'+inner+'</div>';
+      const op2 = el.transparency !== undefined ? 'opacity:'+((100-el.transparency)/100).toFixed(2)+';' : '';
+      return '<div style="position:absolute;'+style+op2+'font-size:'+fs+'px;font-weight:'+(el.bold?'bold':'normal')+';color:'+color+';text-align:'+align+';display:flex;align-items:'+(valign==='middle'?'center':valign==='bottom'?'flex-end':'flex-start')+';white-space:pre-wrap">'+inner+'</div>';
     }
     case 'rect': case 'roundRect':
       return '<div style="position:absolute;'+style+'background:'+(el.fill||'transparent')+';'+(el.type==='roundRect'||el.radius!==undefined?'border-radius:'+(el.radius||8)+'px;':'')+((el.lineColor)?'border:1px solid '+el.lineColor+';':'')+'"></div>';

@@ -60,7 +60,8 @@ function elHtml(el, page, theme) {
       }
       const lineHpx = lineH ? `line-height:${lineH / fs};` : '';
       const extra = el.secondary ? `color:${subColor};font-size:${Math.round(fs * 0.78)}px;` : '';
-      return `<div style="position:absolute;${style}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}${extra}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
+      const op = el.transparency !== undefined ? `opacity:${((100 - el.transparency) / 100).toFixed(2)};` : '';
+      return `<div style="position:absolute;${style}${op}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}${extra}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
     }
     case 'rect':
     case 'roundRect': {
