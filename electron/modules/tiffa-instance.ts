@@ -86,6 +86,8 @@ export class TiffaInstance {
   _pendingAskIds = new Set<string>();
   _rpcChunkBuffer: Map<string, { count: number; chunks: Buffer[]; received: number; byteLength: number }> | null = null;
   stderrDecoder: StringDecoder | null = null;
+  /** 最近 stderr 尾部（环形，≤4000 字符）：exit 时识别「配置致命错误」用 */
+  private _stderrTail = '';
 
   static _titleGenerateCallback: ((inst: TiffaInstance) => void) | null = null;
 
@@ -171,10 +173,9 @@ export class TiffaInstance {
         console.warn(`[TiffaInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
       }
     });
-
-    this.stderrDecoder = new StringDecoder('utf8');
     proc.stderr!.on('data', (chunk: Buffer) => {
       const text = this.stderrDecoder!.write(chunk).trim();
+      this._stderrTail = (this._stderrTail + '\n' + text).slice(-4000);
       if (text) console.log(`[tiffa:stderr:${this._shortCwd()}]`, text);
     });
 
@@ -213,11 +214,20 @@ export class TiffaInstance {
         }, 3000);
       }
 
+      // 配置致命错误识别：models.yml schema 校验失败 / 无可用模型时内核启动即退（exit≠0），
+      // 自动重启救不了它（每次都读同一份坏配置）→ 把原因带给前端弹明确提示，而非无声重启循环。
+      let fatalReason: string | null = null;
+      if (code !== null && code !== 0 && !this.userKilled) {
+        const m = this._stderrTail.match(/(No models available[^\n]*|models\.yml validation failed[^\n]*|Schema error:[^\n]*)/i);
+        if (m) fatalReason = m[1].trim();
+      }
+
       if (_mainWindow && !_mainWindow.isDestroyed()) {
         try {
           _mainWindow.webContents.send('tiffa:exited', {
             code, signal, cwd: this.cwd, sessionId: this.sessionId,
             autoRestarting: shouldRestart, crashCount: this.crashCount,
+            fatalReason,
           });
         } catch (e) {
           console.warn(`[TiffaInstance:${this._shortCwd()}] 通知渲染进程 exited 失败:`, e);
@@ -457,7 +467,7 @@ export class TiffaInstance {
         this._pendingAskIds.delete((event.targetId as string) || (event.id as string));
         this._pendingAskIds.delete(event.id as string);
         mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req cancel target=${event.targetId || event.id}`);
-      } else if (['editor', 'select', 'confirm', 'input'].includes(m)) {
+      } else if (['editor', 'select', 'confirm', 'input', 'askDialog'].includes(m)) {
         this._pendingAskIds.add(event.id as string);
         mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req ${m} id=${event.id} pending=${this._pendingAskIds.size}`);
       }

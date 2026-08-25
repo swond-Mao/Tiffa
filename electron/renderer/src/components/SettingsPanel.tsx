@@ -103,33 +103,44 @@ const PRESET_GROUPS: { label: string; cat: ProviderPreset['cat']; items: Provide
 
 // ── 工具 ──
 
+// 双引号 YAML 标量转义：反斜杠与双引号必须转义，否则 Key/名称含特殊字符时产出坏 YAML。
+function yq(v: unknown): string {
+  return String(v ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+// 数字字段强转：内核 schema 要求 number，字符串数字会导致整个 providers 配置被禁用（内核启动即崩）。
+function ynum(v: unknown, dflt: number): number {
+  const n = typeof v === 'number' ? v : Number(String(v ?? '').trim());
+  return Number.isFinite(n) ? n : dflt;
+}
+
 function serializeModelsYaml(data: TiffaModelsConfig | null): string {
   const lines = ['# Tiffa models.yml', ''];
   if (!data || !data.providers) return lines.join('\n');
   lines.push('providers:');
   for (const [k, p] of Object.entries(data.providers)) {
-    lines.push(`  ${k}:`, `    baseUrl: "${p.baseUrl || ''}"`, `    api: "${p.api || 'openai-completions'}"`);
+    lines.push(`  ${k}:`, `    baseUrl: "${yq(p.baseUrl)}"`, `    api: "${p.api ? yq(p.api) : 'openai-completions'}"`);
     // apiKey 必须始终落盘：内核 getAvailable() 只收录「有凭据或 keyless」的 provider，
     // 空值省略会导致整个供应商从模型列表消失（健康检查不走内核，仍会显示在线）。
     // 惯例：无认证端点写 "none"（与旁路模型 callCompletion/健康检查口径一致）。
-    lines.push(`    apiKey: "${p.apiKey || 'none'}"`);
+    lines.push(`    apiKey: "${p.apiKey ? yq(p.apiKey) : 'none'}"`);
     if (p.models && p.models.length > 0) {
       lines.push('    models:');
       for (const m of p.models) {
         lines.push(
-          `      - id: "${m.id || ''}"`,
-          `        name: "${m.name || m.id || ''}"`,
+          `      - id: "${m.id ? yq(m.id) : ''}"`,
+          `        name: "${yq(m.name || m.id || '')}"`,
           `        reasoning: ${m.reasoning ? 'true' : 'false'}`,
           '        input:',
-          ...(m.input || ['text']).map((i) => `          - "${i}"`),
+          ...(m.input && m.input.length > 0 ? m.input : ['text']).map((i) => `          - "${yq(i)}"`),
           `        supportsTools: ${m.supportsTools ? 'true' : 'false'}`,
-          `        contextWindow: ${m.contextWindow || 128000}`,
-          `        maxTokens: ${m.maxTokens || 8192}`,
+          `        contextWindow: ${ynum(m.contextWindow, 128000)}`,
+          `        maxTokens: ${ynum(m.maxTokens, 8192)}`,
           '        cost:',
-          `          input: ${(m.cost && m.cost.input) || 0}`,
-          `          output: ${(m.cost && m.cost.output) || 0}`,
-          `          cacheRead: ${(m.cost && m.cost.cacheRead) || 0}`,
-          `          cacheWrite: ${(m.cost && m.cost.cacheWrite) || 0}`,
+          `          input: ${ynum(m.cost?.input, 0)}`,
+          `          output: ${ynum(m.cost?.output, 0)}`,
+          `          cacheRead: ${ynum(m.cost?.cacheRead, 0)}`,
+          `          cacheWrite: ${ynum(m.cost?.cacheWrite, 0)}`,
         );
       }
     }

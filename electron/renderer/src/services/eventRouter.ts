@@ -564,7 +564,7 @@ function handleEvent(event: TiffaEventFrame): void {
         ui.dequeueAsk(id);
         break;
       }
-      const INTERACTIVE = ['editor', 'select', 'confirm', 'input'];
+      const INTERACTIVE = ['editor', 'select', 'confirm', 'input', 'askDialog'];
       if (INTERACTIVE.includes(method)) {
         // 所有会话的 ask 统一入全局队列——不再隐藏后台 ask，队列头常显
         dbgLog('ask', `enqueueAsk method=${method} sid=${ssid ?? 'null'} active=${sessions.activeSessionId ?? 'null'} bg=${ssid && sessions.activeSessionId ? ssid !== sessions.activeSessionId : 'n/a'}`);
@@ -794,7 +794,7 @@ async function refreshSessionTreeWithRetry(dirName: string, expectPath: string, 
 
 // ── onExited ──
 
-function handleExited(data: { sessionId?: string; cwd?: string; autoRestarting?: boolean; crashCount?: number; code?: number; signal?: string | null }): void {
+function handleExited(data: { sessionId?: string; cwd?: string; autoRestarting?: boolean; crashCount?: number; code?: number; signal?: string | null; fatalReason?: string | null }): void {
   const sessions = useSessionsStore.getState();
   const projects = useProjectsStore.getState();
   const proc = useProcStore.getState();
@@ -836,10 +836,18 @@ function handleExited(data: { sessionId?: string; cwd?: string; autoRestarting?:
     stopStallCheck(activePath);
     stopFirstResponseCheck(activePath);
     ui.setStatusText(`重启中 (第${data.crashCount}次)...`);
-    ui.addToast(
-      'warning',
-      `内核进程异常退出（code ${data.code}），正在自动重启（第${data.crashCount}次）…请稍候，就绪后可继续发送。`,
-    );
+    if (data.fatalReason) {
+      // 配置致命错误（如 models.yml 校验失败/无可用模型）：重启救不了，指引用户去修配置
+      ui.addToast(
+        'error',
+        `模型配置无法加载：${data.fatalReason}。请到 设置 → 模型配置 检查后保存（自动重启无法修复此类问题）。`,
+      );
+    } else {
+      ui.addToast(
+        'warning',
+        `内核进程异常退出（code ${data.code}），正在自动重启（第${data.crashCount}次）…请稍候，就绪后可继续发送。`,
+      );
+    }
     return;
   }
   proc.setReady(false);
@@ -872,7 +880,7 @@ export function initEventRouter(): void {
     handleEvent(event);
   });
   window.tiffaDesktop.onExited((data) =>
-    handleExited(data as { sessionId?: string; cwd?: string; autoRestarting?: boolean; crashCount?: number; code?: number; signal?: string | null }),
+    handleExited(data as { sessionId?: string; cwd?: string; autoRestarting?: boolean; crashCount?: number; code?: number; signal?: string | null; fatalReason?: string | null }),
   );
 
   // 兜底同步实例就绪态：启动恢复（实例已就绪但无 ready 事件）/事件丢失等场景，

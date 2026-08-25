@@ -17,7 +17,6 @@ exports.setMigrateCallback = setMigrateCallback;
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const child_process_1 = require("child_process");
-const string_decoder_1 = require("string_decoder");
 const constants_1 = require("./constants");
 const session_utils_1 = require("./session-utils");
 const process_utils_1 = require("./process-utils");
@@ -69,6 +68,8 @@ class TiffaInstance {
     _pendingAskIds = new Set();
     _rpcChunkBuffer = null;
     stderrDecoder = null;
+    /** 最近 stderr 尾部（环形，≤4000 字符）：exit 时识别「配置致命错误」用 */
+    _stderrTail = '';
     static _titleGenerateCallback = null;
     static setTitleGenerateCallback(fn) {
         TiffaInstance._titleGenerateCallback = fn;
@@ -147,9 +148,9 @@ class TiffaInstance {
                 console.warn(`[TiffaInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
             }
         });
-        this.stderrDecoder = new string_decoder_1.StringDecoder('utf8');
         proc.stderr.on('data', (chunk) => {
             const text = this.stderrDecoder.write(chunk).trim();
+            this._stderrTail = (this._stderrTail + '\n' + text).slice(-4000);
             if (text)
                 console.log(`[tiffa:stderr:${this._shortCwd()}]`, text);
         });
@@ -189,11 +190,20 @@ class TiffaInstance {
                     }
                 }, 3000);
             }
+            // 配置致命错误识别：models.yml schema 校验失败 / 无可用模型时内核启动即退（exit≠0），
+            // 自动重启救不了它（每次都读同一份坏配置）→ 把原因带给前端弹明确提示，而非无声重启循环。
+            let fatalReason = null;
+            if (code !== null && code !== 0 && !this.userKilled) {
+                const m = this._stderrTail.match(/(No models available[^\n]*|models\.yml validation failed[^\n]*|Schema error:[^\n]*)/i);
+                if (m)
+                    fatalReason = m[1].trim();
+            }
             if (_mainWindow && !_mainWindow.isDestroyed()) {
                 try {
                     _mainWindow.webContents.send('tiffa:exited', {
                         code, signal, cwd: this.cwd, sessionId: this.sessionId,
                         autoRestarting: shouldRestart, crashCount: this.crashCount,
+                        fatalReason,
                     });
                 }
                 catch (e) {
@@ -435,7 +445,7 @@ class TiffaInstance {
                 this._pendingAskIds.delete(event.id);
                 (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] ui-req cancel target=${event.targetId || event.id}`);
             }
-            else if (['editor', 'select', 'confirm', 'input'].includes(m)) {
+            else if (['editor', 'select', 'confirm', 'input', 'askDialog'].includes(m)) {
                 this._pendingAskIds.add(event.id);
                 (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] ui-req ${m} id=${event.id} pending=${this._pendingAskIds.size}`);
             }

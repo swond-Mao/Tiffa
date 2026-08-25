@@ -21,6 +21,7 @@ const tiffa_manager_1 = require("./modules/tiffa-manager");
 const window_setup_1 = require("./modules/window-setup");
 const constants_1 = require("./modules/constants");
 const session_utils_1 = require("./modules/session-utils");
+const models_config_1 = require("./modules/models-config");
 /**
  * Tiffa Desktop - Electron Main Process
  *
@@ -103,28 +104,18 @@ try {
 catch (e) {
     console.warn('[config] 恢复 models.yml 失败:', e.message);
 }
-// ── 自愈：provider 缺凭据时补 apiKey: "none" ──
-// 内核 ModelRegistry.getAvailable() 只收录「有 apiKey 或 auth: none（keyless）」的 provider，
-// 旧版本 UI 保存时 Key 留空会整行省略 → 该供应商从模型列表整体消失（健康检查不走内核仍在线）。
-// 此处幂等修复历史脏数据：有 baseUrl、无 apiKey、无 auth 字段的 provider 补写 "none"。
+// ── 启动自愈：models.yml 历史脏数据清洗（复用 sanitizeModelsConfig，幂等）──
+// 覆盖：缺 apiKey / 空 apiKey 补 "none"；contextWindow/maxTokens/cost.* 字符串数字转回数字。
+// 内核 schema 校验失败会禁用整个 providers → 无可用模型 → 内核启动即退（反复崩溃），此处兜底。
 try {
     const MODELS_YML_HEAL = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'models.yml');
     if (fs_1.default.existsSync(MODELS_YML_HEAL)) {
         const healed = js_yaml_1.default.load(fs_1.default.readFileSync(MODELS_YML_HEAL, 'utf8'));
-        const providersHeal = healed && typeof healed === 'object' ? healed.providers : undefined;
-        if (providersHeal && typeof providersHeal === 'object') {
-            let changed = false;
-            for (const p of Object.values(providersHeal)) {
-                if (p && p.baseUrl && !p.apiKey && p.auth === undefined) {
-                    p.apiKey = 'none';
-                    changed = true;
-                }
-            }
-            if (changed) {
-                fs_1.default.copyFileSync(MODELS_YML_HEAL, MODELS_YML_HEAL + '.bak-heal-apikey');
-                fs_1.default.writeFileSync(MODELS_YML_HEAL, js_yaml_1.default.dump(healed), 'utf8');
-                console.log('[config] 已为缺 apiKey 的 provider 补写 "none"（原文件备份 .bak-heal-apikey）');
-            }
+        const { changed } = (0, models_config_1.sanitizeModelsConfig)(healed);
+        if (changed) {
+            fs_1.default.copyFileSync(MODELS_YML_HEAL, MODELS_YML_HEAL + '.bak-heal-apikey');
+            fs_1.default.writeFileSync(MODELS_YML_HEAL, js_yaml_1.default.dump(healed), 'utf8');
+            console.log('[config] models.yml 自愈完成（原文件备份 .bak-heal-apikey）');
         }
     }
 }
@@ -964,13 +955,25 @@ function setupIpc() {
     });
     electron_1.ipcMain.handle('models:write', async (event, yamlContent) => {
         try {
-            // Validate YAML before writing
-            js_yaml_1.default.load(yamlContent);
+            // 1) 语法校验
+            const data = js_yaml_1.default.load(yamlContent);
+            let out = yamlContent;
+            if (data && typeof data === 'object') {
+                // 2) 幂等清洗（补 apiKey "none"、数字字符串转数字），有改动则以清洗后内容落盘
+                const { changed } = (0, models_config_1.sanitizeModelsConfig)(data);
+                // 3) schema 校验：不过 → 明确报错，拒绝写入（否则内核禁用整个 providers，启动即崩）
+                const errs = (0, models_config_1.validateModelsConfig)(data);
+                if (errs.length > 0) {
+                    return { error: '模型配置存在问题，未保存：\n' + errs.join('\n') };
+                }
+                if (changed)
+                    out = js_yaml_1.default.dump(data);
+            }
             // Backup current file
             if (fs_1.default.existsSync(MODELS_YML)) {
                 fs_1.default.copyFileSync(MODELS_YML, MODELS_YML_BACKUP);
             }
-            fs_1.default.writeFileSync(MODELS_YML, yamlContent, 'utf8');
+            fs_1.default.writeFileSync(MODELS_YML, out, 'utf8');
             return { success: true };
         }
         catch (err) {
@@ -3063,7 +3066,58 @@ else {
         }
     });
 }
+// ── ask 多题对话框协议自愈：给内核 RPC UI 适配器补 askDialog 方法 ──
+// 背景：ask 工具多问有原生富对话框通道（context.ui.askDialog），但 rpc-ui 模式下内核 RPC
+// 适配器只实现了 select/confirm/input/editor，多问被降级成逐题 select（桌面端一题一题弹）。
+// 此处在 cli.js 的唯一锚点（RPC UI 类的 select 方法）后注入一个 askDialog 方法，
+// 整批 questions 一次下发，渲染层同屏作答后一次性回传 results。
+// 内核升级后锚点漂移则仅告警：不阻断启动，退回逐题流程（功能降级不坏）。
+const ASK_DIALOG_MARKER = 'method:"askDialog"';
+const ASK_DIALOG_ANCHOR = 'select(d,A,C){return YEn(this.pendingRequests,this.output,C,void 0,{method:"select",title:d,options:A.map(R8n),timeout:C?.timeout},(N)=>VWf(N,C))}';
+// 注意两点：
+// 1) 必须是箭头函数类字段——ask 工具把 ui.askDialog 取成裸引用后直接调用（this 会丢失），
+//    普通方法形式会抛 "undefined is not an object (evaluating 'this.pendingRequests')"。
+// 2) 类字段后必须跟分号——minified 上下文中 `askDialog=(d,A)=>...confirm(...)` 无分号是语法错误
+//    （esbuild: Expected ";" but found "confirm"）。
+const ASK_DIALOG_INSERT = 'askDialog=(d,A)=>YEn(this.pendingRequests,this.output,A,void 0,{method:"askDialog",title:"请回答以下问题",questions:d,timeout:A?A.timeout:void 0},(N)=>{if(N&&"cancelled"in N&&N.cancelled)return;if(N&&N.value&&N.value.kind==="submit"&&Array.isArray(N.value.results))return N.value;});';
+function healKernelAskDialog() {
+    try {
+        const cliJs = path_1.default.join(constants_1.PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
+        if (!fs_1.default.existsSync(cliJs))
+            return;
+        let s = fs_1.default.readFileSync(cliJs, 'utf8');
+        const bak = cliJs + '.bak-askdialog';
+        const GOOD_TAIL = 'return N.value;});'; // v3 补丁尾（箭头字段 + 分号）
+        if (s.includes(GOOD_TAIL)) {
+            console.log('[kernel-heal] askDialog already patched, skip');
+            return;
+        } // 已是正确版本，跳过
+        if (s.includes(ASK_DIALOG_MARKER)) {
+            // 存在旧版/坏补丁（v1 方法形式 this 丢失 / v2 缺尾分号语法错）→ 从备份恢复原件后重打
+            if (!fs_1.default.existsSync(bak) || fs_1.default.readFileSync(bak, 'utf8').includes(ASK_DIALOG_MARKER)) {
+                console.warn('[kernel-heal] 检测到旧版 askDialog 补丁且无干净备份，跳过（多问 ask 可能异常，需人工恢复内核）');
+                return;
+            }
+            s = fs_1.default.readFileSync(bak, 'utf8');
+            console.log('[kernel-heal] 旧版 askDialog 补丁已从备份恢复原件');
+        }
+        const i = s.indexOf(ASK_DIALOG_ANCHOR);
+        if (i === -1) {
+            console.warn('[kernel-heal] askDialog 锚点未找到（内核版本可能变化），多问 ask 退回逐题回答');
+            return;
+        }
+        if (!fs_1.default.existsSync(bak))
+            fs_1.default.writeFileSync(bak, s, 'utf8'); // 原件仅备份一次
+        const next = s.slice(0, i + ASK_DIALOG_ANCHOR.length) + ASK_DIALOG_INSERT + s.slice(i + ASK_DIALOG_ANCHOR.length);
+        fs_1.default.writeFileSync(cliJs, next, 'utf8');
+        console.log('[kernel-heal] askDialog patched ->', cliJs);
+    }
+    catch (e) {
+        console.warn('[kernel-heal] askDialog 打补丁失败（退回逐题回答）:', e.message);
+    }
+}
 electron_1.app.whenReady().then(() => {
+    healKernelAskDialog();
     setupIpc();
     mainWindow = (0, window_setup_1.createWindow)();
     // 懒启动：不在此处启动 Tiffa，等前端 loadProjects 切换项目时再 activate
