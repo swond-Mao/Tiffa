@@ -38,11 +38,13 @@
                                            "env":  {
                                                        "MNEMOPI_DATA_DIR":  "{{PORTABLE_ROOT}}/data/agent/memories/mnemopi",
                                                        "MNEMOPI_EMBEDDING_MODEL":  "BAAI/bge-small-zh-v1.5",
+                                                       "MNEMOPI_TIER2_DAYS":  "365",
+                                                       "MNEMOPI_TIER3_DAYS":  "1825",
                                                        "HOME":  "{{PORTABLE_ROOT}}/home",
                                                        "USERPROFILE":  "{{PORTABLE_ROOT}}/home"
                                                    },
                                            "enabled":  true,
-                                           "timeout":  300000
+                                           "timeout":  600000
                                        }
                    }
 }
