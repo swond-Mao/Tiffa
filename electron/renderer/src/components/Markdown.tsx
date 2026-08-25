@@ -14,6 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { applyOutputFixes } from '../services/outputFixes';
 import { copyText, handleMessageLinkClick } from '../services/utils';
+import MermaidDiagram from './MermaidDiagram';
 
 /** 链接协议白名单（等价旧版 sanitizeHtml 的 javascript: 拦截） */
 function tiffaUrlTransform(url: string): string {
@@ -103,6 +104,11 @@ function PreBlock({ children }: { children?: ReactNode }) {
   }, [rawText, lang]);
 
   const showHl = hl && hl.raw === rawText;
+
+  // mermaid 代码块：交给图表组件渲染（失败时组件内兜底显示原始代码）
+  if (lang === 'mermaid') {
+    return <MermaidDiagram code={rawText} />;
+  }
 
   return (
     <div ref={wrapRef} className={isTall ? 'collapsible-pre-wrap' : undefined}>

@@ -153,6 +153,15 @@ function UserBody({ msg }: { msg: ChatMessage }) {
   );
 }
 
+// ── 流式期间的 mermaid 占位（结束后由 Markdown 渲染成图）──
+
+/** 把流式文本中的 mermaid 围栏（含未闭合的尾部）折叠成单行占位 */
+function collapseMermaidBlocks(text: string): string {
+  return text
+    .replace(/```mermaid[\s\S]*?```/g, '\n（图表生成中…）')
+    .replace(/```mermaid[\s\S]*$/g, '\n（图表生成中…）');
+}
+
 // ── 助手消息体：thinking / tool / text 顺序渲染 ──
 
 function AssistantBody({ msg }: { msg: ChatMessage }) {
@@ -170,7 +179,7 @@ function AssistantBody({ msg }: { msg: ChatMessage }) {
           // 流式结束再切换回完整 Markdown（代码块/链接/高亮）。
           return (
             <div key={i} className="streaming-plain">
-              {part.text}
+              {collapseMermaidBlocks(part.text)}
             </div>
           );
         }

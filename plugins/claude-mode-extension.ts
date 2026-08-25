@@ -295,6 +295,25 @@ export default async function (pi: any) {
       // 记忆工具：recall/retain/reflect/memory_edit，loadMode 为 discoverable，
       // 需显式加入活跃列表，否则 LLM 看不到这些工具
       const memoryTools = ["recall", "retain", "reflect", "memory_edit"]
+      // mnemopi 官方 MCP 服务（mcp.json 注册）暴露 23 个工具，按白名单裁剪，
+      // 只放行全局库写入与生命周期维护所需的最小集合；其余（共享面/图谱/
+      // 便签/导入导出）对 LLM 隐藏。MCP 异步连接，工具就绪后由下一次
+      // sanitize 调用兜住（session_start + before_agent_start + compacting 重注册）
+      const mnemopiAllow: Record<string, true> = {
+        remember: true,
+        update: true, // 改内容/重要度：偏好演变时原地更新，保留记忆连续性
+        forget: true,
+        invalidate: true,
+        sleep: true,
+        stats: true,
+        diagnose: true, // 记忆系统自检入口，排障不用绕 TTSR 查库
+      }
+      removed.push(
+        ...all.filter((t: string) => {
+          const m = t.match(/^mcp__mnemopi_(.+)$/)
+          return m !== null && !(m[1] in mnemopiAllow)
+        }),
+      )
       let filtered = all.filter((t: string) => !removed.includes(t))
       const missing = memoryTools.filter((t: string) => !filtered.includes(t))
       if (missing.length > 0) {
@@ -682,7 +701,7 @@ export default async function (pi: any) {
         "- 触发时机：用户问「之前/上次/以前讨论过」「记得吗」「查一下历史」，或你不确定某事是否做过时",
         "- 示例：`write xd://recall` 传 `{\"query\": \"ComfyUI 管线配置\"}`",
         "- 返回：相关记忆列表（包含内容、时间、来源）",
-        "- 扩圈：recall 无结果或目标记忆可能在其他项目时，调用 MCP 工具 `wide_recall`（参数 {\"query\": \"检索词\"}）做全项目语义检索；仍无果再读会话文件"
+        "- 扩圈：recall 无结果或目标记忆可能在其他项目时，调用 MCP 工具 `wide_recall`（参数 {\"query\": \"检索词\"}）做全项目语义检索；仍无果再读会话文件",
         "",
         "## retain（记住事实）",
         "- 已开启自动 retain（每 2 轮），一般无需手动调用",
@@ -698,6 +717,32 @@ export default async function (pi: any) {
         "- 用户提及「以前我们怎么实现」：**先 read 该文档**，不够再 recall 语义召回",
         "- 修复确定踩坑后主动写入（### 标题（日期 修复）+ 根因/修复/关键文件/教训）",
         "- 不随会话注入，按需读取",
+      ].join("\n"))
+
+      // ── 全局记忆契约：用户身份/偏好 + 跨项目经验 → mnemopi 全局库（default）──
+      // 分工：项目库由内核 autoRetain 自动维护（记事）；全局库由模型按本契约主动双写（记人 + 规律）。
+      // 这是「长久伙伴」机制的核心：AI.md 是静态人设底座，全局库是对用户认识的动态增量。
+      injected.push([
+        "# 全局记忆契约（mnemopi 全局库 · 记录「人、规律、踩坑」）",
+        "",
+        "项目库自动记录项目事务；**全局库由你负责**——它跨项目共享，是你对用户认识的长期积累。",
+        "",
+        "## 何时写入（mcp__mnemopi_remember）",
+        "遇到以下两类信息时，在正常工作流之外**额外**调用一次 `mcp__mnemopi_remember`：",
+        "1. **用户身份/偏好**：称呼、沟通风格、审美取向、工作习惯、质量要求（例：「PPT 商业推介走鎏金风、医院汇报走稳重卡片风」「回复要结论先行」）",
+        "2. **踩坑/规律(放宽准入)**：所有**确定踩坑**(根因明确+修复已验证)都进,不限于跨项目——语义召回天然按相关性筛,项目级踩坑在无关项目里分数不够不会被带出,不构成污染;跨项目通用的规律(例:「移动硬盘禁用 sed -i」)优先级最高",
+        "",
+        "## 卡片格式（必须结构化，拒绝流水账）",
+        "`[类型]用户偏好|踩坑|身份特征 [范围]通用|<项目名> <一句话结论> 依据:<从哪看出来的>`(项目级踩坑标项目名,通用规律标「通用」)",
+        "",
+        "## 不写入全局库",
+        "- 单个项目的事务进展（归项目库/PROJECT.md）",
+        "- 单次性事实（临时报错、当天日程）",
+        "",
+        "## 生命周期维护",
+        "- 旧记忆与现实冲突：`mcp__mnemopi_invalidate` 标记过期，或 `mcp__mnemopi_forget` 彻底删除",
+        "- 本次会话写过全局库且临近结束：`mcp__mnemopi_sleep` 整理固化一次",
+        "- 不确定全局库现状：`mcp__mnemopi_stats`",
       ].join("\n"))
 
       // ── 进度追踪：每次会话启动先聚合（跨天/周/月 -> 日报/周报/月报 -> PROJECT.md）──

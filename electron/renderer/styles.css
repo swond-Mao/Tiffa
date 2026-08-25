@@ -4797,3 +4797,18 @@ html[data-mode="light"] .muse-tint {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* ── Mermaid 图表块 ── */
+.mermaid-diagram {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  background: hsl(var(--bg-200));
+  border: 1px solid hsl(var(--border-200));
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin: 8px 0;
+}
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+.mermaid-loading { opacity: 0.7; }
+.mermaid-fallback-hint { color: hsl(var(--text-300)); font-size: 12px; margin-bottom: 4px; }
