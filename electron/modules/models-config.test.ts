@@ -4,7 +4,7 @@
  * 进而无可用模型、内核启动即退（Tiffa 表现为反复崩溃）。
  */
 import { describe, it, expect } from 'vitest';
-import { sanitizeModelsConfig, validateModelsConfig } from './models-config';
+import { sanitizeModelsConfig, validateModelsConfig, extractUnsupportedApiProviders } from './models-config';
 
 const validModel = {
   id: 'm1', name: 'm1', reasoning: false, input: ['text'], supportsTools: true,
@@ -87,5 +87,36 @@ describe('validateModelsConfig', () => {
     const errs = validateModelsConfig(data);
     expect(errs.some((e) => e.includes('baseUrl'))).toBe(true);
     expect(errs.some((e) => e.includes('模型 ID'))).toBe(true);
+  });
+
+  it('api 不在内核枚举（ollama-chat/openrouter）→ 报错；缺省 api 合法', () => {
+    const bad = { providers: { p1: { baseUrl: 'http://x/v1', apiKey: 'none', api: 'ollama-chat', models: [validModel] },
+      p2: { baseUrl: 'https://or/api/v1', apiKey: 'sk', api: 'openrouter', models: [validModel] },
+      ok: { baseUrl: 'http://y/v1', apiKey: 'none', models: [validModel] } } };
+    const errs = validateModelsConfig(bad);
+    expect(errs.length).toBe(2);
+    expect(errs[0]).toContain('API 类型');
+  });
+});
+
+describe('extractUnsupportedApiProviders', () => {
+  it('只摘除不兼容 api 的 provider，好配置原样保留', () => {
+    const good = { baseUrl: 'http://127.0.0.1:8080/v1', apiKey: 'none', models: [validModel] };
+    const bad = { baseUrl: 'http://127.0.0.1:11434', apiKey: 'none', api: 'ollama-chat', models: [validModel] };
+    const data = { providers: { good: { ...good }, bad: { ...bad } } };
+    const { removed } = extractUnsupportedApiProviders(data);
+    expect(Object.keys(removed)).toEqual(['bad']);
+    const providers = data.providers as Record<string, unknown>;
+    expect(providers.good).toBeDefined();
+    expect(providers.bad).toBeUndefined();
+    // 摘除后校验通过
+    expect(validateModelsConfig(data)).toEqual([]);
+  });
+
+  it('全部合法/非法输入不炸', () => {
+    expect(extractUnsupportedApiProviders(null).removed).toEqual({});
+    expect(extractUnsupportedApiProviders({}).removed).toEqual({});
+    const data = { providers: { a: { baseUrl: 'http://x/v1', apiKey: 'none', models: [validModel] } } };
+    expect(extractUnsupportedApiProviders(data).removed).toEqual({});
   });
 });

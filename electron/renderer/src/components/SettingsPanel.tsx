@@ -69,11 +69,11 @@ const PRESET_GROUPS: { label: string; cat: ProviderPreset['cat']; items: Provide
     label: '本地 / 自托管',
     cat: 'local',
     items: [
-      { id: 'ollama', name: 'Ollama (本地)', baseUrl: 'http://127.0.0.1:11434', api: 'ollama-chat', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
+      { id: 'ollama', name: 'Ollama (本地)', baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions', authUrl: '', hint: '（OpenAI 兼容端点，本地可留空 Key）', cat: 'local' },
       { id: 'lm-studio', name: 'LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', api: 'openai-completions', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
       { id: 'vllm', name: 'vLLM', baseUrl: 'http://127.0.0.1:8000/v1', api: 'openai-completions', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
-      { id: 'llama-cpp', name: 'llama.cpp', baseUrl: 'http://127.0.0.1:8080', api: 'ollama-chat', authUrl: '', hint: '（本地服务可留空）', cat: 'local' },
-      { id: 'ollama-cloud', name: 'Ollama Cloud', baseUrl: 'https://cloud.ollama.com', api: 'ollama-chat', authUrl: '', hint: '...', cat: 'local' },
+      { id: 'llama-cpp', name: 'llama.cpp', baseUrl: 'http://127.0.0.1:8080/v1', api: 'openai-completions', authUrl: '', hint: '（OpenAI 兼容端点，本地可留空 Key）', cat: 'local' },
+      { id: 'ollama-cloud', name: 'Ollama Cloud', baseUrl: 'https://ollama.com/v1', api: 'openai-completions', authUrl: 'https://ollama.com/settings/keys', hint: '（需 API Key）', cat: 'local' },
     ],
   },
   {
@@ -801,13 +801,11 @@ function AddProviderModal({
                 <option value="openai-responses">OpenAI Responses API (openai-responses)</option>
                 <option value="openai-codex-responses">OpenAI Codex Responses (openai-codex-responses)</option>
                 <option value="anthropic-messages">Anthropic Claude (anthropic-messages)</option>
-                <option value="openrouter">OpenRouter (openrouter)</option>
                 <option value="google-generative-ai">Google Gemini (google-generative-ai)</option>
                 <option value="google-gemini-cli">Google Gemini CLI (google-gemini-cli)</option>
                 <option value="google-vertex">Google Vertex (google-vertex)</option>
                 <option value="azure-openai-responses">Azure OpenAI (azure-openai-responses)</option>
                 <option value="bedrock-converse-stream">AWS Bedrock (bedrock-converse-stream)</option>
-                <option value="ollama-chat">Ollama (ollama-chat)</option>
               </select>
             </label>
 

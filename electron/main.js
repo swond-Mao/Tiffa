@@ -105,17 +105,25 @@ catch (e) {
     console.warn('[config] 恢复 models.yml 失败:', e.message);
 }
 // ── 启动自愈：models.yml 历史脏数据清洗（复用 sanitizeModelsConfig，幂等）──
-// 覆盖：缺 apiKey / 空 apiKey 补 "none"；contextWindow/maxTokens/cost.* 字符串数字转回数字。
+// 覆盖：缺 apiKey / 空 apiKey 补 "none"；contextWindow/maxTokens/cost.* 字符串数字转回数字；
+// api 枚举不支持的 provider（旧版 UI 写出的 ollama-chat/openrouter）整体摘出隔离。
 // 内核 schema 校验失败会禁用整个 providers → 无可用模型 → 内核启动即退（反复崩溃），此处兜底。
 try {
     const MODELS_YML_HEAL = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'models.yml');
     if (fs_1.default.existsSync(MODELS_YML_HEAL)) {
-        const healed = js_yaml_1.default.load(fs_1.default.readFileSync(MODELS_YML_HEAL, 'utf8'));
+        const rawHeal = fs_1.default.readFileSync(MODELS_YML_HEAL, 'utf8');
+        const healed = js_yaml_1.default.load(rawHeal);
         const { changed } = (0, models_config_1.sanitizeModelsConfig)(healed);
-        if (changed) {
+        // api 枚举不兼容的 provider：原样备份到 models.yml.quarantine.bak.yml 后从主文件摘除，
+        // 避免一颗雷炸掉所有自定义供应商（内核 schema 任一错误即整体禁用）
+        const { removed } = (0, models_config_1.extractUnsupportedApiProviders)(healed);
+        if (changed || Object.keys(removed).length > 0) {
             fs_1.default.copyFileSync(MODELS_YML_HEAL, MODELS_YML_HEAL + '.bak-heal-apikey');
+            if (Object.keys(removed).length > 0) {
+                fs_1.default.writeFileSync(MODELS_YML_HEAL + '.quarantine.bak.yml', js_yaml_1.default.dump({ providers: removed }), 'utf8');
+            }
             fs_1.default.writeFileSync(MODELS_YML_HEAL, js_yaml_1.default.dump(healed), 'utf8');
-            console.log('[config] models.yml 自愈完成（原文件备份 .bak-heal-apikey）');
+            console.log(`[config] models.yml 自愈完成（apiKey/数字修复: ${changed}；隔离不兼容 api 供应商: ${Object.keys(removed).join(',') || '无'}；原文件备份 .bak-heal-apikey）`);
         }
     }
 }

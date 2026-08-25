@@ -32,7 +32,7 @@ import {
 } from './modules/session-utils';
 import { killTree, utf8Env } from './modules/process-utils';
 import { resolveDefaultModelFromConfig, findProviderConfig, callCompletion } from './modules/config-utils';
-import { sanitizeModelsConfig, validateModelsConfig } from './modules/models-config';
+import { sanitizeModelsConfig, validateModelsConfig, extractUnsupportedApiProviders } from './modules/models-config';
 import {
   readRemovedCwds, writeRemovedCwds, isRemovedCwd, unremoveCwd, rimraf, rimrafWithRetry,
   readProjectsJson, writeProjectsJson, ensureProjectInJson, cleanupProjectsJson,
@@ -124,17 +124,25 @@ try {
 }
 
 // ── 启动自愈：models.yml 历史脏数据清洗（复用 sanitizeModelsConfig，幂等）──
-// 覆盖：缺 apiKey / 空 apiKey 补 "none"；contextWindow/maxTokens/cost.* 字符串数字转回数字。
+// 覆盖：缺 apiKey / 空 apiKey 补 "none"；contextWindow/maxTokens/cost.* 字符串数字转回数字；
+// api 枚举不支持的 provider（旧版 UI 写出的 ollama-chat/openrouter）整体摘出隔离。
 // 内核 schema 校验失败会禁用整个 providers → 无可用模型 → 内核启动即退（反复崩溃），此处兜底。
 try {
   const MODELS_YML_HEAL = path.join(PORTABLE_ROOT, 'data', 'agent', 'models.yml');
   if (fs.existsSync(MODELS_YML_HEAL)) {
-    const healed = yaml.load(fs.readFileSync(MODELS_YML_HEAL, 'utf8'));
+    const rawHeal = fs.readFileSync(MODELS_YML_HEAL, 'utf8');
+    const healed = yaml.load(rawHeal);
     const { changed } = sanitizeModelsConfig(healed);
-    if (changed) {
+    // api 枚举不兼容的 provider：原样备份到 models.yml.quarantine.bak.yml 后从主文件摘除，
+    // 避免一颗雷炸掉所有自定义供应商（内核 schema 任一错误即整体禁用）
+    const { removed } = extractUnsupportedApiProviders(healed);
+    if (changed || Object.keys(removed).length > 0) {
       fs.copyFileSync(MODELS_YML_HEAL, MODELS_YML_HEAL + '.bak-heal-apikey');
+      if (Object.keys(removed).length > 0) {
+        fs.writeFileSync(MODELS_YML_HEAL + '.quarantine.bak.yml', yaml.dump({ providers: removed }), 'utf8');
+      }
       fs.writeFileSync(MODELS_YML_HEAL, yaml.dump(healed), 'utf8');
-      console.log('[config] models.yml 自愈完成（原文件备份 .bak-heal-apikey）');
+      console.log(`[config] models.yml 自愈完成（apiKey/数字修复: ${changed}；隔离不兼容 api 供应商: ${Object.keys(removed).join(',') || '无'}；原文件备份 .bak-heal-apikey）`);
     }
   }
 } catch (e) {
