@@ -109,7 +109,10 @@ function serializeModelsYaml(data: TiffaModelsConfig | null): string {
   lines.push('providers:');
   for (const [k, p] of Object.entries(data.providers)) {
     lines.push(`  ${k}:`, `    baseUrl: "${p.baseUrl || ''}"`, `    api: "${p.api || 'openai-completions'}"`);
-    if (p.apiKey) lines.push(`    apiKey: "${p.apiKey}"`);
+    // apiKey 必须始终落盘：内核 getAvailable() 只收录「有凭据或 keyless」的 provider，
+    // 空值省略会导致整个供应商从模型列表消失（健康检查不走内核，仍会显示在线）。
+    // 惯例：无认证端点写 "none"（与旁路模型 callCompletion/健康检查口径一致）。
+    lines.push(`    apiKey: "${p.apiKey || 'none'}"`);
     if (p.models && p.models.length > 0) {
       lines.push('    models:');
       for (const m of p.models) {
