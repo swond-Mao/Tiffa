@@ -3508,6 +3508,233 @@ html[data-mode="light"] .muse-tint {
   margin-top: 16px;
 }
 
+/* ── ask 抽屉不挡内容：遮罩减暗（设置面板 #settingsOverlay 保持 0.5 不动）── */
+#extModal {
+  background: hsl(var(--always-black) / 0.15);
+}
+
+/* ── ask 多题对话框：宽屏停靠右侧全高侧板（聊天正文不被卡片遮挡），窄窗口回退居中抽屉 ── */
+@media (min-width: 901px) {
+  .ext-modal-panel.ext-modal-ask {
+    align-self: stretch;          /* 覆盖抽屉的底部对齐，改为整高 */
+    height: 100%;
+    max-height: none;
+    width: min(520px, 44vw);
+    margin-left: auto;            /* 推到右侧（覆盖抽屉的水平居中） */
+    border-radius: 14px 0 0 14px;
+    border-bottom: 1px solid hsl(var(--border-200));
+    border-right: none;
+    /* 让出顶部导航层：#titlebar(38px)+#sessionTabBar(36px) z-index 高于遮罩，
+       会盖住面板顶部——内容必须从其下沿开始，否则标题行/收起按钮点不到 */
+    padding-top: calc(var(--titlebar-height, 38px) + 36px + 14px);
+    box-sizing: border-box;
+  }
+  @keyframes askSlideInRight {
+    from { transform: translateX(60px); opacity: 0.4; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+}
+.ext-modal-panel.ext-modal-ask .ext-modal-actions {
+  position: sticky;
+  bottom: 0;
+  background: hsl(var(--bg-100));
+  border-top: 1px solid hsl(var(--border-200));
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+/* 标题行（标题 + 收起按钮） */
+.ext-ask-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.ext-ask-title-row .ext-modal-title {
+  flex: 1;
+  margin-bottom: 0;
+}
+.ext-ask-collapse-btn {
+  flex: none;
+  border: 1px solid hsl(var(--border-200));
+  background: hsl(var(--bg-200));
+  color: hsl(var(--text-200));
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.ext-ask-collapse-btn:hover {
+  color: hsl(var(--accent-main-100));
+  border-color: hsl(var(--accent-main-000));
+}
+
+/* 收起态：透明遮罩 + 右下角小药丸，完全不遮内容 */
+#extModal.ext-ask-min {
+  background: transparent;
+}
+.ext-ask-min-pill {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid hsl(var(--accent-main-000) / 0.5);
+  border-radius: 999px;
+  background: hsl(var(--bg-100));
+  color: hsl(var(--text-100));
+  font-size: 13px;
+  box-shadow: 0 6px 24px hsl(var(--always-black) / 0.35);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.ext-ask-min-pill:hover {
+  border-color: hsl(var(--accent-main-000));
+}
+.ext-ask-min-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: hsl(var(--accent-main-000));
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* ── 多题对话框：问题块 / 选项行 / 推荐角标 / Other 输入 ── */
+.ext-ask-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+}
+.ext-ask-question + .ext-ask-question {
+  border-top: 1px solid hsl(var(--border-200));
+}
+/* ask 面板标题加大提亮（仅作用于 ask 对话框） */
+.ext-modal-panel.ext-modal-ask .ext-modal-title {
+  font-size: 17px;
+}
+
+.ext-ask-qhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 来源会话标注（标题下一行小字，始终显示） */
+.ext-ask-src {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: hsl(var(--text-200));
+}
+.ext-ask-qnum {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: hsl(var(--accent-main-000) / 0.2);
+  color: hsl(var(--accent-main-100));
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ext-ask-qtag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: hsl(var(--bg-200));
+  border: 1px solid hsl(var(--border-200));
+  color: hsl(var(--text-300));
+  font-size: 11px;
+}
+.ext-ask-qtext {
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--text-100));
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.ext-ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ext-ask-optrow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ext-ask-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid hsl(var(--border-200));
+  border-radius: 6px;
+  background: transparent;
+  color: hsl(var(--text-100));
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ext-ask-opt:hover {
+  border-color: hsl(var(--accent-main-000));
+  background: hsl(var(--accent-main-000) / 0.08);
+}
+.ext-ask-opt.on {
+  border-color: hsl(var(--accent-main-000));
+  background: hsl(var(--accent-main-000) / 0.16);
+}
+.ext-ask-opt-mark {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  color: hsl(var(--text-300));
+  font-size: 13px;
+}
+.ext-ask-opt.on .ext-ask-opt-mark {
+  color: hsl(var(--accent-main-100));
+}
+.ext-ask-opt-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ext-ask-opt-rec {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: hsl(var(--accent-main-000) / 0.2);
+  color: hsl(var(--accent-main-100));
+  font-size: 11px;
+}
+.ext-ask-opt-desc {
+  margin-left: 26px;
+  font-size: 12px;
+  color: hsl(var(--text-300));
+  line-height: 1.5;
+}
+.ext-ask-custom-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--accent-main-000));
+  border-radius: 6px;
+  background: hsl(var(--bg-200));
+  color: hsl(var(--text-100));
+  font-size: 13px;
+}
+.ext-ask-custom-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--accent-main-000) / 0.25);
+}
+
 /* ── 角色卡（AI 身份弹窗：性别 / 性格标签 / 扩写预览） ── */
 .persona-gender-row {
   display: flex;

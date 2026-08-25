@@ -81,6 +81,11 @@ function createWindow() {
             win.webContents.toggleDevTools();
             event.preventDefault();
         }
+        // F5 / Ctrl+R 刷新渲染层（改了前端后无需重启应用；主进程与内核会话不受影响）
+        if (input.type === 'keyDown' && (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r'))) {
+            win.webContents.reload();
+            event.preventDefault();
+        }
     });
     win.webContents.setWindowOpenHandler(({ url }) => {
         if (/^https?:\/\//.test(url)) {

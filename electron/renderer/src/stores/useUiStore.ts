@@ -15,12 +15,29 @@ export type ApprovalMode = 'auto' | 'yolo' | 'normal';
 /** 思考档位（内核协议 set_thinking_level，与 oh-my-pi UI 一致） */
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export interface AskQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** ask 多题对话框的单个问题（内核 askDialog 载荷） */
+export interface AskQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  options: AskQuestionOption[];
+  multi?: boolean;
+  recommended?: number;
+}
+
 export interface AskItem extends TiffaEventFrame {
   id: string;
   method: string;
   title?: string;
   prefill?: string;
   options?: string[];
+  /** method === 'askDialog'：整批问题一次下发，前端同屏作答后一次提交 */
+  questions?: AskQuestion[];
   _sessionId?: string;
   _sessionPath?: string;
 }
