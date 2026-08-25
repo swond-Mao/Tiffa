@@ -296,8 +296,8 @@ export default async function (pi: any) {
       // 需显式加入活跃列表，否则 LLM 看不到这些工具
       const memoryTools = ["recall", "retain", "reflect", "memory_edit"]
       // mnemopi 官方 MCP 服务（mcp.json 注册）暴露 23 个工具，按白名单裁剪，
-      // 只放行全局库写入与生命周期维护所需的最小集合；其余（共享面/图谱/
-      // 便签/导入导出）对 LLM 隐藏。MCP 异步连接，工具就绪后由下一次
+      // 只放行全局库写入、生命周期维护与跨机合并所需的最小集合；其余（共享面/
+      // 图谱/便签/scratchpad）对 LLM 隐藏。MCP 异步连接，工具就绪后由下一次
       // sanitize 调用兜住（session_start + before_agent_start + compacting 重注册）
       const mnemopiAllow: Record<string, true> = {
         remember: true,
@@ -307,6 +307,8 @@ export default async function (pi: any) {
         sleep: true,
         stats: true,
         diagnose: true, // 记忆系统自检入口，排障不用绕 TTSR 查库
+        export: true, // 跨机合并：导出全局库 JSON（含向量文本，不含向量本身）
+        import: true, // 跨机合并：按 id 去重导入（重复合并幂等，force 默认 false 不误删）
       }
       removed.push(
         ...all.filter((t: string) => {
@@ -743,6 +745,7 @@ export default async function (pi: any) {
         "- 旧记忆与现实冲突：`mcp__mnemopi_invalidate` 标记过期，或 `mcp__mnemopi_forget` 彻底删除",
         "- 本次会话写过全局库且临近结束：`mcp__mnemopi_sleep` 整理固化一次",
         "- 不确定全局库现状：`mcp__mnemopi_stats`",
+        "- 跨机合并：`mcp__mnemopi_export` 导出全局库 JSON（拷到另一台机器），`mcp__mnemopi_import` 导入合并（按 id 去重，同一文件重复合并幂等；语义近重复项合并后用 recall 核对并 invalidate）",
       ].join("\n"))
 
       // ── 进度追踪：每次会话启动先聚合（跨天/周/月 -> 日报/周报/月报 -> PROJECT.md）──

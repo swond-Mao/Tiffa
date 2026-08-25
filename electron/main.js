@@ -103,6 +103,34 @@ try {
 catch (e) {
     console.warn('[config] 恢复 models.yml 失败:', e.message);
 }
+// ── 自愈：provider 缺凭据时补 apiKey: "none" ──
+// 内核 ModelRegistry.getAvailable() 只收录「有 apiKey 或 auth: none（keyless）」的 provider，
+// 旧版本 UI 保存时 Key 留空会整行省略 → 该供应商从模型列表整体消失（健康检查不走内核仍在线）。
+// 此处幂等修复历史脏数据：有 baseUrl、无 apiKey、无 auth 字段的 provider 补写 "none"。
+try {
+    const MODELS_YML_HEAL = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'models.yml');
+    if (fs_1.default.existsSync(MODELS_YML_HEAL)) {
+        const healed = js_yaml_1.default.load(fs_1.default.readFileSync(MODELS_YML_HEAL, 'utf8'));
+        const providersHeal = healed && typeof healed === 'object' ? healed.providers : undefined;
+        if (providersHeal && typeof providersHeal === 'object') {
+            let changed = false;
+            for (const p of Object.values(providersHeal)) {
+                if (p && p.baseUrl && !p.apiKey && p.auth === undefined) {
+                    p.apiKey = 'none';
+                    changed = true;
+                }
+            }
+            if (changed) {
+                fs_1.default.copyFileSync(MODELS_YML_HEAL, MODELS_YML_HEAL + '.bak-heal-apikey');
+                fs_1.default.writeFileSync(MODELS_YML_HEAL, js_yaml_1.default.dump(healed), 'utf8');
+                console.log('[config] 已为缺 apiKey 的 provider 补写 "none"（原文件备份 .bak-heal-apikey）');
+            }
+        }
+    }
+}
+catch (e) {
+    console.warn('[config] models.yml 凭据自愈失败:', e.message);
+}
 // ── 确保 grounding.json 存在（computer-use 视觉模型配置，含真实 API Key 不入库；缺失时从 example 恢复，绝不覆盖已有配置） ──
 try {
     const GROUNDING_JSON = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'managed-skills', 'computer-use', 'grounding.json');
