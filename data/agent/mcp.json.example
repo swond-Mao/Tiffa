@@ -45,6 +45,20 @@
                                                    },
                                            "enabled":  true,
                                            "timeout":  600000
+                                       },
+                       "playwright":  {
+                                           "type":  "stdio",
+                                           "command":  "{{PORTABLE_ROOT}}/node/node.exe",
+                                           "args":  [
+                                                        "{{PORTABLE_ROOT}}/skill-deps/node_modules/@playwright/mcp/cli.js"
+                                                    ],
+                                           "env":  {
+                                                       "HOME":  "{{PORTABLE_ROOT}}/home",
+                                                       "USERPROFILE":  "{{PORTABLE_ROOT}}/home",
+                                                       "LOCALAPPDATA":  "{{PORTABLE_ROOT}}/home/AppData/Local"
+                                                   },
+                                           "enabled":  true,
+                                           "timeout":  600000
                                        }
                    }
 }

@@ -370,11 +370,16 @@ if (-not (Test-SkillDep $pdfSkillDir "playwright")) {
 #    （不装进 npm-global：npm install 会按 package.json 剪枝内核树，清掉手工摆放的 bun 等组件）
 #    （start-tiffa.bat / electron 主进程均已注入 NODE_PATH=%ROOT%\skill-deps\node_modules）
 $skillDepsDir = Join-Path $ROOT "skill-deps"
+# 共享依赖：docx（文档生成）+ playwright/@playwright/mcp（浏览器自动化，MCP 插件供内核直接调用）。
+# 旧版本 package.json 缺这些依赖时整体重写（该文件为脚本生成的机器文件，不含用户手工内容）
+$skillDepsTemplate = '{"name":"tiffa-skill-deps","private":true,"dependencies":{"@playwright/mcp":"0.0.79","docx":"^9.7.1","playwright":"1.63.0-alpha-2026-08-05"}}'
 if (-not (Test-Path (Join-Path $skillDepsDir "package.json"))) {
     New-Item -ItemType Directory -Path $skillDepsDir -Force | Out-Null
-    '{"name":"tiffa-skill-deps","private":true,"dependencies":{"docx":"^9.7.1"}}' | Set-Content -Path (Join-Path $skillDepsDir "package.json") -Encoding UTF8
+    $skillDepsTemplate | Set-Content -Path (Join-Path $skillDepsDir "package.json") -Encoding UTF8
+} elseif (-not (Select-String -Path (Join-Path $skillDepsDir "package.json") -Pattern '"playwright"' -Quiet)) {
+    $skillDepsTemplate | Set-Content -Path (Join-Path $skillDepsDir "package.json") -Encoding UTF8
 }
-Install-SkillNpm $skillDepsDir "docx" "docx 共享依赖 (skill-deps)"
+Install-SkillNpm $skillDepsDir "playwright" "skill-deps 共享依赖 (docx/playwright/mcp)"
 
 # ⑤ 无头浏览器 chromium-headless-shell（node/python 两侧 playwright 1.60.0 同版本共享同一缓存）
 #    落到 $ROOT\home（便携，随包拷贝）：dashiai 导出 / pdf 封面 / diagram-drawing 渲染共用
@@ -403,6 +408,9 @@ if ($shellInstalled) {
         try {
             for ($attempt = 1; $attempt -le 3; $attempt++) {
                 if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+                # 移动硬盘上残留的 __dirlock 锁会让安装器误判"已损坏"直接中断下载（实测必现）
+                $lockDir = Join-Path $pwCacheRoot "__dirlock"
+                if (Test-Path $lockDir) { Remove-Item -Recurse -Force $lockDir -ErrorAction SilentlyContinue }
                 cmd /c "cd /d `"$dashiaiProjDir`" && npx --no-install playwright-core install chromium-headless-shell" 2>&1 | Out-String | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     $shellInstalled = @(Get-ChildItem $pwCacheRoot -Directory -Filter "chromium_headless_shell-*" -ErrorAction SilentlyContinue).Count -gt 0
@@ -424,6 +432,34 @@ if ($shellInstalled) {
         }
     } else {
         INFO "跳过无头浏览器下载（dashiai-ppt 依赖未安装成功）"
+    }
+}
+# ⑤b skill-deps playwright 的 chromium 内核版本匹配：skill-deps 与 dashiai 的 playwright
+#    版本可能不同，所需内核修订号也不同（如 v1223 vs v1237）。各自跑一遍幂等安装器，
+#    已就位的版本秒过；缺的补下。锁清理同上（移动硬盘 __dirlock 卡死实测必现）。
+if (Test-SkillDep $skillDepsDir "playwright") {
+    $prevUserProfile = $env:USERPROFILE
+    $prevHome = $env:HOME
+    $prevLocalAppData = $env:LOCALAPPDATA
+    $env:HOME = Join-Path $ROOT "home"
+    $env:USERPROFILE = Join-Path $ROOT "home"
+    $env:LOCALAPPDATA = Join-Path $ROOT "home\AppData\Local"
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+            $lockDir = Join-Path $pwCacheRoot "__dirlock"
+            if (Test-Path $lockDir) { Remove-Item -Recurse -Force $lockDir -ErrorAction SilentlyContinue }
+            cmd /c "cd /d `"$skillDepsDir`" && node node_modules\playwright-core\cli.js install chromium-headless-shell" 2>&1 | Out-String | Out-Null
+            if ($LASTEXITCODE -eq 0) { OK "skill-deps playwright 浏览器内核已匹配"; break }
+            if ($attempt -eq 3) { Write-Host "    [WARN] skill-deps playwright 浏览器内核下载失败（MCP 浏览器工具将不可用，其余功能不受影响）。联网重跑 install.ps1 或手动: cd $ROOT\skill-deps && node node_modules\playwright-core\cli.js install chromium-headless-shell" -ForegroundColor Yellow }
+        }
+    } finally {
+        $env:USERPROFILE = $prevUserProfile
+        $env:HOME = $prevHome
+        $env:LOCALAPPDATA = $prevLocalAppData
+        $ErrorActionPreference = $prevEAP
     }
 }
 
