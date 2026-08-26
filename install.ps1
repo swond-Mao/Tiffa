@@ -172,11 +172,21 @@ if (Test-Path $bunExe) {
 
 # Step 4: 安装 Tiffa 内核
 Step 4 7 "检查 Tiffa 内核"
+# 内核锁死精确版本：ask 多题对话框等运行时补丁依赖特定 cli.js 压缩锚点，
+# 浮动版本会导致补丁锚点失配（表现为 ask 面板功能静默降级）。升级内核须同步验证锚点。
+$KERNEL_VERSION = "17.2.2"
 $agentDir = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent"
+$needKernelInstall = $true
 if (Test-Path $agentDir) {
     $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
-    OK "@oh-my-pi/pi-coding-agent v$ver"
-} else {
+    if ($ver -eq $KERNEL_VERSION) {
+        OK "@oh-my-pi/pi-coding-agent v$ver"
+        $needKernelInstall = $false
+    } else {
+        INFO "内核版本 v$ver 与适配版本 v$KERNEL_VERSION 不一致，重装到锁定版本 ..."
+    }
+}
+if ($needKernelInstall) {
     INFO "安装 Tiffa 内核（国内镜像，失败自动重试）..."
     $npmGlobalDir = Join-Path $ROOT "npm-global"
     if (-not (Test-Path $npmGlobalDir)) {
@@ -224,9 +234,7 @@ if (Test-Path $agentDir) {
         }
         # 用 cmd /c 直接执行完整命令字符串，绕开 PowerShell 函数参数绑定/引号/splatting 等全部陷阱。
         # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装。
-        $npmCmdLine = "cd /d `"$npmGlobalDir`" && npm install @oh-my-pi/pi-coding-agent --save --force --loglevel=error"
-        $npmOut = cmd /c $npmCmdLine 2>&1 | Out-String
-        $npmCode = $LASTEXITCODE
+        $npmCmdLine = "cd /d `"$npmGlobalDir`" && npm install @oh-my-pi/pi-coding-agent@$KERNEL_VERSION --save-exact --save --force --loglevel=error"
         if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
@@ -244,7 +252,7 @@ if (Test-Path $agentDir) {
         $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
         OK "Tiffa 内核 v$ver 安装成功"
     } else {
-        FAIL "Tiffa 内核安装失败：npm install 3 次均失败。请手动执行：cd $ROOT\npm-global && npm install @oh-my-pi/pi-coding-agent --save（需联网），或拷贝源机器 npm-global 目录"
+        FAIL "Tiffa 内核安装失败：npm install 3 次均失败。请手动执行：cd $ROOT\npm-global && npm install @oh-my-pi/pi-coding-agent@$KERNEL_VERSION --save-exact --save（需联网），或拷贝源机器 npm-global 目录"
     }
     Pop-Location
 }
