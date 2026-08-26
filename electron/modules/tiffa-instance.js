@@ -148,7 +148,9 @@ class TiffaInstance {
                 console.warn(`[TiffaInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
             }
         });
+        this.stderrDecoder = new (require('string_decoder').StringDecoder)('utf8');
         proc.stderr.on('data', (chunk) => {
+            if (!this.stderrDecoder) return;
             const text = this.stderrDecoder.write(chunk).trim();
             this._stderrTail = (this._stderrTail + '\n' + text).slice(-4000);
             if (text)
