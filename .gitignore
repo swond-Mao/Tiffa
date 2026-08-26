@@ -160,10 +160,10 @@ electron/renderer/assets_backup/
 
 # React 构建产物（vite build 生成，已入库保证 clone 即用；源码改动后需 npm run build 重新生成并提交）
 
-# 主进程 TS 编译产物（tsc 生成，已入库保证 clone 即用；源码改动后需 npm run build 重新生成并提交）
-electron/main.js
+# 主进程 TS 编译产物（tsc 生成,已入库保证 clone 即用;源码改动后需 npm run build 重新生成并提交）
+# 注意: .js 编译产物必须入库(clone 即用),不可忽略——曾因忽略规则漏交导致远端缺文件启动即崩(4defec1 models-config.js / playwright-utils.js)
+# 仅 .js.map 调试产物忽略
 electron/main.js.map
-electron/modules/*.js
 electron/modules/*.js.map
 
 # Electron 运行时进度（勿入库）
