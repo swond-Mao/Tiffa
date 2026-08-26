@@ -40,6 +40,8 @@ import {
   moveSessionFilesForCwd, discoverWorkspaceProjects,
 } from './modules/project-utils';
 import { isComputerUseEnabled, syncComputerUseMcp } from './modules/computer-use-utils';
+import { isPlaywrightEnabled, syncPlaywrightMcp } from './modules/playwright-utils';
+import { PLAYWRIGHT_ENABLED_FILE } from './modules/constants';
 import { tryGenerateSessionTitle } from './modules/session-utils';
 
 /**
@@ -927,6 +929,22 @@ function setupIpc() {
       syncComputerUseMcp(enabled);
       console.log(`[主进程] Computer Use 开关: ${enabled ? 'ON' : 'OFF'}`);
       return { enabled };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+  // ── Playwright MCP 开关（默认关 -> 不拉起 playwright 进程，新对话启动更快）──
+  syncPlaywrightMcp(isPlaywrightEnabled());
+
+  ipcMain.handle('playwright:status', async () => ({ enabled: isPlaywrightEnabled() }));
+  ipcMain.handle('playwright:toggle', async (event, enabled) => {
+    try {
+      const dir = path.dirname(PLAYWRIGHT_ENABLED_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(PLAYWRIGHT_ENABLED_FILE, enabled ? 'true' : 'false', 'utf8');
+      syncPlaywrightMcp(!!enabled);
+      console.log(`[主进程] Playwright 开关: ${enabled ? 'ON' : 'OFF'}`);
+      return { enabled: !!enabled };
     } catch (err) {
       return { error: err.message };
     }

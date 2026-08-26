@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.currentWorkspaceDir = exports.LRU_KEEP_ALIVE_MS = exports.MAX_INSTANCES = exports.AGENT_DIR = exports.COMPUTER_USE_MCP_JSON = exports.COMPUTER_USE_ENABLED_FILE = exports.REMOVED_CWDS_FILE = exports.PROJECTS_JSON = exports.ARCHIVE_DIR = exports.SESSIONS_DIR = exports.DEFAULT_WORKSPACE_DIR = exports.COMPUTER_USE_EXTENSION_PATH = exports.EXTENSION_PATH = exports.TIFFA_CLI = exports.BUN_EXE = exports.PORTABLE_ROOT = void 0;
+exports.currentWorkspaceDir = exports.LRU_KEEP_ALIVE_MS = exports.MAX_INSTANCES = exports.AGENT_DIR = exports.PLAYWRIGHT_ENABLED_FILE = exports.COMPUTER_USE_MCP_JSON = exports.COMPUTER_USE_ENABLED_FILE = exports.REMOVED_CWDS_FILE = exports.PROJECTS_JSON = exports.ARCHIVE_DIR = exports.SESSIONS_DIR = exports.DEFAULT_WORKSPACE_DIR = exports.COMPUTER_USE_EXTENSION_PATH = exports.EXTENSION_PATH = exports.TIFFA_CLI = exports.BUN_EXE = exports.PORTABLE_ROOT = void 0;
 exports.setCurrentWorkspaceDir = setCurrentWorkspaceDir;
 /**
  * 主进程共享常量
@@ -40,6 +40,7 @@ exports.PROJECTS_JSON = path_1.default.join(exports.PORTABLE_ROOT, 'data', 'agen
 exports.REMOVED_CWDS_FILE = path_1.default.join(exports.PORTABLE_ROOT, 'data', 'agent', 'removed-cwds.json');
 exports.COMPUTER_USE_ENABLED_FILE = path_1.default.join(exports.PORTABLE_ROOT, 'data', 'agent', 'computer-use-enabled');
 exports.COMPUTER_USE_MCP_JSON = path_1.default.join(exports.PORTABLE_ROOT, 'data', 'agent', 'mcp.json');
+exports.PLAYWRIGHT_ENABLED_FILE = path_1.default.join(exports.PORTABLE_ROOT, 'data', 'agent', 'playwright-enabled');
 exports.AGENT_DIR = path_1.default.join(exports.PORTABLE_ROOT, 'data', 'agent');
 exports.MAX_INSTANCES = 8;
 exports.LRU_KEEP_ALIVE_MS = 5 * 60 * 1000;

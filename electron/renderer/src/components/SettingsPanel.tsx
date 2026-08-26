@@ -1284,6 +1284,47 @@ function ComputerUseSection() {
     </div>
   );
 }
+function PlaywrightSection() {
+  const addToast = useUiStore((s) => s.addToast);
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const r = (await window.tiffaDesktop.getPlaywrightStatus()) as { enabled?: boolean };
+        setEnabled(!!(r && r.enabled));
+      } catch {
+        /* ignore */
+      }
+    };
+    void load();
+  }, []);
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">Playwright（浏览器自动化 MCP）</div>
+      <div className="settings-section-desc">开启后每个对话实例启动时都会拉起 playwright MCP 进程（含 playwright-core 加载，新对话准备更慢）；关闭则新对话启动更快。修改后需重启 Tiffa 生效</div>
+      <label className="model-toggle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={async (e) => {
+            const v = e.target.checked;
+            setEnabled(v);
+            try {
+              await window.tiffaDesktop.togglePlaywright(v);
+            } catch {
+              /* ignore */
+            }
+            addToast('info', v ? '已开启（重启 Tiffa 后生效）' : '已关闭（重启 Tiffa 后生效）');
+          }}
+        />
+        <span className="model-toggle-slider" />
+        <span className="model-toggle-label">{enabled ? '已开启（重启 Tiffa 后生效）' : '已关闭'}</span>
+      </label>
+    </div>
+  );
+}
 
 function ConstraintsSection() {
   const [preview, setPreview] = useState('加载中...');
@@ -1553,6 +1594,7 @@ export default function SettingsPanel() {
                 <ModelListSection />
                 <BypassModelSection kind="bypass" />
                 <ComputerUseSection />
+                <PlaywrightSection />
                 <BypassModelSection kind="grounding" />
                 <ThemeSection />
                 <ConstraintsSection />

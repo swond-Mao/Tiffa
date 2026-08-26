@@ -57,7 +57,7 @@
                                                        "USERPROFILE":  "{{PORTABLE_ROOT}}/home",
                                                        "LOCALAPPDATA":  "{{PORTABLE_ROOT}}/home/AppData/Local"
                                                    },
-                                           "enabled":  true,
+                                           "enabled":  false,
                                            "timeout":  600000
                                        }
                    }

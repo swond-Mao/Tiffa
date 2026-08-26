@@ -221,6 +221,9 @@ export interface TiffaDesktopApi {
   toggleXmlTranslation: (enabled: boolean) => Promise<unknown>;
   getComputerUseStatus: () => Promise<{ enabled?: boolean } | undefined>;
   toggleComputerUse: (enabled: boolean) => Promise<unknown>;
+  // ── Playwright（浏览器自动化 MCP）开关 ──
+  getPlaywrightStatus: () => Promise<{ enabled?: boolean } | undefined>;
+  togglePlaywright: (enabled: boolean) => Promise<unknown>;
   // ── Computer Use v4：每应用策略 + 窗口快照 ──
   getComputerUsePolicies: () => Promise<{ default: string; apps: Record<string, string>; popup_ignore: string[] }>;
   setComputerUsePolicies: (cfg: unknown) => Promise<{ ok: boolean; error?: string }>;

@@ -44,6 +44,7 @@ export const PROJECTS_JSON = path.join(PORTABLE_ROOT, 'data', 'agent', 'projects
 export const REMOVED_CWDS_FILE = path.join(PORTABLE_ROOT, 'data', 'agent', 'removed-cwds.json');
 export const COMPUTER_USE_ENABLED_FILE = path.join(PORTABLE_ROOT, 'data', 'agent', 'computer-use-enabled');
 export const COMPUTER_USE_MCP_JSON = path.join(PORTABLE_ROOT, 'data', 'agent', 'mcp.json');
+export const PLAYWRIGHT_ENABLED_FILE = path.join(PORTABLE_ROOT, 'data', 'agent', 'playwright-enabled');
 export const AGENT_DIR = path.join(PORTABLE_ROOT, 'data', 'agent');
 export const MAX_INSTANCES = 8;
 export const LRU_KEEP_ALIVE_MS = 5 * 60 * 1000;

@@ -22,6 +22,8 @@ const window_setup_1 = require("./modules/window-setup");
 const constants_1 = require("./modules/constants");
 const session_utils_1 = require("./modules/session-utils");
 const models_config_1 = require("./modules/models-config");
+const playwright_utils_1 = require("./modules/playwright-utils");
+const constants_2 = require("./modules/constants");
 /**
  * Tiffa Desktop - Electron Main Process
  *
@@ -940,6 +942,23 @@ function setupIpc() {
             syncComputerUseMcp(enabled);
             console.log(`[主进程] Computer Use 开关: ${enabled ? 'ON' : 'OFF'}`);
             return { enabled };
+        }
+        catch (err) {
+            return { error: err.message };
+        }
+    });
+    // ── Playwright MCP 开关（默认关 -> 不拉起 playwright 进程，新对话启动更快）──
+    (0, playwright_utils_1.syncPlaywrightMcp)((0, playwright_utils_1.isPlaywrightEnabled)());
+    electron_1.ipcMain.handle('playwright:status', async () => ({ enabled: (0, playwright_utils_1.isPlaywrightEnabled)() }));
+    electron_1.ipcMain.handle('playwright:toggle', async (event, enabled) => {
+        try {
+            const dir = path_1.default.dirname(constants_2.PLAYWRIGHT_ENABLED_FILE);
+            if (!fs_1.default.existsSync(dir))
+                fs_1.default.mkdirSync(dir, { recursive: true });
+            fs_1.default.writeFileSync(constants_2.PLAYWRIGHT_ENABLED_FILE, enabled ? 'true' : 'false', 'utf8');
+            (0, playwright_utils_1.syncPlaywrightMcp)(!!enabled);
+            console.log(`[主进程] Playwright 开关: ${enabled ? 'ON' : 'OFF'}`);
+            return { enabled: !!enabled };
         }
         catch (err) {
             return { error: err.message };

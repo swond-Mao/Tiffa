@@ -116,6 +116,9 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   // ── Computer Use（电脑控制）开关 ──
   getComputerUseStatus: () => ipcRenderer.invoke('computer-use:status'),
   toggleComputerUse: (enabled) => ipcRenderer.invoke('computer-use:toggle', enabled),
+  // ── Playwright（浏览器自动化 MCP）开关 ──
+  getPlaywrightStatus: () => ipcRenderer.invoke('playwright:status'),
+  togglePlaywright: (enabled) => ipcRenderer.invoke('playwright:toggle', enabled),
 
   // ── Computer Use v4：每应用策略 + 窗口快照热键 ──
   getComputerUsePolicies: () => ipcRenderer.invoke('computer-use:policies:get'),
