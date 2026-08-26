@@ -232,16 +232,22 @@ if ($needKernelInstall) {
             INFO "第 $attempt/3 次尝试 ..."
             Start-Sleep -Seconds 3
         }
-        # 用 cmd /c 直接执行完整命令字符串，绕开 PowerShell 函数参数绑定/引号/splatting 等全部陷阱。
         # --force 强制重新解析，防止 npm 用旧缓存/旧状态误判已安装。
-        $npmCmdLine = "cd /d `"$npmGlobalDir`" && npm install @oh-my-pi/pi-coding-agent@$KERNEL_VERSION --save-exact --save --force --loglevel=error"
+        # 走 Invoke-Npm（便携 node 直跑 npm-cli.js），不依赖 cmd 内 PATH 解析 npm。
+        $npmOut = Invoke-Npm install "@oh-my-pi/pi-coding-agent@$KERNEL_VERSION" "--save-exact" "--save" "--force" "--loglevel=error"
+        $npmCode = $LASTEXITCODE
         if ($npmCode -eq 0 -and (Test-Path $agentDir)) {
             $installed = $true
             break
         }
-        # 诊断：显示 npm 实际输出（失败时，截取前 800 字符）和目录状态
-        Write-Host "    [WARN] npm 安装失败（退出码 $npmCode）" -ForegroundColor Yellow
-        if ($npmOut.Trim()) { Write-Host "    [NPM-OUT] $($npmOut.Trim().Substring(0, [Math]::Min(800, $npmOut.Trim().Length)))" -ForegroundColor Yellow }
+        # 诊断：显示 npm 实际输出（失败时截取前 800 字符；空输出单独提示）
+        Write-Host "    [WARN] npm 安装失败（退出码 $(if ($null -ne $npmCode) { $npmCode } else { '无——命令未执行' })）" -ForegroundColor Yellow
+        $outText = if ($null -ne $npmOut) { ([string]$npmOut).Trim() } else { "" }
+        if ($outText) {
+            Write-Host "    [NPM-OUT] $($outText.Substring(0, [Math]::Min(800, $outText.Length)))" -ForegroundColor Yellow
+        } else {
+            Write-Host "    [NPM-OUT] （无输出——npm 未被执行或环境异常，检查 node/npm 是否就位）" -ForegroundColor Yellow
+        }
         Write-Host "    [DIAG] agentDir 是否存在: $(Test-Path $agentDir)" -ForegroundColor Yellow
         Write-Host "    [DIAG] npm-global 内容: $(if (Test-Path $npmGlobalDir) { (Get-ChildItem $npmGlobalDir -Force | Select-Object -ExpandProperty Name) -join ', ' } else { '不存在' })" -ForegroundColor Yellow
     }
