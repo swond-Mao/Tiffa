@@ -50,8 +50,10 @@ export default function ThinkingPicker() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // 当前模型实际支持的档位（内核实测 state.model.thinking.efforts）；无此信息时不过滤
-  const isSupported = (v: ThinkingLevel) => !efforts || efforts.includes(v);
+  // 当前模型实际支持的档位（内核实测 state.model.thinking.efforts）；无此信息时不过滤。
+  // off 是"关闭思考"开关而非 effort 档位：只要模型可关思考就始终可选（不受 efforts 过滤），
+  // 否则 efforts=[low,medium,xhigh] 时 off 永远置灰。
+  const isSupported = (v: ThinkingLevel) => v === 'off' || !efforts || efforts.includes(v);
 
   const pick = (l: ThinkingLevel) => {
     if (!isSupported(l)) return;

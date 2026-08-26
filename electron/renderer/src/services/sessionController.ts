@@ -1457,7 +1457,8 @@ export async function sendThinkingLevel(level: ThinkingLevel): Promise<void> {
 export async function cycleThinkingLevel(): Promise<void> {
   const ui = useUiStore.getState();
   const efforts = ui.thinkingEfforts;
-  const pool = efforts && efforts.length > 0 ? (THINKING_LEVELS as readonly string[]).filter((l) => efforts.includes(l as ThinkingLevel)) : THINKING_LEVELS;
+  // off 是关闭开关，不参与 efforts 过滤（否则 Ctrl+T 永远切不到关闭）
+  const pool = efforts && efforts.length > 0 ? (THINKING_LEVELS as readonly string[]).filter((l) => l === 'off' || efforts.includes(l as ThinkingLevel)) : THINKING_LEVELS;
   if (pool.length === 0) return;
   const cur = ui.thinkingLevel;
   const idx = cur ? pool.indexOf(cur) : -1;
