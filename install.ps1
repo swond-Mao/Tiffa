@@ -178,12 +178,17 @@ $KERNEL_VERSION = "17.2.2"
 $agentDir = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent"
 $needKernelInstall = $true
 if (Test-Path $agentDir) {
-    $ver = (Get-Content (Join-Path $agentDir "package.json") -Raw | ConvertFrom-Json).version
-    if ($ver -eq $KERNEL_VERSION) {
-        OK "@oh-my-pi/pi-coding-agent v$ver"
-        $needKernelInstall = $false
+    $pkgJson = Join-Path $agentDir "package.json"
+    if (Test-Path $pkgJson) {
+        $ver = (Get-Content $pkgJson -Raw | ConvertFrom-Json).version
+        if ($ver -eq $KERNEL_VERSION) {
+            OK "@oh-my-pi/pi-coding-agent v$ver"
+            $needKernelInstall = $false
+        } else {
+            INFO "内核版本 v$ver 与适配版本 v$KERNEL_VERSION 不一致，重装到锁定版本 ..."
+        }
     } else {
-        INFO "内核版本 v$ver 与适配版本 v$KERNEL_VERSION 不一致，重装到锁定版本 ..."
+        INFO "检测到残缺的内核目录（缺 package.json，多为历史安装中断残留），清理后重装 ..."
     }
 }
 if ($needKernelInstall) {
