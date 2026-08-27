@@ -444,6 +444,9 @@ export default async function (pi: any) {
         // compat 键 8 空格深、其子键 9+ 空格；兄弟键（input: 等）8 空格不会被吞。
         const oldBlock = yml.match(/  bypass-dynamic:[\s\S]*?(?=\n  [\w.-]+:|$)/)?.[0] || ""
         const compatBlock = oldBlock.match(/[ \t]+compat:\n(?:[ \t]{9,}\S[^\n]*\n)*/)?.[0] || ""
+        // 保留 thinking 子块（requiresEffort:false 等）：设置面板「Qwen3.8 深度」落盘在
+        // bypass-dynamic 的 thinking 块，动态重写必须带走，否则 off 档 requiresEffort 丢失。
+        const thinkingBlock = oldBlock.match(/[ \t]+thinking:\n(?:[ \t]{9,}\S[^\n]*\n)*/)?.[0] || ""
         // 防双 /v1：bypass.baseUrl 可能已含 /v1（设置面板里用户填完整路径），不再重复拼接
         const apiBase = bypass.baseUrl.replace(/\/+$/, "").endsWith("/v1")
           ? bypass.baseUrl.replace(/\/+$/, "")
@@ -458,6 +461,7 @@ export default async function (pi: any) {
           `      - id: "${bypass.model}"\n` +
           `        name: "旁路模型（动态视觉）"\n` +
           `        reasoning: true\n` +
+          (thinkingBlock || "") +
           (compatBlock || "") +
           `        input:\n` +
           `          - "text"\n` +
