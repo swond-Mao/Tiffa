@@ -133,6 +133,15 @@ function serializeModelsYaml(data: TiffaModelsConfig | null): string {
           `        reasoning: ${m.reasoning ? 'true' : 'false'}`,
           ...(m.qwen38
             ? [
+                // Qwen3.8+ 深度开关：落盘三件套——
+                // thinking.requiresEffort:false 显式声明「可关闭思考」，覆盖内核
+                // isQwenTemplateReasoningEffortCompat 推导的 requiresEffort:true
+                // （否则 off 档被 clamp 到 low，enable_thinking:false 关不掉）。
+                // compat.qwenTemplateReasoningEffort:true 驱动 on 档发 reasoning_effort。
+                '        thinking:',
+                '          mode: "effort"',
+                '          efforts: [ "low", "medium", "xhigh" ]',
+                '          requiresEffort: false',
                 '        compat:',
                 '          thinkingFormat: "qwen-chat-template"',
                 '          qwenTemplateReasoningEffort: true',
@@ -538,7 +547,7 @@ function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: 
           <input type="checkbox" checked={fields.vision} onChange={(e) => setFields((f) => ({ ...f, vision: e.target.checked }))} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
           视觉
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }} title="标记模型为 Qwen3.8+（思考深度档位可控）：on 档发 reasoning_effort，off 档真关思考。保存并重启后生效。">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }} title="标记模型为 Qwen3.8+：on 档发 reasoning_effort 控思考深度，off 档真关思考（落盘 requiresEffort:false 允许关闭）。保存并重启后生效。">
           <input type="checkbox" checked={fields.qwen38} onChange={(e) => setFields((f) => ({ ...f, qwen38: e.target.checked }))} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
           Qwen3.8 深度
         </label>
