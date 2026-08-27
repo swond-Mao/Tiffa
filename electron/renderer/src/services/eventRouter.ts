@@ -232,16 +232,18 @@ function handleEvent(event: TiffaEventFrame): void {
       // 恢复该会话思考档位(重启/切换会话时直接读文件,绕过 sessionThinkingMap 异步加载竞态)
       const ap = sessions.activeSessionPath;
       if (ap) {
-        void readSessionThinkingLevel(ap)
-          .then((lv) => {
-            if (lv && (THINKING_LEVELS as readonly string[]).includes(lv)) {
-              useUiStore.getState().setThinkingLevelState(lv as ThinkingLevel);
-              void window.tiffaDesktop
-                .command('set_thinking_level', { level: lv }, useSessionsStore.getState().activeSessionId)
-                .catch(() => {});
-            }
-          })
-          .catch(() => {});
+        void (async () => {
+          const lv = await readSessionThinkingLevel(ap).catch(() => null);
+          if (!lv || !(THINKING_LEVELS as readonly string[]).includes(lv)) return;
+          // 当前模型 efforts 已知且不支持该档位 → 不恢复(避免 Qwen/DeepSeek 收到不支持的档位)
+          const st = await window.tiffaDesktop.getState(useSessionsStore.getState().activeSessionId).catch(() => null);
+          const eff = (st as { model?: { thinking?: { efforts?: string[] } } } | null)?.model?.thinking?.efforts;
+          if (eff && eff.length > 0 && !eff.includes(lv)) return;
+          useUiStore.getState().setThinkingLevelState(lv as ThinkingLevel);
+          void window.tiffaDesktop
+            .command('set_thinking_level', { level: lv }, useSessionsStore.getState().activeSessionId)
+            .catch(() => {});
+        })().catch(() => {});
       }
       restoreTodoPhases().catch(() => {});
       break;
