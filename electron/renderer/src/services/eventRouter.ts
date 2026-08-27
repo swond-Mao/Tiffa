@@ -18,7 +18,7 @@ import {
   touchGuard, hasReceivedFirstResponse,
 } from './generationGuard';
 import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached, THINKING_LEVELS } from './sessionController';
-import { autoRenameWithLightModel } from './historyService';
+import { autoRenameWithLightModel, readSessionThinkingLevel } from './historyService';
 import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
 import { normalizeUserContent } from './messageBuilders';
 import { finalizeStreamText } from '../stores/useChatStore';
@@ -229,11 +229,19 @@ function handleEvent(event: TiffaEventFrame): void {
       } else {
         import('./sessionController').then((sc) => sc.fetchCurrentModel()).catch(() => {});
       }
-      // 恢复该会话思考档位(sessionThinkingMap,切换会话时恢复实际用过的档位)
-      const savedLevel = sessions.activeSessionPath ? sessions.sessionThinkingMap[sessions.activeSessionPath] : null;
-      if (savedLevel && (THINKING_LEVELS as readonly string[]).includes(savedLevel)) {
-        ui.setThinkingLevelState(savedLevel as ThinkingLevel);
-        void window.tiffaDesktop.command('set_thinking_level', { level: savedLevel }, sessions.activeSessionId).catch(() => {});
+      // 恢复该会话思考档位(重启/切换会话时直接读文件,绕过 sessionThinkingMap 异步加载竞态)
+      const ap = sessions.activeSessionPath;
+      if (ap) {
+        void readSessionThinkingLevel(ap)
+          .then((lv) => {
+            if (lv && (THINKING_LEVELS as readonly string[]).includes(lv)) {
+              useUiStore.getState().setThinkingLevelState(lv as ThinkingLevel);
+              void window.tiffaDesktop
+                .command('set_thinking_level', { level: lv }, useSessionsStore.getState().activeSessionId)
+                .catch(() => {});
+            }
+          })
+          .catch(() => {});
       }
       restoreTodoPhases().catch(() => {});
       break;

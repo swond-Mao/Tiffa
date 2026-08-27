@@ -306,5 +306,20 @@ export async function loadThinkingLevelMap(): Promise<void> {
   }
 }
 
+/** 直接读某会话的思考档位（重启/切换会话恢复用；绕过 sessionThinkingMap 异步加载竞态，直接从文件读） */
+export async function readSessionThinkingLevel(path: string): Promise<string | null> {
+  try {
+    const root = await window.tiffaDesktop.getRootPath();
+    const result = await window.tiffaDesktop.readFile(`${root}\\data\\agent\\${THINKING_MAP_FILE}`);
+    if (result && result.content) {
+      const map = JSON.parse(result.content) as Record<string, string>;
+      return map[path] ?? null;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /** 提取真实 sessionId（供外部使用） */
 export { extractSessionId };
