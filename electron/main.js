@@ -3100,13 +3100,17 @@ else {
 // 整批 questions 一次下发，渲染层同屏作答后一次性回传 results。
 // 内核升级后锚点漂移则仅告警：不阻断启动，退回逐题流程（功能降级不坏）。
 const ASK_DIALOG_MARKER = 'method:"askDialog"';
-const ASK_DIALOG_ANCHOR = 'select(d,A,C){return YEn(this.pendingRequests,this.output,C,void 0,{method:"select",title:d,options:A.map(R8n),timeout:C?.timeout},(N)=>VWf(N,C))}';
+const ASK_DIALOG_ANCHOR = 'select(v,P,I){return wZs(this.pendingRequests,this.output,v,P,I)}';
+// 锚点版本表：17.2.2 = select(d,A,C){return YEn(...)}；18.0.6 = select(v,P,I){return wZs(this.pendingRequests,this.output,v,P,I)}
+// （18.0.6 把 select 重构为顶层函数 wZs 委托，分派函数 YEn→O5e，选项映射 R8n→Qle；
+//  内核 RPC 包装器 Uoi 原生识别 e.askDialog 并以 s.call(e,...) 绑定 this，ask 工具裸引用调用，
+//  故 askDialog 必须保持箭头函数类字段；返回契约：{kind:"submit",results:[{id,selectedOptions,...}]} 或 {kind:"chat"}）
 // 注意两点：
 // 1) 必须是箭头函数类字段——ask 工具把 ui.askDialog 取成裸引用后直接调用（this 会丢失），
 //    普通方法形式会抛 "undefined is not an object (evaluating 'this.pendingRequests')"。
 // 2) 类字段后必须跟分号——minified 上下文中 `askDialog=(d,A)=>...confirm(...)` 无分号是语法错误
 //    （esbuild: Expected ";" but found "confirm"）。
-const ASK_DIALOG_INSERT = 'askDialog=(d,A)=>YEn(this.pendingRequests,this.output,A,void 0,{method:"askDialog",title:"请回答以下问题",questions:d,timeout:A?A.timeout:void 0},(N)=>{if(N&&"cancelled"in N&&N.cancelled)return;if(N&&N.value&&N.value.kind==="submit"&&Array.isArray(N.value.results))return N.value;});';
+const ASK_DIALOG_INSERT = 'askDialog=(d,A)=>O5e(this.pendingRequests,this.output,A,void 0,{method:"askDialog",title:"请回答以下问题",questions:d,timeout:A?A.timeout:void 0},(N)=>{if(N&&"cancelled"in N&&N.cancelled)return;if(N&&N.value&&(N.value.kind==="chat"||(N.value.kind==="submit"&&Array.isArray(N.value.results))))return N.value;});';
 function healKernelAskDialog() {
     try {
         const cliJs = path_1.default.join(constants_1.PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');

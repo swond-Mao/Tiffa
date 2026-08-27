@@ -439,6 +439,11 @@ export default async function (pi: any) {
         if (!existsSync(modelsPath)) return
         let yml = readFileSync(modelsPath, "utf8")
         const key = !bypass.apiKey || bypass.apiKey === "EMPTY" ? "none" : bypass.apiKey
+        // 保留 compat 子块：设置面板「Qwen3.8 深度」勾选落在 bypass-dynamic 模型的 compat
+        // （thinkingFormat + qwenTemplateReasoningEffort），动态重写必须带走，否则下次 session_start 被抹掉。
+        // compat 键 8 空格深、其子键 9+ 空格；兄弟键（input: 等）8 空格不会被吞。
+        const oldBlock = yml.match(/  bypass-dynamic:[\s\S]*?(?=\n  [\w.-]+:|$)/)?.[0] || ""
+        const compatBlock = oldBlock.match(/[ \t]+compat:\n(?:[ \t]{9,}\S[^\n]*\n)*/)?.[0] || ""
         // 防双 /v1：bypass.baseUrl 可能已含 /v1（设置面板里用户填完整路径），不再重复拼接
         const apiBase = bypass.baseUrl.replace(/\/+$/, "").endsWith("/v1")
           ? bypass.baseUrl.replace(/\/+$/, "")
@@ -453,6 +458,7 @@ export default async function (pi: any) {
           `      - id: "${bypass.model}"\n` +
           `        name: "旁路模型（动态视觉）"\n` +
           `        reasoning: true\n` +
+          (compatBlock || "") +
           `        input:\n` +
           `          - "text"\n` +
           `          - "image"\n` +

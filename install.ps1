@@ -174,7 +174,7 @@ if (Test-Path $bunExe) {
 Step 4 7 "检查 Tiffa 内核"
 # 内核锁死精确版本：ask 多题对话框等运行时补丁依赖特定 cli.js 压缩锚点，
 # 浮动版本会导致补丁锚点失配（表现为 ask 面板功能静默降级）。升级内核须同步验证锚点。
-$KERNEL_VERSION = "17.2.2"
+$KERNEL_VERSION = "18.0.6"
 $agentDir = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent"
 $needKernelInstall = $true
 if (Test-Path $agentDir) {

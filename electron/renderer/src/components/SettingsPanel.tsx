@@ -131,6 +131,13 @@ function serializeModelsYaml(data: TiffaModelsConfig | null): string {
           `      - id: "${m.id ? yq(m.id) : ''}"`,
           `        name: "${yq(m.name || m.id || '')}"`,
           `        reasoning: ${m.reasoning ? 'true' : 'false'}`,
+          ...(m.qwen38
+            ? [
+                '        compat:',
+                '          thinkingFormat: "qwen-chat-template"',
+                '          qwenTemplateReasoningEffort: true',
+              ]
+            : []),
           '        input:',
           ...(m.input && m.input.length > 0 ? m.input : ['text']).map((i) => `          - "${yq(i)}"`),
           `        supportsTools: ${m.supportsTools ? 'true' : 'false'}`,
@@ -155,6 +162,10 @@ interface ModelEntry {
   id: string;
   name?: string;
   reasoning?: boolean;
+  /** Qwen3.8+ 思考深度档位（勾选后落盘 compat：thinkingFormat + qwenTemplateReasoningEffort；设置面板「Qwen3.8 深度」勾选框入口） */
+  qwen38?: boolean;
+  /** 内核 compat 透传（models.yml 的 compat 块；加载时归一化反映到 qwen38 勾选框） */
+  compat?: { thinkingFormat?: string; qwenTemplateReasoningEffort?: boolean };
   input?: string[];
   supportsTools?: boolean;
   contextWindow?: number;
@@ -172,7 +183,17 @@ function ModelConfigSection() {
   const load = useCallback(async () => {
     try {
       const r = await window.tiffaDesktop.readModelsYml();
-      if (r && !r.error) setCfg(r.data || null);
+      if (r && !r.error) {
+        const data = r.data || null;
+        // 「Qwen3.8 深度」勾选态归一化：磁盘已有 compat 块（手写或上次保存落盘）时反映到 qwen38，
+        // 保证勾选框状态与实际落盘一致（序列化只看 qwen38，防止取消勾选后旧 compat 残留重新写回）。
+        for (const p of Object.values((data && data.providers) || {})) {
+          for (const m of p.models || []) {
+            if (typeof m.qwen38 !== 'boolean') m.qwen38 = !!m.compat?.qwenTemplateReasoningEffort;
+          }
+        }
+        setCfg(data);
+      }
     } catch {
       /* ignore */
     }
@@ -418,20 +439,25 @@ function ModelConfigSection() {
 }
 
 /** 模型条目行：内联编辑（点击展开） */
-function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: ModelEntry; onChange: (patch: Partial<ModelEntry>) => void; onDelete: () => void; baseUrl?: string; apiKey?: string }) {
-  const [editing, setEditing] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const addToast = useUiStore((s) => s.addToast);
-  // hooks 必须无条件调用：若放在 if(!editing) 之后，展开时 hooks 数量 1→2，
-  // React 报 #310 "Rendered more hooks than during the previous render" → 白屏。
-  const [fields, setFields] = useState({
+/** 从模型真实值构建编辑表单字段（进入编辑时同步，避免脏状态） */
+function buildFields(model: ModelEntry) {
+  return {
     id: model.id,
     name: model.name || '',
     contextWindow: String(model.contextWindow || 128000),
     maxTokens: String(model.maxTokens || 8192),
     reasoning: !!model.reasoning,
     vision: !!(model.input && model.input.includes('image')),
-  });
+    qwen38: !!model.qwen38,
+  };
+}
+function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: ModelEntry; onChange: (patch: Partial<ModelEntry>) => void; onDelete: () => void; baseUrl?: string; apiKey?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const addToast = useUiStore((s) => s.addToast);
+  // hooks 必须无条件调用：若放在 if(!editing) 之后，展开时 hooks 数量 1→2，
+  // React 报 #310 "Rendered more hooks than during the previous render" → 白屏。
+  const [fields, setFields] = useState(() => buildFields(model));
 
   const checkHealth = async () => {
     if (!baseUrl || !model.id) {
@@ -451,12 +477,14 @@ function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: 
   if (!editing) {
     const thinkBadge = model.reasoning ? ' | 思考' : '';
     const visionBadge = model.input && model.input.includes('image') ? ' | 视觉' : '';
+    const depthBadge = model.qwen38 ? ' | 3.8深度' : '';
     return (
-      <div className="model-entry" onClick={() => setEditing(true)}>
+      <div className="model-entry" onClick={() => { setFields(buildFields(model)); setEditing(true); }}>
         <span className="model-entry-id">{model.id || ''}</span>
         <span className="model-entry-meta">
           {model.name || ''} | {model.contextWindow || '?'}ctx{thinkBadge}
           {visionBadge}
+          {depthBadge}
         </span>
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           {baseUrl && model.id && (
@@ -510,6 +538,10 @@ function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: 
           <input type="checkbox" checked={fields.vision} onChange={(e) => setFields((f) => ({ ...f, vision: e.target.checked }))} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
           视觉
         </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }} title="标记模型为 Qwen3.8+（思考深度档位可控）：on 档发 reasoning_effort，off 档真关思考。保存并重启后生效。">
+          <input type="checkbox" checked={fields.qwen38} onChange={(e) => setFields((f) => ({ ...f, qwen38: e.target.checked }))} style={{ width: 16, height: 16, accentColor: 'var(--accent)' }} />
+          Qwen3.8 深度
+        </label>
       </div>
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
         <button
@@ -525,6 +557,7 @@ function ModelEntryRow({ model, onChange, onDelete, baseUrl, apiKey }: { model: 
               maxTokens: parseInt(fields.maxTokens) || 8192,
               reasoning: fields.reasoning,
               input: fields.vision ? ['text', 'image'] : ['text'],
+              qwen38: fields.qwen38,
             });
             setEditing(false);
           }}
@@ -557,6 +590,7 @@ function addModelDialog(prov: TiffaProviderConfig | undefined, onAdd: (m: ModelE
       <input id="dlgModelMax" type="number" style="width:100%;padding:6px 10px;margin:4px 0 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;" value="8192">
       <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer;"><input id="dlgModelReasoning" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);"> 思考模式</label>
       <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer;"><input id="dlgModelVision" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);"> 支持视觉（图片输入 / snapcompact 图像压缩）</label>
+      <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer;"><input id="dlgModelQwen38" type="checkbox" style="width:16px;height:16px;accent-color:var(--accent);"> Qwen3.8 深度（思考档位可控）</label>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
         <button id="dlgCancel" style="padding:6px 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;">取消</button>
         <button id="dlgOk" style="padding:6px 16px;border:none;border-radius:4px;background:var(--accent);color:white;cursor:pointer;">添加</button>
@@ -581,7 +615,8 @@ function addModelDialog(prov: TiffaProviderConfig | undefined, onAdd: (m: ModelE
     const max = parseInt((backdrop.querySelector('#dlgModelMax') as HTMLInputElement).value) || 8192;
     const reasoning = (backdrop.querySelector('#dlgModelReasoning') as HTMLInputElement).checked;
     const vision = (backdrop.querySelector('#dlgModelVision') as HTMLInputElement).checked;
-    onAdd({ id, name, reasoning, input: vision ? ['text', 'image'] : ['text'], supportsTools: true, contextWindow: ctx, maxTokens: max, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+    const qwen38 = (backdrop.querySelector('#dlgModelQwen38') as HTMLInputElement).checked;
+    onAdd({ id, name, reasoning, qwen38, input: vision ? ['text', 'image'] : ['text'], supportsTools: true, contextWindow: ctx, maxTokens: max, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
     close();
   };
   backdrop.querySelector('#dlgOk')?.addEventListener('click', submit);

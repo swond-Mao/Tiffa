@@ -107,6 +107,9 @@ export interface TiffaProviderConfig {
     id: string;
     name?: string;
     reasoning?: boolean;
+    /** Qwen3.8+ 思考深度档位（设置面板勾选后落盘 compat：thinkingFormat + qwenTemplateReasoningEffort） */
+    qwen38?: boolean;
+    compat?: { thinkingFormat?: string; qwenTemplateReasoningEffort?: boolean };
     input?: string[];
     supportsTools?: boolean;
     contextWindow?: number;

@@ -17,6 +17,7 @@ exports.setMigrateCallback = setMigrateCallback;
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const child_process_1 = require("child_process");
+const string_decoder_1 = require("string_decoder");
 const constants_1 = require("./constants");
 const session_utils_1 = require("./session-utils");
 const process_utils_1 = require("./process-utils");
@@ -148,9 +149,10 @@ class TiffaInstance {
                 console.warn(`[TiffaInstance:${this._shortCwd()}] 无法解析事件:`, trimmed.substring(0, 200));
             }
         });
-        this.stderrDecoder = new (require('string_decoder').StringDecoder)('utf8');
+        this.stderrDecoder = new string_decoder_1.StringDecoder('utf8');
         proc.stderr.on('data', (chunk) => {
-            if (!this.stderrDecoder) return;
+            if (!this.stderrDecoder)
+                return;
             const text = this.stderrDecoder.write(chunk).trim();
             this._stderrTail = (this._stderrTail + '\n' + text).slice(-4000);
             if (text)
@@ -305,6 +307,16 @@ class TiffaInstance {
         this.lastActiveTime = Date.now();
         if (event.type === 'ready') {
             this.ready = true;
+            // 18.0.6+ 协议 v2 协商（分块传输）：目录大时（openrouter 470+ 模型）
+            // get_available_models 单帧超 1MiB 上限，停留在 v1 只得到溢出错误帧
+            // （error=RPC response exceeded the transport limit）→ 前端模型列表消失。
+            // 下方已有的 rpc_chunk 重组逻辑在协商成功后才生效；
+            // 旧内核 ready 帧不含 supportedProtocolVersions 时自动保持 v1，不受影响。
+            if (Array.isArray(event.supportedProtocolVersions) && event.supportedProtocolVersions.includes(2)) {
+                this.sendCommand({ type: 'negotiate_protocol', protocolVersion: 2 })
+                    .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] RPC 协议 v2 已启用（大帧拆 rpc_chunk 分块）`); })
+                    .catch((e) => { console.warn(`[TiffaInstance:${this._shortCwd()}] RPC v2 协商失败，保持 v1: ${e.message}`); });
+            }
             this.agentRunning = false;
             this.crashCount = 0;
             console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
