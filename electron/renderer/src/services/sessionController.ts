@@ -192,6 +192,51 @@ async function getAvailableModelSet(): Promise<Set<string> | null> {
   return set;
 }
 
+// ── 思考档位缓存(data/agent/thinking-efforts-cache.json)──
+// provider/name -> efforts,跨重启持久化:首屏从缓存预填真实档位,get_state 实时值覆盖并刷新
+async function loadThinkingEffortsCache(): Promise<Record<string, string[]>> {
+  try {
+    const root = (await window.tiffaDesktop.getRootPath()) as string;
+    const res = (await window.tiffaDesktop.readFile(`${root}\\data\\agent\\thinking-efforts-cache.json`)) as { content?: string } | undefined;
+    if (res?.content) {
+      const parsed = JSON.parse(res.content) as Record<string, string[]>;
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch { /* 无缓存/解析失败 */ }
+  return {};
+}
+
+async function saveThinkingEffortsCache(key: string, efforts: string[]): Promise<void> {
+  try {
+    const root = (await window.tiffaDesktop.getRootPath()) as string;
+    const cache = await loadThinkingEffortsCache();
+    cache[key] = efforts;
+    await window.tiffaDesktop.writeFile(`${root}\\data\\agent\\thinking-efforts-cache.json`, JSON.stringify(cache, null, 2));
+  } catch { /* 写失败不影响主流程 */ }
+}
+
+/** 从缓存预填当前模型的思考档位(首屏加速);引擎就绪后 get_state 实时值覆盖 */
+async function prefillThinkingEfforts(): Promise<void> {
+  const ui = useUiStore.getState();
+  if (!ui.currentProvider || !ui.currentModel || ui.currentModel === '--') return;
+  const cached = await loadThinkingEffortsCache();
+  const efforts = cached[`${ui.currentProvider}/${ui.currentModel}`];
+  if (Array.isArray(efforts) && efforts.length > 0) {
+    useUiStore.getState().setThinkingEfforts(efforts as ThinkingLevel[]);
+  }
+}
+
+// 模型变化时预填(currentModel/currentProvider 任一变化触发,覆盖切模型/恢复/首屏)
+let lastEffortsPrefillKey = '';
+useUiStore.subscribe((state) => {
+  const key = `${state.currentProvider}/${state.currentModel}`;
+  if (key !== lastEffortsPrefillKey) {
+    lastEffortsPrefillKey = key;
+    void prefillThinkingEfforts();
+  }
+});
+void prefillThinkingEfforts(); // 首屏立即预填一次(覆盖 currentModel 已恢复的边界)
+
 export async function fetchCurrentModel(): Promise<void> {
   // 引擎未就绪（含崩溃后停止重启）不调 getModels：主进程 handler 无实例会 throw
   if (!useProcStore.getState().tiffaReady) return;
@@ -206,6 +251,10 @@ export async function fetchCurrentModel(): Promise<void> {
     // 同步模型思考档位支持列表（内核实测 state.model.thinking.efforts，UI 据此过滤可选档位）
     const efforts = (sm && sm.thinking && Array.isArray(sm.thinking.efforts) ? sm.thinking.efforts : null) as ThinkingLevel[] | null;
     useUiStore.getState().setThinkingEfforts(efforts);
+    // 缓存思考档位(provider/name -> efforts),下次首屏预填;get_state 实时值每次刷新
+    if (sm && sm.id && sm.provider && efforts && efforts.length > 0) {
+      void saveThinkingEffortsCache(`${sm.provider}/${sm.name || sm.id}`, efforts);
+    }
     const stLevel = (st as { thinkingLevel?: string } | null)?.thinkingLevel;
     if (stLevel && THINKING_LEVELS.includes(stLevel as ThinkingLevel)) {
       useUiStore.getState().setThinkingLevelState(stLevel as ThinkingLevel);
