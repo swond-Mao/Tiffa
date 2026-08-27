@@ -1497,6 +1497,9 @@ export async function sendThinkingLevel(level: ThinkingLevel): Promise<void> {
   try {
     await window.tiffaDesktop.command('set_thinking_level', { level }, useSessionsStore.getState().activeSessionId);
     useUiStore.getState().setThinkingLevelState(level);
+    // 记录该会话的思考档位(切换会话时恢复实际用过的档位)
+    const path = useSessionsStore.getState().activeSessionPath;
+    if (path) useSessionsStore.getState().setSessionThinkingLevel(path, level);
   } catch (err) {
     useUiStore.getState().addToast('error', `切换思考档位失败: ${(err as Error).message}`);
   }

@@ -274,5 +274,37 @@ export async function loadModelMap(): Promise<void> {
   }
 }
 
+const THINKING_MAP_FILE = 'session-thinking-level-map.json';
+
+/** 启动时加载 data/agent/session-thinking-level-map.json（清理 __new__ 临时键） */
+export async function loadThinkingLevelMap(): Promise<void> {
+  try {
+    const root = await window.tiffaDesktop.getRootPath();
+    const result = await window.tiffaDesktop.readFile(`${root}\\data\\agent\\${THINKING_MAP_FILE}`);
+    if (result && result.content) {
+      const map = JSON.parse(result.content) as Record<string, string>;
+      if (map && typeof map === 'object') {
+        let cleaned = false;
+        for (const key of Object.keys(map)) {
+          if (key.startsWith('__new__')) {
+            delete map[key];
+            cleaned = true;
+          }
+        }
+        useSessionsStore.setState({ sessionThinkingMap: map });
+        if (cleaned) {
+          try {
+            await window.tiffaDesktop.writeFile(`${root}\\data\\agent\\${THINKING_MAP_FILE}`, JSON.stringify(map));
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } catch (e) {
+    dbgLog('thinkingMap', `读取思考档位映射失败: ${(e as Error).message}`);
+  }
+}
+
 /** 提取真实 sessionId（供外部使用） */
 export { extractSessionId };

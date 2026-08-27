@@ -9,7 +9,7 @@
 import { useEffect } from 'react';
 import { initEventRouter } from './services/eventRouter';
 import { fetchCurrentModel, loadProjects, preloadDuringWelcome, getModelListCached } from './services/sessionController';
-import { loadModelMap } from './services/historyService';
+import { loadModelMap, loadThinkingLevelMap } from './services/historyService';
 import { initIdentity } from './services/identity';
 import ChatView from './components/ChatView';
 import InputBox from './components/InputBox';
@@ -41,6 +41,7 @@ export default function App() {
     }
     initEventRouter();
     void loadModelMap();
+    void loadThinkingLevelMap();
     void fetchCurrentModel();
     // 后台预载死列表缓存（遮罩期预热，不阻塞 UI；点开模型列表时秒开）
     void getModelListCached();

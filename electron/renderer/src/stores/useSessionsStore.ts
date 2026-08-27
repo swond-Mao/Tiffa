@@ -45,6 +45,8 @@ export interface SessionsState {
   preparingNewSessions: Record<string, true>;
   /** 每会话模型记忆：path -> { provider, modelId } */
   sessionModelMap: Record<string, { provider: string; modelId: string }>;
+  /** 每会话思考档位记忆：path -> thinkingLevel */
+  sessionThinkingMap: Record<string, string>;
   /** 展开全部对话的项目集合 */
   expandedSessionTrees: Record<string, true>;
   /** 新建对话标志：新建后到收到 session_switch 之前忽略 message_* 事件 */
@@ -62,6 +64,8 @@ export interface SessionsState {
   migrateTabPath: (oldPath: string, newPath: string, realSessionId: string | null) => void;
   setSessionModel: (path: string, provider: string, modelId: string) => void;
   removeSessionModel: (path: string) => void;
+  setSessionThinkingLevel: (path: string, level: string) => void;
+  removeSessionThinkingLevel: (path: string) => void;
   markAutoNamed: (path: string) => void;
   clearPreparing: (path: string) => void;
   toggleExpandedTree: (dirName: string) => void;
@@ -77,6 +81,7 @@ export interface SessionsState {
 }
 
 const MODEL_MAP_FILE = 'session-model-map.json';
+const THINKING_MAP_FILE = 'session-thinking-level-map.json';
 
 /**
  * 模型记忆落盘：data/agent/session-model-map.json（与 loadModelMap 直读对称，直写文件）。
@@ -94,6 +99,17 @@ function saveModelMap(map: Record<string, { provider: string; modelId: string }>
   })();
 }
 
+function saveThinkingLevelMap(map: Record<string, string>): void {
+  void (async () => {
+    try {
+      const root = await window.tiffaDesktop.getRootPath();
+      await window.tiffaDesktop.writeFile(`${root}\\data\\agent\\${THINKING_MAP_FILE}`, JSON.stringify(map));
+    } catch (e) {
+      console.warn('[持久化] 保存思考档位映射失败:', e);
+    }
+  })();
+}
+
 export const useSessionsStore = create<SessionsState>((set, get) => ({
   sessions: [],
   activeSessionPath: null,
@@ -103,6 +119,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   autoNamedSessions: {},
   preparingNewSessions: {},
   sessionModelMap: {},
+  sessionThinkingMap: {},
   expandedSessionTrees: {},
   pendingNewSession: false,
   newSessionSwitched: false,
@@ -169,6 +186,12 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         delete sessionModelMap[oldPath];
         saveModelMap(sessionModelMap);
       }
+      const sessionThinkingMap = { ...s.sessionThinkingMap };
+      if (sessionThinkingMap[oldPath]) {
+        sessionThinkingMap[newPath] = sessionThinkingMap[oldPath];
+        delete sessionThinkingMap[oldPath];
+        saveThinkingLevelMap(sessionThinkingMap);
+      }
       const autoNamedSessions = { ...s.autoNamedSessions };
       if (autoNamedSessions[oldPath]) {
         autoNamedSessions[newPath] = true;
@@ -187,6 +210,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       return {
         activeTabMeta,
         sessionModelMap,
+        sessionThinkingMap,
         autoNamedSessions,
         preparingNewSessions,
         sessions,
@@ -212,6 +236,22 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       delete sessionModelMap[path];
       saveModelMap(sessionModelMap);
       return { sessionModelMap };
+    }),
+
+  setSessionThinkingLevel: (path, level) =>
+    set((s) => {
+      const sessionThinkingMap = { ...s.sessionThinkingMap, [path]: level };
+      saveThinkingLevelMap(sessionThinkingMap);
+      return { sessionThinkingMap };
+    }),
+
+  removeSessionThinkingLevel: (path) =>
+    set((s) => {
+      if (!s.sessionThinkingMap[path]) return s;
+      const sessionThinkingMap = { ...s.sessionThinkingMap };
+      delete sessionThinkingMap[path];
+      saveThinkingLevelMap(sessionThinkingMap);
+      return { sessionThinkingMap };
     }),
 
   markAutoNamed: (path) =>

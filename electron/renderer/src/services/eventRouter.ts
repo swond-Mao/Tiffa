@@ -9,7 +9,7 @@ import type { TiffaEventFrame } from '../types/tiffaDesktop';
 import { useProcStore } from '../stores/useProcStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useChatStore } from '../stores/useChatStore';
-import { useUiStore, type AskItem } from '../stores/useUiStore';
+import { useUiStore, type AskItem, type ThinkingLevel } from '../stores/useUiStore';
 import { useProjectsStore } from '../stores/useProjectsStore';
 import {
   startStallCheck, stopStallCheck,
@@ -17,7 +17,7 @@ import {
   markFirstResponseReceived, currentModelLabel,
   touchGuard, hasReceivedFirstResponse,
 } from './generationGuard';
-import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached } from './sessionController';
+import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached, THINKING_LEVELS } from './sessionController';
 import { autoRenameWithLightModel } from './historyService';
 import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
 import { normalizeUserContent } from './messageBuilders';
@@ -228,6 +228,12 @@ function handleEvent(event: TiffaEventFrame): void {
           .catch(() => {});
       } else {
         import('./sessionController').then((sc) => sc.fetchCurrentModel()).catch(() => {});
+      }
+      // 恢复该会话思考档位(sessionThinkingMap,切换会话时恢复实际用过的档位)
+      const savedLevel = sessions.activeSessionPath ? sessions.sessionThinkingMap[sessions.activeSessionPath] : null;
+      if (savedLevel && (THINKING_LEVELS as readonly string[]).includes(savedLevel)) {
+        ui.setThinkingLevelState(savedLevel as ThinkingLevel);
+        void window.tiffaDesktop.command('set_thinking_level', { level: savedLevel }, sessions.activeSessionId).catch(() => {});
       }
       restoreTodoPhases().catch(() => {});
       break;
