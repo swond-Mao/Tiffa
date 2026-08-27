@@ -85,31 +85,35 @@ function stableSessionDirName(cwdPath) {
  * 给定 cwd + sessionId，在 SESSIONS_DIR 下定位匹配的 .jsonl。
  * 两种存放模式：1. 直接 *_<uuid>.jsonl  2. 子目录 *_<uuid>/<name>.jsonl
  * 兜底：扫描所有会话目录按 sessionId 匹配。
+ *
+ * 异步（fs.promises）：原同步版在主进程做多轮 readdirSync，exFAT 移动硬盘上
+ * 可阻塞事件循环数百毫秒至秒级，是「新建对话打字卡顿」的次要贡献者
+ * （主犯是 computer-use MCP 逐实例冷启动 Python）。
+ * 调用点均在 tiffa-manager.activateSession 的 async 上下文（2 处）。
  */
-function findSessionFile(cwd, sessionId) {
+async function findSessionFile(cwd, sessionId) {
     if (!cwd || !sessionId)
         return null;
     const dirName = stableSessionDirName(cwd);
     const projectDir = path_1.default.join(constants_1.SESSIONS_DIR, dirName);
-    if (!fs_1.default.existsSync(projectDir))
-        return null;
     const uuidLower = sessionId.toLowerCase();
     try {
-        // 模式 1：直接在项目目录下的 *_<uuid>.jsonl
-        const directFiles = fs_1.default
-            .readdirSync(projectDir)
-            .filter((f) => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
-        if (directFiles.length > 0)
-            return path_1.default.join(projectDir, directFiles[0]);
-        // 模式 2：子目录 *_<uuid>/ 中的 .jsonl
-        const subDirs = fs_1.default
-            .readdirSync(projectDir, { withFileTypes: true })
-            .filter((d) => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
-        for (const sd of subDirs) {
-            const sdPath = path_1.default.join(projectDir, sd.name);
-            const jsonlFiles = fs_1.default.readdirSync(sdPath).filter((f) => f.endsWith('.jsonl'));
-            if (jsonlFiles.length > 0)
-                return path_1.default.join(sdPath, jsonlFiles[0]);
+        const projectDirExists = await fs_1.default.promises.access(projectDir).then(() => true, () => false);
+        if (projectDirExists) {
+            // 模式 1：直接在项目目录下的 *_<uuid>.jsonl
+            const directFiles = (await fs_1.default.promises.readdir(projectDir))
+                .filter((f) => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
+            if (directFiles.length > 0)
+                return path_1.default.join(projectDir, directFiles[0]);
+            // 模式 2：子目录 *_<uuid>/ 中的 .jsonl
+            const subDirs = (await fs_1.default.promises.readdir(projectDir, { withFileTypes: true }))
+                .filter((d) => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
+            for (const sd of subDirs) {
+                const sdPath = path_1.default.join(projectDir, sd.name);
+                const jsonlFiles = (await fs_1.default.promises.readdir(sdPath)).filter((f) => f.endsWith('.jsonl'));
+                if (jsonlFiles.length > 0)
+                    return path_1.default.join(sdPath, jsonlFiles[0]);
+            }
         }
     }
     catch {
@@ -117,21 +121,18 @@ function findSessionFile(cwd, sessionId) {
     }
     // 兜底：扫描所有会话目录
     try {
-        const allDirs = fs_1.default
-            .readdirSync(constants_1.SESSIONS_DIR, { withFileTypes: true })
+        const allDirs = (await fs_1.default.promises.readdir(constants_1.SESSIONS_DIR, { withFileTypes: true }))
             .filter((d) => d.isDirectory() && d.name !== dirName);
         for (const ad of allDirs) {
             const haystack = path_1.default.join(constants_1.SESSIONS_DIR, ad.name);
-            const direct = fs_1.default
-                .readdirSync(haystack)
+            const direct = (await fs_1.default.promises.readdir(haystack))
                 .filter((f) => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
             if (direct.length > 0)
                 return path_1.default.join(haystack, direct[0]);
-            const sub = fs_1.default
-                .readdirSync(haystack, { withFileTypes: true })
+            const sub = (await fs_1.default.promises.readdir(haystack, { withFileTypes: true }))
                 .filter((d) => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
             for (const sd of sub) {
-                const js = fs_1.default.readdirSync(path_1.default.join(haystack, sd.name)).filter((f) => f.endsWith('.jsonl'));
+                const js = (await fs_1.default.promises.readdir(path_1.default.join(haystack, sd.name))).filter((f) => f.endsWith('.jsonl'));
                 if (js.length > 0)
                     return path_1.default.join(haystack, sd.name, js[0]);
             }

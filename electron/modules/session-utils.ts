@@ -72,28 +72,33 @@ export function stableSessionDirName(cwdPath: string): string {
  * 给定 cwd + sessionId，在 SESSIONS_DIR 下定位匹配的 .jsonl。
  * 两种存放模式：1. 直接 *_<uuid>.jsonl  2. 子目录 *_<uuid>/<name>.jsonl
  * 兜底：扫描所有会话目录按 sessionId 匹配。
+ *
+ * 异步（fs.promises）：原同步版在主进程做多轮 readdirSync，exFAT 移动硬盘上
+ * 可阻塞事件循环数百毫秒至秒级，是「新建对话打字卡顿」的次要贡献者
+ * （主犯是 computer-use MCP 逐实例冷启动 Python）。
+ * 调用点均在 tiffa-manager.activateSession 的 async 上下文（2 处）。
  */
-export function findSessionFile(cwd: string | null, sessionId: string | null): string | null {
+export async function findSessionFile(cwd: string | null, sessionId: string | null): Promise<string | null> {
   if (!cwd || !sessionId) return null;
   const dirName = stableSessionDirName(cwd);
   const projectDir = path.join(SESSIONS_DIR, dirName);
-  if (!fs.existsSync(projectDir)) return null;
   const uuidLower = sessionId.toLowerCase();
   try {
-    // 模式 1：直接在项目目录下的 *_<uuid>.jsonl
-    const directFiles = fs
-      .readdirSync(projectDir)
-      .filter((f) => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
-    if (directFiles.length > 0) return path.join(projectDir, directFiles[0]);
+    const projectDirExists = await fs.promises.access(projectDir).then(() => true, () => false);
+    if (projectDirExists) {
+      // 模式 1：直接在项目目录下的 *_<uuid>.jsonl
+      const directFiles = (await fs.promises.readdir(projectDir))
+        .filter((f) => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
+      if (directFiles.length > 0) return path.join(projectDir, directFiles[0]);
 
-    // 模式 2：子目录 *_<uuid>/ 中的 .jsonl
-    const subDirs = fs
-      .readdirSync(projectDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
-    for (const sd of subDirs) {
-      const sdPath = path.join(projectDir, sd.name);
-      const jsonlFiles = fs.readdirSync(sdPath).filter((f) => f.endsWith('.jsonl'));
-      if (jsonlFiles.length > 0) return path.join(sdPath, jsonlFiles[0]);
+      // 模式 2：子目录 *_<uuid>/ 中的 .jsonl
+      const subDirs = (await fs.promises.readdir(projectDir, { withFileTypes: true }))
+        .filter((d) => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
+      for (const sd of subDirs) {
+        const sdPath = path.join(projectDir, sd.name);
+        const jsonlFiles = (await fs.promises.readdir(sdPath)).filter((f) => f.endsWith('.jsonl'));
+        if (jsonlFiles.length > 0) return path.join(sdPath, jsonlFiles[0]);
+      }
     }
   } catch {
     // ignore
@@ -101,20 +106,17 @@ export function findSessionFile(cwd: string | null, sessionId: string | null): s
 
   // 兜底：扫描所有会话目录
   try {
-    const allDirs = fs
-      .readdirSync(SESSIONS_DIR, { withFileTypes: true })
+    const allDirs = (await fs.promises.readdir(SESSIONS_DIR, { withFileTypes: true }))
       .filter((d) => d.isDirectory() && d.name !== dirName);
     for (const ad of allDirs) {
       const haystack = path.join(SESSIONS_DIR, ad.name);
-      const direct = fs
-        .readdirSync(haystack)
+      const direct = (await fs.promises.readdir(haystack))
         .filter((f) => f.endsWith('.jsonl') && f.toLowerCase().includes(uuidLower));
       if (direct.length > 0) return path.join(haystack, direct[0]);
-      const sub = fs
-        .readdirSync(haystack, { withFileTypes: true })
+      const sub = (await fs.promises.readdir(haystack, { withFileTypes: true }))
         .filter((d) => d.isDirectory() && d.name.toLowerCase().includes(uuidLower));
       for (const sd of sub) {
-        const js = fs.readdirSync(path.join(haystack, sd.name)).filter((f) => f.endsWith('.jsonl'));
+        const js = (await fs.promises.readdir(path.join(haystack, sd.name))).filter((f) => f.endsWith('.jsonl'));
         if (js.length > 0) return path.join(haystack, sd.name, js[0]);
       }
     }

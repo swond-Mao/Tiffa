@@ -105,7 +105,7 @@ export class TiffaInstanceManager {
     const spawnPromise = (async (): Promise<ActivateResult> => {
       // 新建会话：spawn 前预写正式会话文件，内核 --session 启动即加载（身份立即确定）。
       // 已有会话（findSessionFile 命中）不预写，走原恢复逻辑。
-      const existingFile = sessionId ? findSessionFile(normalized, sessionId) : null;
+      const existingFile = sessionId ? await findSessionFile(normalized, sessionId) : null;
       const preparedFile = existingFile ? null : prepareNewSessionFile(normalized, sessionId);
       const inst = new TiffaInstance(normalized, sessionId, preparedFile);
       this.instances.set(key, inst);
@@ -120,7 +120,7 @@ export class TiffaInstanceManager {
 
       // 会话上下文恢复（已有会话）或新建引导确认（预写文件）
       if (inst.ready && inst.sessionId) {
-        const sessionFile = findSessionFile(normalized, inst.sessionId);
+        const sessionFile = await findSessionFile(normalized, inst.sessionId);
         if (sessionFile) {
           if (preparedFile && path.resolve(sessionFile) === path.resolve(preparedFile)) {
             // 新建引导：--session 已让内核加载预写文件（session_switch 补发在

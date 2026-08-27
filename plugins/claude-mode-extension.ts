@@ -1288,6 +1288,10 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
             ],
             temperature: 0.1,
             max_tokens: 4000,
+            // 旁路任务（总结/记账/看图）一律显式关思考：总结类任务不需要推理链，
+            // 且思考 token 会拉长响应（曾最坏 35-46s 撞内核 30s handler 超时）。
+            // enable_thinking 是 Qwen/llama.cpp 的协议参数，非 Qwen 服务端忽略未知字段。
+            enable_thinking: false,
           }),
           signal: ctrl.signal,
         })

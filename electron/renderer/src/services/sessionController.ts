@@ -16,7 +16,7 @@ import {
   startFirstResponseCheck, stopFirstResponseCheck,
   markFirstResponseReceived, stopAllGuards,
 } from './generationGuard';
-import { loadAndRenderHistory, autoRenameWithLightModel, setHistoryPreload } from './historyService';
+import { loadAndRenderHistory, autoRenameWithLightModel, setHistoryPreload, readSessionThinkingLevel } from './historyService';
 import { dirNameFromSessionPath, extractSessionId, dbgLog, localizeKernelMessage, msgFingerprint } from './utils';
 import { normalizeUserContent } from './messageBuilders';
 import type { MessageImage } from '../types/messages';
@@ -215,14 +215,35 @@ async function saveThinkingEffortsCache(key: string, efforts: string[]): Promise
   } catch { /* 写失败不影响主流程 */ }
 }
 
-/** 从缓存预填当前模型的思考档位(首屏加速);引擎就绪后 get_state 实时值覆盖 */
+/** 从缓存预填当前模型的思考档位(首屏加速);引擎就绪后 get_state 实时值覆盖
+ *  缓存 key 历史上用 provider/(name||id) 存,而 currentModel 可能是 id(restoreModelIfAvailable
+ *  恢复路径)也可能是 name||id(fetchCurrentModel/选择器)。为兼容 name≠id 的模型(如 Qwen3.X-直连
+ *  的 name 带"直连"后缀而 id 不带),按候选 key 依次命中,避免重启后缓存未命中→档位过滤失效。 */
 async function prefillThinkingEfforts(): Promise<void> {
   const ui = useUiStore.getState();
-  if (!ui.currentProvider || !ui.currentModel || ui.currentModel === '--') return;
+  const provider = ui.currentProvider;
+  const model = ui.currentModel;
+  if (!provider || !model || model === '--') return;
   const cached = await loadThinkingEffortsCache();
-  const efforts = cached[`${ui.currentProvider}/${ui.currentModel}`];
-  if (Array.isArray(efforts) && efforts.length > 0) {
-    useUiStore.getState().setThinkingEfforts(efforts as ThinkingLevel[]);
+  // 异步读缓存期间模型可能已切走,过期则丢弃,防止把上一模型的档位写到当前模型
+  const cur = useUiStore.getState();
+  if (cur.currentProvider !== provider || cur.currentModel !== model) return;
+  // 候选 key:直接 provider/currentModel + 从模型列表解析出的规范 key provider/(name||id)
+  const candidates: string[] = [`${provider}/${model}`];
+  try {
+    const list = await getModelListCached();
+    const hit = list?.find((m) => m.provider === provider && (m.id === model || m.name === model));
+    if (hit && hit.provider) {
+      const canon = `${hit.provider}/${hit.name || hit.id}`;
+      if (!candidates.includes(canon)) candidates.push(canon);
+    }
+  } catch { /* 列表不可用则只用直接 key */ }
+  for (const k of candidates) {
+    const v = cached[k];
+    if (Array.isArray(v) && v.length > 0) {
+      useUiStore.getState().setThinkingEfforts(v as ThinkingLevel[]);
+      return;
+    }
   }
 }
 
@@ -249,11 +270,15 @@ export async function fetchCurrentModel(): Promise<void> {
       useUiStore.getState().setCurrentModel(sm.name || sm.id, sm.provider || '');
     }
     // 同步模型思考档位支持列表（内核实测 state.model.thinking.efforts，UI 据此过滤可选档位）
-    const efforts = (sm && sm.thinking && Array.isArray(sm.thinking.efforts) ? sm.thinking.efforts : null) as ThinkingLevel[] | null;
-    useUiStore.getState().setThinkingEfforts(efforts);
-    // 缓存思考档位(provider/name -> efforts),下次首屏预填;get_state 实时值每次刷新
-    if (sm && sm.id && sm.provider && efforts && efforts.length > 0) {
-      void saveThinkingEffortsCache(`${sm.provider}/${sm.name || sm.id}`, efforts);
+    // 仅当内核实际报出非空 efforts 才覆盖;内核没报(模型未加载完/瞬时未就绪)则保留已预填的缓存值,
+    // 避免用 null 冲掉缓存预填 → 重启后"选择器全部点亮"的根因
+    const kernelEfforts = (sm && sm.thinking && Array.isArray(sm.thinking.efforts) ? sm.thinking.efforts : null) as string[] | null;
+    if (kernelEfforts && kernelEfforts.length > 0) {
+      useUiStore.getState().setThinkingEfforts(kernelEfforts as ThinkingLevel[]);
+      // 缓存思考档位(provider/name -> efforts),下次首屏预填;get_state 实时值每次刷新
+      if (sm && sm.id && sm.provider) {
+        void saveThinkingEffortsCache(`${sm.provider}/${sm.name || sm.id}`, kernelEfforts);
+      }
     }
     const stLevel = (st as { thinkingLevel?: string } | null)?.thinkingLevel;
     if (stLevel && THINKING_LEVELS.includes(stLevel as ThinkingLevel)) {
@@ -400,6 +425,23 @@ export async function switchModel(provider: string, modelId: string): Promise<vo
     lsSetSafe('tiffa-lastModel', JSON.stringify({ provider, modelId }));
   }
   useUiStore.getState().setCurrentModel(modelId, provider);
+  // 切模型后校验当前档位：新模型可能不支持当前档位（如 Qwen 的 xhigh 切到 DeepSeek）
+  // → 自动切到解析档位（≤ 当前档位的最大支持档）+ 持久化，从源头避免发消息时内核解析跳档
+  void (async () => {
+    const cur = useUiStore.getState().thinkingLevel;
+    if (!cur || cur === 'off') return; // off 对所有模型有效，不校验
+    let eff: string[] | undefined = (await loadThinkingEffortsCache())[`${provider}/${modelId}`];
+    if (!eff || eff.length === 0) {
+      const ok = await ensureOnlineForCommand();
+      if (!ok) return;
+      const st = (await window.tiffaDesktop.getState(useSessionsStore.getState().activeSessionId).catch(() => null)) as { model?: { thinking?: { efforts?: string[] } } } | null;
+      eff = st?.model?.thinking?.efforts;
+    }
+    if (!eff || eff.length === 0 || eff.includes(cur)) return;
+    const resolved = resolveLevelForEfforts(cur, eff);
+    if (!resolved || resolved === cur) return;
+    await sendThinkingLevel(resolved as ThinkingLevel);
+  })().catch(() => {});
 }
 
 /** 启动时的 lastModel 恢复 */
@@ -1039,6 +1081,15 @@ export async function switchToSession(sessionPath: string): Promise<void> {
             /* ignore */
           }
         }
+        // 恢复该会话记录的思考档位（不依赖 ready 事件，解决"切换对话档位不保持"）
+        const lv = await readSessionThinkingLevel(sessionPath).catch(() => null);
+        if (lv && (THINKING_LEVELS as readonly string[]).includes(lv)) {
+          const cur = useUiStore.getState().thinkingLevel;
+          if (cur !== lv) {
+            useUiStore.getState().setThinkingLevelState(lv as ThinkingLevel);
+            void window.tiffaDesktop.command('set_thinking_level', { level: lv }, targetSessionId).catch(() => {});
+          }
+        }
       } else {
         // 未就绪：清掉上一会话的模型残留（防串数据），拉起后恢复
         ui.setCurrentModel('--', '');
@@ -1468,6 +1519,22 @@ export async function compactMessage(): Promise<void> {
 
 /** 合法档位列表（思考档位校验用） */
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+/** 标准档位顺序（与内核 Xs 一致，用于解析不支持档位到最接近的支持档） */
+const LEVEL_ORDER: readonly string[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
+/** 解析档位：当前档位不在模型 efforts 时，找 ≤ 当前档位的最大支持档（与内核 resolveThinkingLevelForModel/BO 一致）。
+ * off 特殊：对所有模型有效，不解析（内核 qu 里 if(t===Off)return Off）。 */
+export function resolveLevelForEfforts(level: string, efforts: string[]): string | null {
+  if (efforts.includes(level)) return level;
+  const idx = LEVEL_ORDER.indexOf(level);
+  if (idx === -1) return null;
+  let best: string | null = null;
+  for (const e of efforts) {
+    if (LEVEL_ORDER.indexOf(e) > idx) break;
+    best = e;
+  }
+  return best ?? efforts[0];
+}
 
 /** 会话激活语义（指针模式）：档位命令前先确保实例在线（未就绪时轻量拉起），返回是否就绪 */
 async function ensureOnlineForCommand(): Promise<boolean> {

@@ -17,7 +17,7 @@ import {
   markFirstResponseReceived, currentModelLabel,
   touchGuard, hasReceivedFirstResponse,
 } from './generationGuard';
-import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached, THINKING_LEVELS } from './sessionController';
+import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached, THINKING_LEVELS, resolveLevelForEfforts } from './sessionController';
 import { autoRenameWithLightModel, readSessionThinkingLevel } from './historyService';
 import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
 import { normalizeUserContent } from './messageBuilders';
@@ -235,13 +235,18 @@ function handleEvent(event: TiffaEventFrame): void {
         void (async () => {
           const lv = await readSessionThinkingLevel(ap).catch(() => null);
           if (!lv || !(THINKING_LEVELS as readonly string[]).includes(lv)) return;
-          // 当前模型 efforts 已知且不支持该档位 → 不恢复(避免 Qwen/DeepSeek 收到不支持的档位)
+          // 当前模型 efforts 已知且不支持该档位 → 解析到支持的最大档（与内核 resolveThinkingLevelForModel 一致），而非放弃
           const st = await window.tiffaDesktop.getState(useSessionsStore.getState().activeSessionId).catch(() => null);
           const eff = (st as { model?: { thinking?: { efforts?: string[] } } } | null)?.model?.thinking?.efforts;
-          if (eff && eff.length > 0 && !eff.includes(lv)) return;
-          useUiStore.getState().setThinkingLevelState(lv as ThinkingLevel);
+          let restored = lv;
+          if (lv !== 'off' && eff && eff.length > 0 && !eff.includes(lv)) {
+            const resolved = resolveLevelForEfforts(lv, eff);
+            if (!resolved) return;
+            restored = resolved;
+          }
+          useUiStore.getState().setThinkingLevelState(restored as ThinkingLevel);
           void window.tiffaDesktop
-            .command('set_thinking_level', { level: lv }, useSessionsStore.getState().activeSessionId)
+            .command('set_thinking_level', { level: restored }, useSessionsStore.getState().activeSessionId)
             .catch(() => {});
         })().catch(() => {});
       }

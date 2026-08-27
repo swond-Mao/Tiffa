@@ -3003,9 +3003,32 @@ function healKernelAskDialog(): void {
     console.warn('[kernel-heal] askDialog 打补丁失败（退回逐题回答）:', (e as Error).message);
   }
 }
+// ── 自愈：延长内核扩展 handler 超时（30s → 120s）──
+// session_before_compact 钩子内同步跑旁路总结（最坏 35-46s），内核默认 30s 会 abort 钩子
+// 并放弃结果，导致压缩降级到内核自压。延长到 120s 让钩子有时间完成 ③ 旁路结构化总结。
+// 幂等：已打标记则跳过。内核升级后 dist/cli.js 被覆盖，本函数每次启动自动重打。
+function healKernelExtensionHandlerTimeout(): void {
+  try {
+    const cliJs = path.join(PORTABLE_ROOT, 'npm-global', 'node_modules', '@oh-my-pi', 'pi-coding-agent', 'dist', 'cli.js');
+    if (!fs.existsSync(cliJs)) return;
+    const m = '/*TIFFA_EXT_HANDLER_TIMEOUT_120000*/';
+    let src = fs.readFileSync(cliJs, 'utf8');
+    if (src.includes(m)) return; // 已打
+    const anchor = 'var Xle=30000,';
+    const idx = src.indexOf(anchor);
+    if (idx < 0) { console.warn('[kernel-heal] extension-handler-timeout 锚点未找到（内核版本可能变化），跳过'); return; }
+    const newSrc = src.slice(0, idx) + 'var Xle=120000' + m + ',' + src.slice(idx + anchor.length);
+    fs.writeFileSync(cliJs, newSrc, 'utf8');
+    mainLog('[kernel-heal] 内核扩展 handler 超时 30s -> 120s（session_before_compact 旁路总结需要更长窗口）');
+  } catch (e) {
+    console.warn('[kernel-heal] extension-handler-timeout 打补丁失败:', (e as Error).message);
+  }
+}
+
 
 
 app.whenReady().then(() => {
+  healKernelExtensionHandlerTimeout();
   healKernelAskDialog();
   setupIpc();
   mainWindow = createWindow();
