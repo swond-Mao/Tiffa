@@ -66,6 +66,52 @@ function Invoke-Npm {
     }
 }
 
+# ── 离线/内网模式：检测镜像可达性；不可达则校验目录内预置依赖（自包含），齐全则跳过联网安装 ──
+# 内网机器无 npmmirror 镜像。正确用法是拷贝整个 Tiffa 目录（含预置依赖）后直接 start-tiffa.bat；
+# 若在内网跑本脚本，检测到离线就校验预置是否齐全，齐全直接 exit，缺则明确告知缺哪个目录。
+function Test-Online {
+    try {
+        $r = Test-NetConnection -ComputerName "registry.npmmirror.com" -Port 443 -WarningAction SilentlyContinue
+        return [bool]$r.TcpTestSucceeded
+    } catch { return $false }
+}
+$Online = Test-Online
+if (-not $Online) {
+    Write-Host ""
+    Write-Host "  [离线模式] npmmirror 镜像不可达（内网环境）" -ForegroundColor Yellow
+    Write-Host "  校验目录内预置依赖（自包含）..." -ForegroundColor Yellow
+    $checks = @(
+        "node\node.exe|便携 node",
+        "electron\node_modules\electron\dist\electron.exe|Electron 二进制",
+        "npm-global\node_modules\@oh-my-pi|Tiffa 内核",
+        "home\AppData\Local\ms-playwright|playwright 浏览器内核",
+        "python\python.exe|便携 python",
+        "npm-global\node_modules\bun\bin\bun.exe|bun",
+        "python\Scripts\pip.exe|Python 依赖(pip+site-packages)",
+        "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)"
+    )
+    $missing = @()
+    foreach ($spec in $checks) {
+        $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
+        if (Test-Path (Join-Path $ROOT $rel)) { OK "$name（已预置）" } else { $missing += $name }
+    }
+    # 可选依赖(非核心: 缺了降级不阻断) —— computer-use WPS/Office 与 canvas-design 中文字体
+    $optionalChecks = @(
+        "home\AppData\Roaming\Kingsoft\wps|WPS COM 对象(computer-use WPS/Office)",
+        "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)"
+    )
+    foreach ($spec in $optionalChecks) {
+        $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
+        if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name，需时从源机器拷贝" }
+    }
+    if ($missing.Count -eq 0) {
+        OK "离线模式：关键依赖齐全，跳过联网安装。直接 start-tiffa.bat 使用。"
+        exit 0
+    } else {
+        FAIL "离线模式缺少预置依赖，请从源机器拷贝对应目录: $($missing -join ', ')"
+    }
+}
+
 # Step 1: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
 # 必须在 npm 镜像配置之前执行：全新机器没有任何 Node.js/npm，
 # 若先要求 npm 会在第一步直接 FAIL，导致 Node.js 自动下载永远轮不到执行。
@@ -784,6 +830,37 @@ if (Test-Path $aiMd) {
     }
 }
 
+# ---- 在线装完自检: 确认 10 项依赖齐全(与离线校验同口径), 防某 Step 误判成功但文件缺失 ----
+Write-Host ""
+Write-Host "  [自检] 校验依赖完整性(10 项)..." -ForegroundColor Cyan
+$finalCoreChecks = @(
+    "node\node.exe|便携 node",
+    "electron\node_modules\electron\dist\electron.exe|Electron 二进制",
+    "npm-global\node_modules\@oh-my-pi|Tiffa 内核",
+    "home\AppData\Local\ms-playwright|playwright 浏览器内核",
+    "python\python.exe|便携 python",
+    "npm-global\node_modules\bun\bin\bun.exe|bun",
+    "python\Scripts\pip.exe|Python 依赖(pip+site-packages)",
+    "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)"
+)
+$finalMissing = @()
+foreach ($spec in $finalCoreChecks) {
+    $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
+    if (Test-Path (Join-Path $ROOT $rel)) { OK "$name" } else { $finalMissing += $name }
+}
+$finalOptChecks = @(
+    "home\AppData\Roaming\Kingsoft\wps|WPS COM 对象(computer-use WPS/Office)",
+    "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)"
+)
+foreach ($spec in $finalOptChecks) {
+    $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
+    if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name，需时从源机器拷贝" }
+}
+if ($finalMissing.Count -eq 0) {
+    OK "依赖完整(10 项齐全)，可直接 start-tiffa.bat 启动"
+} else {
+    FAIL "以下依赖缺失(建议联网重跑 install.ps1 或从源机器拷贝): $($finalMissing -join ', ')"
+}
 # 完成
 Write-Host ""
 Write-Host "  ==============================================" -ForegroundColor White
