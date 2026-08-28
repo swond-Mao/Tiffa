@@ -34,12 +34,16 @@
 
 - `radius`（roundRect）单位 px
 - 省略 `fill` → 透明（可用于占位）
-
 ## line 线段
 
 ```js
-{ type: 'line', x1: 80, y1: 200, x2: 1200, y2: 200, color: '#E2E8F0', width: 2 }
+{ type: 'line', x1: 80, y1: 200, x2: 1200, y2: 200, color: '#E2E8F0', width: 2,
+  endArrow: true, beginArrow: 'arrow' }
 ```
+
+- `endArrow` / `beginArrow`：线端箭头（可选）。`true` = 实心三角；或字符串 `'arrow' | 'triangle' | 'stealth' | 'diamond' | 'oval' | 'chevron'`
+- 导出 .pptx 时为 PowerPoint 原生箭头端（可编辑）；预览/编辑器按三角/菱形/圆近似渲染
+- 预览方向随线自动，无需手工旋转字符
 
 ## image 图片
 

@@ -37,6 +37,21 @@ function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// line 箭头：DSL endArrow/beginArrow → SVG marker（true 或 'triangle'|'arrow'|'diamond'|'oval'|'chevron'|'stealth'）
+function arrowId(el, kind) {
+  const key = ['ah', el.x1, el.y1, el.x2, el.y2, el.width, el.color, kind].join('_');
+  return key.replace(/[^a-zA-Z0-9_]/g, '');
+}
+function arrowMarker(id, type, color) {
+  const t = type === true ? 'triangle' : String(type || 'triangle');
+  const shape = t === 'diamond'
+    ? `<path d="M0,4.5 L4.5,0 L9,4.5 L4.5,9 Z" fill="${color}"/>`
+    : t === 'oval'
+      ? `<circle cx="4.5" cy="4.5" r="4.5" fill="${color}"/>`
+      : `<path d="M0,0 L9,4.5 L0,9 Z" fill="${color}"/>`;
+  return `<marker id="${id}" markerWidth="9" markerHeight="9" refX="9" refY="4.5" orient="auto">${shape}</marker>`;
+}
+
 // 与 preview.js 相同的元素渲染（编辑器画布用）
 function elHtml(el, page, theme) {
   const style = `left:${el.x || 0}px;top:${el.y || 0}px;width:${el.w || 0}px;height:${el.h || 0}px;`;
@@ -73,7 +88,12 @@ function elHtml(el, page, theme) {
       return `<div style="position:absolute;${style}background:${el.fill || 'transparent'};border-radius:50%;${el.opacity !== undefined ? `opacity:${el.opacity};` : ''}"></div>`;
     }
     case 'line': {
-      return `<svg style="position:absolute;left:${el.x1 || 0}px;top:${el.y1 || 0}px;overflow:visible" width="2" height="2"><line x1="0" y1="0" x2="${(el.x2 || 0) - (el.x1 || 0)}" y2="${(el.y2 || 0) - (el.y1 || 0)}" stroke="${el.color || '#1A1A1A'}" stroke-width="${el.width || 2}"/></svg>`;
+      const lc = el.color || '#1A1A1A';
+      const lw = el.width || 2;
+      let defs = '', ms = '', me = '';
+      if (el.beginArrow) { const id = arrowId(el, 's'); defs += arrowMarker(id, el.beginArrow, lc); ms = ` marker-start="url(#${id})"`; }
+      if (el.endArrow) { const id = arrowId(el, 'e'); defs += arrowMarker(id, el.endArrow, lc); me = ` marker-end="url(#${id})"`; }
+      return `<svg style="position:absolute;left:${el.x1 || 0}px;top:${el.y1 || 0}px;overflow:visible" width="2" height="2"><defs>${defs}</defs><line x1="0" y1="0" x2="${(el.x2 || 0) - (el.x1 || 0)}" y2="${(el.y2 || 0) - (el.y1 || 0)}" stroke="${lc}" stroke-width="${lw}"${ms}${me}/></svg>`;
     }
     case 'image': {
       const rel = path.relative(process.cwd(), el.path).replace(/\\/g, '/');
@@ -401,6 +421,19 @@ function decoHtml(page, th){
   return h;
 }
 
+function arrowId(el, kind){
+  var key = ['ah', el.x1, el.y1, el.x2, el.y2, el.width, el.color, kind].join('_');
+  return key.replace(/[^a-zA-Z0-9_]/g, '');
+}
+function arrowMarker(id, type, color){
+  var t = type === true ? 'triangle' : String(type || 'triangle');
+  var shape = t === 'diamond'
+    ? '<path d="M0,4.5 L4.5,0 L9,4.5 L4.5,9 Z" fill="' + color + '"/>'
+    : t === 'oval'
+      ? '<circle cx="4.5" cy="4.5" r="4.5" fill="' + color + '"/>'
+      : '<path d="M0,0 L9,4.5 L0,9 Z" fill="' + color + '"/>';
+  return '<marker id="' + id + '" markerWidth="9" markerHeight="9" refX="9" refY="4.5" orient="auto">' + shape + '</marker>';
+}
 function elHtml(el, page, theme){
   const style = 'left:'+(el.x||0)+'px;top:'+(el.y||0)+'px;width:'+(el.w||0)+'px;height:'+(el.h||0)+'px;';
   switch(el.type){
@@ -419,8 +452,14 @@ function elHtml(el, page, theme){
       return '<div style="position:absolute;'+style+'background:'+(el.fill||'transparent')+';'+(el.type==='roundRect'||el.radius!==undefined?'border-radius:'+(el.radius||8)+'px;':'')+((el.lineColor)?'border:1px solid '+el.lineColor+';':'')+'"></div>';
     case 'ellipse':
       return '<div style="position:absolute;'+style+'background:'+(el.fill||'transparent')+';border-radius:50%"></div>';
-    case 'line':
-      return '<svg style="position:absolute;left:'+(el.x1||0)+'px;top:'+(el.y1||0)+'px;overflow:visible" width="2" height="2"><line x1="0" y1="0" x2="'+((el.x2||0)-(el.x1||0))+'" y2="'+((el.y2||0)-(el.y1||0))+'" stroke="'+(el.color||'#1A1A1A')+'" stroke-width="'+(el.width||2)+'"/></svg>';
+    case 'line': {
+      var lc = el.color || '#1A1A1A';
+      var lw = el.width || 2;
+      var defs = '', ms = '', me = '';
+      if (el.beginArrow) { var id = arrowId(el, 's'); defs += arrowMarker(id, el.beginArrow, lc); ms = ' marker-start="url(#'+id+')"'; }
+      if (el.endArrow) { var id = arrowId(el, 'e'); defs += arrowMarker(id, el.endArrow, lc); me = ' marker-end="url(#'+id+')"'; }
+      return '<svg style="position:absolute;left:'+(el.x1||0)+'px;top:'+(el.y1||0)+'px;overflow:visible" width="2" height="2"><defs>'+defs+'</defs><line x1="0" y1="0" x2="'+((el.x2||0)-(el.x1||0))+'" y2="'+((el.y2||0)-(el.y1||0))+'" stroke="'+lc+'" stroke-width="'+lw+'"'+ms+me+'/></svg>';
+    }
     case 'image': {
       if (el._src) {
         const fit = el.objectFit === 'contain' ? 'contain' : 'cover';

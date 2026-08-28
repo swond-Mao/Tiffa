@@ -40,6 +40,13 @@ function hex(c) {
   return s.replace('#', '').toUpperCase();
 }
 function norm(c) { return String(c).toLowerCase(); }
+// line 箭头：DSL endArrow/beginArrow → PptxGenJS 箭头类型（true = 实心三角）
+const ARROW_TYPES = ['arrow', 'diamond', 'oval', 'open', 'stealth', 'triangle', 'chevron'];
+function arrowTypeName(v) {
+  if (v === true) return 'triangle';
+  const s = String(v).toLowerCase();
+  return ARROW_TYPES.includes(s) ? s : 'triangle';
+}
 
 // 边界裁剪：超出画布的元素自动裁剪（返回裁剪后的 {x,y,w,h}）
 function clipBounds(el) {
@@ -189,10 +196,16 @@ function renderElement(slide, pptx, el, page) {
       break;
     }
     case 'line': {
+      const lineOpts = {
+        color: hex(el.color || '#1A1A1A'),
+        width: px(el.width || 2),
+      };
+      if (el.endArrow) lineOpts.endArrowType = arrowTypeName(el.endArrow);
+      if (el.beginArrow) lineOpts.beginArrowType = arrowTypeName(el.beginArrow);
       slide.addShape(pptx.ShapeType.line, {
         x: px(el.x1 || 0), y: px(el.y1 || 0),
         w: px((el.x2 || 0) - (el.x1 || 0)), h: px((el.y2 || 0) - (el.y1 || 0)),
-        line: { color: hex(el.color || '#1A1A1A'), width: px(el.width || 2) },
+        line: lineOpts,
       });
       break;
     }
