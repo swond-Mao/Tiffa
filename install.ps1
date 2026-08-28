@@ -112,6 +112,50 @@ if (-not $Online) {
     }
 }
 
+# ---- 升级辅助: 检测本地【已跟踪代码改动】, 通俗提示一键清除+升级(不用看代码) ----
+# 区分: 已跟踪代码改动(M/A/D, 真正的修改) vs 未跟踪文件(??, 运行时产物/缓存, 不影响升级)。
+# 只对代码改动询问清除(stash); 未跟踪文件不影响 git pull, 提示可忽略。
+try {
+    $isGitRepo = (& git -C $ROOT rev-parse --is-inside-work-tree 2>$null) -like "true*"
+    if ($isGitRepo) {
+        $porcelain = & git -C $ROOT status --porcelain 2>$null
+        $lines = @($porcelain | Where-Object { $_ -and $_.ToString().Trim() -ne "" })
+        $trackedChanges = @($lines | Where-Object { $_.ToString().Trim() -notmatch "^\?\?" })
+        $untrackedCount = @($lines | Where-Object { $_.ToString().Trim() -match "^\?\?" }).Count
+        if ($trackedChanges.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  [升级] 这台机器有 $($trackedChanges.Count) 处代码改动(未保存的修改):" -ForegroundColor Yellow
+            $trackedChanges | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+            if ($untrackedCount -gt 0) { Write-Host "         (另有 $untrackedCount 个未跟踪文件是运行时产物, 不影响升级, 可忽略)" -ForegroundColor DarkGray }
+            Write-Host "         如果你【没有】在这台机器改过 Tiffa 代码(部署机/运行机) → 选 Y: 清除改动并升级到最新" -ForegroundColor Yellow
+            Write-Host "         如果你【正在】这台机器改代码 → 选 N: 保留改动(升级可能需要你先手动处理)" -ForegroundColor Yellow
+            $ans = Read-Host "         清除代码改动并升级到最新? [Y/N, 默认N]"
+            if ($ans -match "^[Yy]") {
+                & git -C $ROOT stash push -m "install.ps1 升级前自动暂存" 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    OK "已清除代码改动(其实暂存了, 想找回: git stash pop; 确定不要: git stash drop)"
+                    & git -C $ROOT pull 2>&1 | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }
+                    if ($LASTEXITCODE -eq 0) { OK "已升级到最新版本。" } else { WARN "升级没成功, 但改动没丢(暂存了)。稍后可: git stash pop 恢复, git pull 重试。" }
+                } else {
+                    WARN "清除改动没成功, 请手动: git stash(暂存) 或 git checkout -- .(丢弃)"
+                }
+            } else {
+                WARN "已保留代码改动, 未升级。要继续升级, 请先处理改动(或下次再选 Y)。"
+            }
+        } else {
+            Write-Host ""
+            if ($untrackedCount -gt 0) {
+                Write-Host "  [升级] 无代码改动(仅 $untrackedCount 个未跟踪运行时文件, 不影响升级), 直接升级到最新..." -ForegroundColor Cyan
+            } else {
+                Write-Host "  [升级] 无本地改动, 直接升级到最新..." -ForegroundColor Cyan
+            }
+            & git -C $ROOT pull 2>&1 | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }
+            if ($LASTEXITCODE -eq 0) { OK "已是最新版本。" } else { WARN "升级(git pull)没成功, 手动: git pull" }
+        }
+    }
+} catch {
+    # git 不可用 / 非 git 目录 / 无交互输入 → 静默跳过, 不影响依赖安装
+}
 # Step 1: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
 # 必须在 npm 镜像配置之前执行：全新机器没有任何 Node.js/npm，
 # 若先要求 npm 会在第一步直接 FAIL，导致 Node.js 自动下载永远轮不到执行。
