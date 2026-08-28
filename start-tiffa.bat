@@ -28,6 +28,8 @@ REM ── 技能共享 npm 依赖解析路径（docx 等装在 npm-global，AI 
 set "NODE_PATH=%ROOT%\skill-deps\node_modules"
 REM ── playwright 浏览器落盘位置重定向到便携 home（Windows 读 LOCALAPPDATA）──
 set "LOCALAPPDATA=%ROOT%\home\AppData\Local"
+REM ── playwright 浏览器内核显式指向便携 home（双保险：不依赖 playwright 默认查找，内网换盘符也能命中）──
+set "PLAYWRIGHT_BROWSERS_PATH=%ROOT%\home\AppData\Local\ms-playwright"
 
 REM ── 工作目录 ──
 set "TIFFA_WORKSPACE=%ROOT%\workspace"
