@@ -57,20 +57,34 @@ export default function InputBox() {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 指针模式：!tiffaReady 不再锁输入（可打字/选模型），锁仅留给切换/模型切换/连接中
-  const shouldDisable = sessionSwitching || modelSwitching;
+  // 切换/模型切换锁（有会话时生效）；无会话单独走 input-nosession 遮罩（保留点击提示，
+  // 不复用 input-disabled 的 pointer-events:none——那会吞掉点击，弹不出「请先新建对话」）
+  const switchingLock = sessionSwitching || modelSwitching;
+  const noSession = !activeSessionPath;
+  const shouldDisable = switchingLock || noSession;
 
-  const placeholder = shouldDisable
-    ? sessionSwitching
-      ? '正在切换会话…'
-      : '正在切换模型…'
-    : pendingActivation
-      ? '正在连接引擎…'
-      : !tiffaReady
-        ? '输入消息，发送后自动连接引擎…'
-        : agentRunning
-          ? 'Enter 排队 / 再次 Enter 发送 | 点击引导按钮立即干预'
-          : '输入消息，Enter 发送，Shift+Enter 换行...';
+  // 无会话点击防呆提示（2s 节流，避免连续点击刷屏）
+  const lastNoSessionToastRef = useRef(0);
+  const handleNoSessionClick = () => {
+    const now = Date.now();
+    if (now - lastNoSessionToastRef.current < 2000) return;
+    lastNoSessionToastRef.current = now;
+    useUiStore.getState().addToast('warning', '请先新建对话');
+  };
+
+  const placeholder = noSession
+    ? '请先新建对话'
+    : switchingLock
+      ? sessionSwitching
+        ? '正在切换会话…'
+        : '正在切换模型…'
+      : pendingActivation
+        ? '正在连接引擎…'
+        : !tiffaReady
+          ? '输入消息，发送后自动连接引擎…'
+          : agentRunning
+            ? 'Enter 排队 / 再次 Enter 发送 | 点击引导按钮立即干预'
+            : '输入消息，Enter 发送，Shift+Enter 换行...';
 
   // ── textarea 高度自适应 ──
 
@@ -324,7 +338,7 @@ export default function InputBox() {
   return (
     <div
       id="inputArea"
-      className={`${agentRunning ? 'input-running' : ''} ${shouldDisable ? 'input-disabled' : ''} ${dragOver ? 'drag-over' : ''}`}
+      className={`${agentRunning ? 'input-running' : ''} ${switchingLock ? 'input-disabled' : ''} ${noSession ? 'input-nosession' : ''} ${dragOver ? 'drag-over' : ''}`}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -425,7 +439,7 @@ export default function InputBox() {
               <line x1="3" y1="21" x2="10" y2="14" />
             </svg>
           </button>
-          <button type="button" id="btnAttach" className="input-btn attach" title="添加图片" onClick={() => fileInputRef.current?.click()}>
+          <button type="button" id="btnAttach" className="input-btn attach" title="添加图片" disabled={noSession} onClick={() => fileInputRef.current?.click()}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" />
               <circle cx="8.5" cy="8.5" r="1.5" />
@@ -467,6 +481,14 @@ export default function InputBox() {
             </div>
           ))}
         </div>
+        {noSession && (
+          <div
+            className="input-nosession-mask"
+            onClick={handleNoSessionClick}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => e.preventDefault()}
+          />
+        )}
       </div>
     </div>
   );

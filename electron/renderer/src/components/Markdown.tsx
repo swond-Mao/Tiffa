@@ -15,6 +15,7 @@ import remarkGfm from 'remark-gfm';
 import { applyOutputFixes } from '../services/outputFixes';
 import { copyText, handleMessageLinkClick } from '../services/utils';
 import MermaidDiagram from './MermaidDiagram';
+import DOMPurify from 'dompurify';
 
 /** 链接协议白名单（等价旧版 sanitizeHtml 的 javascript: 拦截） */
 function tiffaUrlTransform(url: string): string {
@@ -46,6 +47,80 @@ const COPY_BTN_STYLE: CSSProperties = {
   cursor: 'pointer',
   zIndex: 2,
 };
+
+/**
+ * 富 HTML 活渲染（```html / ```htm 代码块）：
+ * DOMPurify 默认配置拦截 script / 事件属性 / javascript: 链接 / iframe 等 XSS，
+ * 再叠加 CSS 守卫剥离内联 style 里的危险构造（expression / 外部 url 等——
+ * 现代 Chromium 里本不执行，仍按防呆标准堵死）。
+ */
+function splitDeclarations(style: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inQuote: string | null = null;
+  let cur = '';
+  for (const ch of style) {
+    if (inQuote) { cur += ch; if (ch === inQuote) inQuote = null; continue; }
+    if (ch === '"' || ch === "'") { inQuote = ch; cur += ch; continue; }
+    if (ch === '(') { depth++; cur += ch; continue; }
+    if (ch === ')') { depth = Math.max(0, depth - 1); cur += ch; continue; }
+    if (ch === ';' && depth === 0) { parts.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts;
+}
+
+/** 内联 style 二次消毒：剥离 expression / 外部 url / 危险协议，保留合法 CSS */
+function cleanCssStyle(style: string): string {
+  if (typeof style !== 'string') return style;
+  return splitDeclarations(style)
+    .map((s) => s.trim())
+    .filter((s) => {
+      if (!s) return false;
+      if (/expression\s*\(|behavior\s*:|javascript\s*:|vbscript\s*:/i.test(s)) return false;
+      const m = s.match(/url\(\s*(['"]?)([^'")]*?)\1\s*\)/i);
+      if (m) {
+        const arg = m[2].trim();
+        if (/^(https?:|ftp:|file:|javascript:|vbscript:)/i.test(arg) || arg.startsWith('//')) return false;
+      }
+      return true;
+    })
+    .join('; ');
+}
+
+let _purify: any = null;
+function getPurify(): any {
+  if (typeof window === 'undefined') return null;
+  if (!_purify) {
+    _purify = DOMPurify(window);
+    _purify.addHook('afterSanitizeAttributes', (node: Element) => {
+      const style = node.getAttribute('style');
+      if (!style) return;
+      const cleaned = cleanCssStyle(style);
+      if (cleaned) node.setAttribute('style', cleaned);
+      else node.removeAttribute('style');
+    });
+  }
+  return _purify;
+}
+
+function LiveHtml({ code }: { code: string }) {
+  const html = useMemo(() => {
+    const p = getPurify();
+    if (!p) return '';
+    try {
+      return p.sanitize(code);
+    } catch {
+      return '';
+    }
+  }, [code]);
+  if (!html) {
+    // 无 DOM / 消毒失败：退化为代码显示（安全兜底）
+    return <pre className="live-html-fallback"><code>{code}</code></pre>;
+  }
+  return <div className="tiffa-live-html" dangerouslySetInnerHTML={{ __html: html }} />;
+}
 
 /**
  * 代码块（pre 的自定义渲染）：
@@ -109,6 +184,12 @@ function PreBlock({ children }: { children?: ReactNode }) {
   if (lang === 'mermaid') {
     return <MermaidDiagram code={rawText} />;
   }
+
+  // 富 HTML 代码块（```html / ```htm）：消毒后活渲染
+  if (lang === 'html' || lang === 'htm') {
+    return <LiveHtml code={rawText} />;
+  }
+
 
   return (
     <div ref={wrapRef} className={isTall ? 'collapsible-pre-wrap' : undefined}>

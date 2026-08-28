@@ -61,7 +61,8 @@ function elHtml(el, page, theme) {
       const lineHpx = lineH ? `line-height:${lineH / fs};` : '';
       const extra = el.secondary ? `color:${subColor};font-size:${Math.round(fs * 0.78)}px;` : '';
       const op = el.transparency !== undefined ? `opacity:${((100 - el.transparency) / 100).toFixed(2)};` : '';
-      return `<div style="position:absolute;${style}${op}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}${extra}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
+      const jc = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
+      return `<div style="position:absolute;${style}${op}font-size:${fs}px;font-weight:${el.bold ? 'bold' : 'normal'};font-style:${el.italic ? 'italic' : 'normal'};color:${color};text-align:${align};display:flex;justify-content:${jc};align-items:${valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start'};${lineHpx}${extra}overflow:hidden;white-space:pre-wrap">${inner}</div>`;
     }
     case 'rect':
     case 'roundRect': {
@@ -75,7 +76,8 @@ function elHtml(el, page, theme) {
     case 'ellipse': {
       const bg = el.fill || 'transparent';
       const shadow = (el.shadow && theme && theme.decoration && theme.decoration.shadow) ? `box-shadow:0 6px 20px ${rgba(bg, 0.3)};` : '';
-      return `<div style="position:absolute;${style}background:${bg};border-radius:50%;${el.opacity !== undefined ? `opacity:${el.opacity};` : ''}${shadow}"></div>`;
+      const border = el.lineColor ? `border:${el.lineWidth || 1}px solid ${el.lineColor};box-sizing:border-box;` : '';
+      return `<div style="position:absolute;${style}background:${bg};border-radius:50%;${border}${el.opacity !== undefined ? `opacity:${el.opacity};` : ''}${shadow}"></div>`;
     }
     case 'line': {
       return `<svg style="position:absolute;left:${el.x1 || 0}px;top:${el.y1 || 0}px;overflow:visible" width="2" height="2"><line x1="0" y1="0" x2="${(el.x2 || 0) - (el.x1 || 0)}" y2="${(el.y2 || 0) - (el.y1 || 0)}" stroke="${el.color || t.primary || '#1A1A1A'}" stroke-width="${el.width || 2}"/></svg>`;

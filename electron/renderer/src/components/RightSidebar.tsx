@@ -441,7 +441,11 @@ function FilePanel() {
   );
 
   useEffect(() => {
-    if (workspacePath && !root) void loadTree(workspacePath);
+    // 项目切换：重置文件树定位到新项目根（防呆——不残留上一项目的子目录/列表）
+    setRoot('');
+    setEntries(null);
+    setError('');
+    if (workspacePath) void loadTree(workspacePath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath]);
 
