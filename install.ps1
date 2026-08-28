@@ -81,10 +81,17 @@ if (-not $Online) {
     Write-Host "  [离线模式] npmmirror 镜像不可达（内网环境）" -ForegroundColor Yellow
     Write-Host "  校验目录内预置依赖（自包含）..." -ForegroundColor Yellow
     $missing = @()
-    # node 项: 便携 node\node.exe 或 系统 node(与 Step 1 口径一致, 有系统 node 也算 OK)
-    $nodeOk = (Test-Path (Join-Path $ROOT "node\node.exe"))
-    if (-not $nodeOk) { $nodeOk = $null -ne (Get-Command node -ErrorAction SilentlyContinue) }
-    if ($nodeOk) { OK "node(便携或系统)" } else { $missing += "node(便携或系统)" }
+    # node 项: 便携 node\node.exe 必须存在(自包含); 缺失时系统 node 仅作本机兜底(WARN 提示拷内网需补)
+    if (Test-Path (Join-Path $ROOT "node\node.exe")) {
+        OK "node(便携, 自包含)"
+    } else {
+        $hasSys = $null -ne (Get-Command node -ErrorAction SilentlyContinue)
+        if ($hasSys) {
+            WARN "node: 便携缺失(回退系统 node), 本机可用, 但拷内网需补装便携 node"
+        } else {
+            $missing += "node(便携, 自包含)"
+        }
+    }
     # 其余核心依赖(预置目录)
     $checks = @(
         "electron\node_modules\electron\dist\electron.exe|Electron 二进制",
@@ -160,45 +167,48 @@ try {
 } catch {
     # git 不可用 / 非 git 目录 / 无交互输入 → 静默跳过, 不影响依赖安装
 }
-# Step 1: 检查 / 安装 Node.js（优先便携，次系统，最后从国内镜像下载）
+# Step 1: 确保便携 Node.js（自包含核心：无论系统有没有 node，都确保 node\ 目录存在）
+# 自包含是 Tiffa 特色：整目录拷到内网直接跑，不依赖系统环境，所以 node 必须便携化。
 # 必须在 npm 镜像配置之前执行：全新机器没有任何 Node.js/npm，
 # 若先要求 npm 会在第一步直接 FAIL，导致 Node.js 自动下载永远轮不到执行。
-Step 1 7 "检查 Node.js"
+Step 1 7 "确保便携 Node.js（自包含）"
 $nodeExe = Join-Path $ROOT "node\node.exe"
 if (Test-Path $nodeExe) {
     $v = & $nodeExe --version 2>$null
-    OK "Node.js $v (便携)"
+    OK "Node.js $v（便携，自包含）"
     $NODE = $nodeExe
 } else {
-    $sysNode = Get-Command node -ErrorAction SilentlyContinue
-    if ($sysNode) {
-        $v = & node --version 2>$null
-        OK "Node.js $v (系统)"
-        $NODE = "node"
-    } else {
-        INFO "未找到 Node.js，从国内镜像(npmmirror)下载 v22.17.1 ..."
-        $nodeVer = "v22.17.1"
-        $nodeZip = Join-Path $env:TEMP "tiffa-node-$nodeVer-win-x64.zip"
-        $nodeUrl = "https://registry.npmmirror.com/-/binary/node/$nodeVer/node-$nodeVer-win-x64.zip"
-        try {
-            Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
-            Expand-Archive -Path $nodeZip -DestinationPath $ROOT -Force
-            $extracted = Join-Path $ROOT "node-$nodeVer-win-x64"
-            $nodeDir   = Join-Path $ROOT "node"
-            if (Test-Path $extracted) {
-                if (Test-Path $nodeDir) { Remove-Item $nodeDir -Recurse -Force }
-                Move-Item $extracted $nodeDir
-            }
-            if (Test-Path $nodeExe) {
-                $v = & $nodeExe --version 2>$null
-                OK "Node.js $v 安装成功 (国内镜像)"
-                $NODE = $nodeExe
-            } else { throw "node.exe 未出现在 $nodeDir" }
-        } catch {
-            FAIL "Node.js 下载/解压失败：$_ ｜ 请手动下载 https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip 并解压到 $ROOT\node\"
-        } finally {
-            if (Test-Path $nodeZip) { Remove-Item $nodeZip -Force }
+    # 便携不存在 → 总是装便携（不管系统有没有，保证自包含可拷内网）
+    INFO "安装便携 Node.js（自包含，保证拷内网可用，国内镜像 v22.17.1）..."
+    $nodeVer = "v22.17.1"
+    $nodeZip = Join-Path $env:TEMP "tiffa-node-$nodeVer-win-x64.zip"
+    $nodeUrl = "https://registry.npmmirror.com/-/binary/node/$nodeVer/node-$nodeVer-win-x64.zip"
+    try {
+        Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
+        Expand-Archive -Path $nodeZip -DestinationPath $ROOT -Force
+        $extracted = Join-Path $ROOT "node-$nodeVer-win-x64"
+        $nodeDir   = Join-Path $ROOT "node"
+        if (Test-Path $extracted) {
+            if (Test-Path $nodeDir) { Remove-Item $nodeDir -Recurse -Force }
+            Move-Item $extracted $nodeDir
         }
+        if (Test-Path $nodeExe) {
+            $v = & $nodeExe --version 2>$null
+            OK "Node.js $v 安装成功（便携，自包含）"
+            $NODE = $nodeExe
+        } else { throw "node.exe 未出现在 $nodeDir" }
+    } catch {
+        # 装便携失败 → 系统 node 仅作兜底（本机能用，但拷内网需补便携）
+        $sysNode = Get-Command node -ErrorAction SilentlyContinue
+        if ($sysNode) {
+            $v = & node --version 2>$null
+            WARN "便携 node 装失败，暂用系统 Node.js $v（本机可用）。拷内网前需补装便携 node（内网无系统 node），或从源机器拷 node\ 目录"
+            $NODE = "node"
+        } else {
+            FAIL "便携 Node.js 下载/解压失败且无系统 Node.js：$_ ｜ 请手动下载 https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip 解压到 $ROOT\node\"
+        }
+    } finally {
+        if (Test-Path $nodeZip) { Remove-Item $nodeZip -Force }
     }
 }
 # 便携 node 前置到 PATH：Step 4/5 用 `cmd /c npm install` 执行，子进程继承的是
@@ -913,10 +923,17 @@ if (Test-Path $aiMd) {
 Write-Host ""
 Write-Host "  [自检] 校验依赖完整性(10 项)..." -ForegroundColor Cyan
 $finalMissing = @()
-# node 项: 便携 node\node.exe 或 系统 node(与 Step 1 口径一致, 有系统 node 也算 OK)
-$nodeOk2 = (Test-Path (Join-Path $ROOT "node\node.exe"))
-if (-not $nodeOk2) { $nodeOk2 = $null -ne (Get-Command node -ErrorAction SilentlyContinue) }
-if ($nodeOk2) { OK "node(便携或系统)" } else { $finalMissing += "node(便携或系统)" }
+# node 项: 便携 node\node.exe 必须存在(自包含); 缺失时系统 node 仅作本机兜底(WARN 提示拷内网需补)
+if (Test-Path (Join-Path $ROOT "node\node.exe")) {
+    OK "node(便携, 自包含)"
+} else {
+    $hasSys2 = $null -ne (Get-Command node -ErrorAction SilentlyContinue)
+    if ($hasSys2) {
+        WARN "node: 便携缺失(回退系统 node), 本机可用, 但拷内网需补装便携 node"
+    } else {
+        $finalMissing += "node(便携, 自包含)"
+    }
+}
 # 其余核心依赖
 $finalCoreChecks = @(
     "electron\node_modules\electron\dist\electron.exe|Electron 二进制",
