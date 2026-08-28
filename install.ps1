@@ -348,27 +348,58 @@ if (Test-Path $electronExe) {
     } else {
         FAIL "Electron 安装失败。请手动执行：cd $ROOT\electron && npm install（需联网，ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/）"
     }
-    # 统一防呆（新装/已装都检查）：构建产物（main.js / renderer/dist）不入库，
-    # 新机器 clone 后缺失会导致 Electron 无入口/无页面（空白窗口）。缺失则本地 tsc + vite 构建。
-    $elMainJs = Join-Path $electronDir "main.js"
-    $elIndex  = Join-Path $electronDir "renderer\dist\index.html"
-    if (-not (Test-Path $elMainJs) -or -not (Test-Path $elIndex)) {
-        INFO "检测到 Electron 构建产物缺失，本地构建（tsc + vite）..."
-        $prevEAP2 = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        try {
-            $buildCmd = "cd /d `"$electronDir`" && npm run build"
-            cmd /c $buildCmd 2>&1 | Out-String | Out-Null
-            $buildCode = $LASTEXITCODE
-            if ($buildCode -eq 0 -and (Test-Path $elMainJs) -and (Test-Path $elIndex)) {
-                OK "Electron 构建成功"
-            } else {
-                FAIL "Electron 构建失败（退出码 $buildCode）：请手动执行 cd $electronDir && npm run build"
-            }
-        } finally {
-            $ErrorActionPreference = $prevEAP2
+}
+
+# ---- 防呆（新装/已装都做）：renderer/dist 入库，install 一律强制清洗到仓库版 ----
+# 本地残留的旧/脏 dist 会挡住新功能（如新设置项不显示），故先还原被跟踪文件 + 清未跟踪残留，
+# 再按本地是否有构建工具决定是否重新编译刷新（有工具→dist/main 与源码一致；无工具内网→沿用仓库版）。
+$elMainJs = Join-Path $electronDir "main.js"
+$elIndex  = Join-Path $electronDir "renderer\dist\index.html"
+$viteBin  = Join-Path $electronDir "node_modules\vite\bin\vite.js"
+# 还原被跟踪的 dist 到仓库提交版 + 清掉本地未跟踪的 dist 残留（旧 hash 文件等）
+cmd /c "cd /d `"$ROOT`" && git checkout -- electron/renderer/dist 2>&1" | Out-Null
+cmd /c "cd /d `"$ROOT`" && git clean -fdq electron/renderer/dist 2>&1" | Out-Null
+# 仓库版 dist/main.js 仍缺失（极端：仓库未提交产物）→ 本地 build 兜底
+if (-not (Test-Path $elMainJs) -or (-not (Test-Path $elIndex))) {
+    INFO "检测到 Electron 构建产物缺失，本地构建（tsc + vite）..."
+    $prevEAP2 = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $buildCmd = "cd /d `"$electronDir`" && npm run build"
+        cmd /c $buildCmd 2>&1 | Out-String | Out-Null
+        $buildCode = $LASTEXITCODE
+        if ($buildCode -eq 0 -and (Test-Path $elMainJs) -and (Test-Path $elIndex)) {
+            OK "Electron 构建成功"
+        } else {
+            FAIL "Electron 构建失败（退出码 $buildCode）：请手动执行 cd $electronDir && npm run build"
         }
+    } finally {
+        $ErrorActionPreference = $prevEAP2
     }
+}
+# 本地含构建工具 → 重新编译刷新（main.js/dist 与源码一致）；无工具（内网离线）→ 沿用仓库版
+if (Test-Path $viteBin) {
+    INFO "本地含构建工具，重新编译 Electron 前端（确保与源码一致）..."
+    $prevEAP3 = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $rebuildOk = $false
+    try {
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+            cmd /c "cd /d `"$electronDir`" && npm run build 2>&1" | Out-String | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $elMainJs) -and (Test-Path $elIndex)) { $rebuildOk = $true; break }
+            Write-Host "    [WARN] 前端重新编译失败（第 $attempt/3 次，退出码 $LASTEXITCODE）" -ForegroundColor Yellow
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP3
+    }
+    if ($rebuildOk) {
+        OK "Electron 前端已重新编译（与源码一致）"
+    } else {
+        Write-Host "    [WARN] 前端重新编译失败，沿用仓库版（仍可用）" -ForegroundColor Yellow
+    }
+} else {
+    OK "Electron 前端（仓库版 dist，内网离线可用）"
 }
 
 # Step 6: 安装技能 npm 依赖与无头浏览器（便携离线关键）
