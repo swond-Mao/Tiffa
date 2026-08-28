@@ -80,8 +80,13 @@ if (-not $Online) {
     Write-Host ""
     Write-Host "  [离线模式] npmmirror 镜像不可达（内网环境）" -ForegroundColor Yellow
     Write-Host "  校验目录内预置依赖（自包含）..." -ForegroundColor Yellow
+    $missing = @()
+    # node 项: 便携 node\node.exe 或 系统 node(与 Step 1 口径一致, 有系统 node 也算 OK)
+    $nodeOk = (Test-Path (Join-Path $ROOT "node\node.exe"))
+    if (-not $nodeOk) { $nodeOk = $null -ne (Get-Command node -ErrorAction SilentlyContinue) }
+    if ($nodeOk) { OK "node(便携或系统)" } else { $missing += "node(便携或系统)" }
+    # 其余核心依赖(预置目录)
     $checks = @(
-        "node\node.exe|便携 node",
         "electron\node_modules\electron\dist\electron.exe|Electron 二进制",
         "npm-global\node_modules\@oh-my-pi|Tiffa 内核",
         "home\AppData\Local\ms-playwright|playwright 浏览器内核",
@@ -90,7 +95,6 @@ if (-not $Online) {
         "python\Scripts\pip.exe|Python 依赖(pip+site-packages)",
         "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)"
     )
-    $missing = @()
     foreach ($spec in $checks) {
         $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
         if (Test-Path (Join-Path $ROOT $rel)) { OK "$name（已预置）" } else { $missing += $name }
@@ -908,8 +912,13 @@ if (Test-Path $aiMd) {
 # ---- 在线装完自检: 确认 10 项依赖齐全(与离线校验同口径), 防某 Step 误判成功但文件缺失 ----
 Write-Host ""
 Write-Host "  [自检] 校验依赖完整性(10 项)..." -ForegroundColor Cyan
+$finalMissing = @()
+# node 项: 便携 node\node.exe 或 系统 node(与 Step 1 口径一致, 有系统 node 也算 OK)
+$nodeOk2 = (Test-Path (Join-Path $ROOT "node\node.exe"))
+if (-not $nodeOk2) { $nodeOk2 = $null -ne (Get-Command node -ErrorAction SilentlyContinue) }
+if ($nodeOk2) { OK "node(便携或系统)" } else { $finalMissing += "node(便携或系统)" }
+# 其余核心依赖
 $finalCoreChecks = @(
-    "node\node.exe|便携 node",
     "electron\node_modules\electron\dist\electron.exe|Electron 二进制",
     "npm-global\node_modules\@oh-my-pi|Tiffa 内核",
     "home\AppData\Local\ms-playwright|playwright 浏览器内核",
@@ -918,7 +927,6 @@ $finalCoreChecks = @(
     "python\Scripts\pip.exe|Python 依赖(pip+site-packages)",
     "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)"
 )
-$finalMissing = @()
 foreach ($spec in $finalCoreChecks) {
     $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
     if (Test-Path (Join-Path $ROOT $rel)) { OK "$name" } else { $finalMissing += $name }
