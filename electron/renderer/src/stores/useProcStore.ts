@@ -18,9 +18,11 @@ interface ProcState {
   tiffaReady: boolean;
   /** per-session 生成状态（key = sessionPath） */
   procStateMap: Record<string, SessionProcState>;
-  /** per-session 实例就绪态（key = sessionPath）：活动对话（实例已就绪，LRU 保活中）为 true，
-   *  对话树左侧圆点据此显示——选中（activeSessionPath）≠ 活动 */
+  /** per-session 实例就绪态（key = sessionPath）：活动对话（实例已就绪，LRU 保活中）为 true */
   sessionReadyMap: Record<string, boolean>;
+  /** per-session 真实交互时间（key = sessionPath）：仅用户发送消息 / AI 输出时 touch，
+   *  点开查看不更新。对话树圆点据此判断「30 分钟内真实交互过」 */
+  lastInteractionMap: Record<string, number>;
   /** per-实例(cwd) 生成状态（切换项目时保存/恢复） */
   instanceAgentRunning: Record<string, boolean>;
   /** 自动重启后未就绪标记 */
@@ -29,6 +31,7 @@ interface ProcState {
   setReady: (ready: boolean) => void;
   setSessionReady: (sessionPath: string | null, ready: boolean) => void;
   setSessionReadyMap: (map: Record<string, boolean>) => void;
+  touchSessionInteraction: (sessionPath: string | null) => void;
   setSessionRunning: (sessionPath: string | null, running: boolean) => void;
   setInstanceRunning: (cwd: string | null, running: boolean) => void;
   setAutoRestarting: (v: boolean) => void;
@@ -38,6 +41,7 @@ export const useProcStore = create<ProcState>((set) => ({
   tiffaReady: false,
   procStateMap: {},
   sessionReadyMap: {},
+  lastInteractionMap: {},
   instanceAgentRunning: {},
   autoRestarting: false,
 
@@ -49,6 +53,10 @@ export const useProcStore = create<ProcState>((set) => ({
     }));
   },
   setSessionReadyMap: (map) => set({ sessionReadyMap: map }),
+  touchSessionInteraction: (sessionPath) => {
+    if (!sessionPath) return;
+    set((s) => ({ lastInteractionMap: { ...s.lastInteractionMap, [sessionPath]: Date.now() } }));
+  },
   setSessionRunning: (sessionPath, running) => {
     if (!sessionPath) return;
     set((s) => {
@@ -81,6 +89,11 @@ export function renameProcKey(oldPath: string, newPath: string): void {
       readyMap[newPath] = readyMap[oldPath];
       delete readyMap[oldPath];
     }
-    return { procStateMap: map, sessionReadyMap: readyMap };
+    const interactionMap = { ...s.lastInteractionMap };
+    if (oldPath in interactionMap) {
+      interactionMap[newPath] = interactionMap[oldPath];
+      delete interactionMap[oldPath];
+    }
+    return { procStateMap: map, sessionReadyMap: readyMap, lastInteractionMap: interactionMap };
   });
 }

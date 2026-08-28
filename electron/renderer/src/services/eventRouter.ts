@@ -145,6 +145,7 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
           const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, true);
+            proc.touchSessionInteraction(bgPath);
             // 新一轮生成开始：旧快照作废（agent 运行中切回时避免显示上一轮旧尾部）
             useChatStore.getState().markCacheFresh(bgPath, false);
             // 后台首响也要标记并清定时器：发送时启动的首响检测依赖 agent_start/
@@ -156,6 +157,7 @@ function routeBackgroundEvent(event: TiffaEventFrame): boolean {
           const bgPath = resolveBgPath(event._sessionId, useSessionsStore.getState());
           if (bgPath) {
             proc.setSessionRunning(bgPath, false);
+            proc.touchSessionInteraction(bgPath);
             // 只停本会话检测器：并行会话的卡住/首响检测互不干扰
             stopStallCheck(bgPath);
             stopFirstResponseCheck(bgPath);
@@ -301,6 +303,7 @@ function handleEvent(event: TiffaEventFrame): void {
     case 'agent_start': {
       const pathAs = resolveEventWritePath(event, sessions) || sessions.activeSessionPath;
       proc.setSessionRunning(pathAs, true);
+      proc.touchSessionInteraction(pathAs);
       proc.setInstanceRunning(projects.workspacePath, true);
       // 新一轮生成：缓存快照可能落后，标记不新鲜
       chat.markCacheFresh(pathAs, false);
@@ -333,6 +336,7 @@ function handleEvent(event: TiffaEventFrame): void {
       }
       const pathAe = resolveEventWritePath(event, sessions) || sessions.activeSessionPath;
       proc.setSessionRunning(pathAe, false);
+      proc.touchSessionInteraction(pathAe);
       proc.setInstanceRunning(projects.workspacePath, false);
       ui.setPendingSteerMarker(false);
       // per-session：只停本会话检测器（不误清并行会话的检测）

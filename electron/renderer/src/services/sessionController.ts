@@ -1062,8 +1062,7 @@ export async function switchToSession(sessionPath: string): Promise<void> {
   // 不活动对话保持可打字/可选模型，点发送时才由 sendMessage 兜底拉起实例。
   if (targetSessionId) {
     void window.tiffaDesktop.isReady(targetSessionId).then(async (ready) => {
-      // 无论是否仍为活跃会话：记录该会话实例就绪态（对话树圆点显示依据）
-      proc.setSessionReady(sessionPath, ready);
+      // 点击 tab 仅切换查看视图，不改变"对话实例激活"圆点状态（sessionReadyMap 由真实实例事件维护）
       if (useSessionsStore.getState().activeSessionId !== targetSessionId) return;
       proc.setReady(ready);
       if (ready) {
@@ -1251,6 +1250,7 @@ export async function sendMessage(text: string, images?: MessageImage[]): Promis
   }
   const sendImages = images && images.length > 0 ? images.map((img) => ({ data: img.data, mimeType: img.mimeType })) : undefined;
   proc.setSessionRunning(activePath, true);
+  useProcStore.getState().touchSessionInteraction(activePath);
   proc.setInstanceRunning(projects.workspacePath, true);
   startStallCheck(activePath);
   startFirstResponseCheck(activePath);

@@ -18,6 +18,7 @@ import { extractSessionId } from '../services/utils';
 
 /** tab 标题截断长度（等价旧版 renderSessionTabs） */
 const TITLE_MAX = 12;
+const INTERACTION_WINDOW_MS = 30 * 60 * 1000; // 对话真实交互后 tab 指示条保持点亮时长
 
 export default function SessionTabs() {
   const activeTabMeta = useSessionsStore((s) => s.activeTabMeta);
@@ -96,6 +97,8 @@ function TabItem({
 }) {
   const isActive = useSessionsStore((s) => s.activeSessionPath === path);
   const isRunning = useProcStore((s) => !!s.procStateMap[path]?.agentRunning);
+  const lastInter = useProcStore((s) => s.lastInteractionMap[path] || 0);
+  const isFresh = Date.now() - lastInter < INTERACTION_WINDOW_MS;
   const isPreparing = useSessionsStore((s) => !!s.preparingNewSessions[path]);
 
   const title = meta.title || '新对话';
@@ -105,6 +108,7 @@ function TabItem({
     'session-tab',
     isActive ? 'active' : '',
     isRunning ? 'running' : '',
+    isFresh ? 'open' : '',
     hasAsk ? 'pending-ask' : '',
     isPreparing ? 'preparing' : '',
   ]

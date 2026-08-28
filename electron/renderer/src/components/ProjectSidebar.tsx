@@ -36,6 +36,7 @@ import { SESSION_TREE_LIMIT } from '../stores/useSessionsStore';
 const PANEL_MIN_WIDTH = 160;
 const PANEL_MAX_WIDTH = 420;
 const PANEL_WIDTH_KEY = 'tiffa:projectPanelWidth';
+const INTERACTION_WINDOW_MS = 30 * 60 * 1000; // 对话真实交互后圆点保持点亮时长
 
 /** 右键菜单 item 构建（等价旧版 context-menu HTML） */
 function menuItem(action: string, label: string, svg: string, danger = false): string {
@@ -81,6 +82,7 @@ function SessionTree({ dirName }: { dirName: string }) {
   // 空闲对话（即使实例已就绪 .ready）一律不点亮——点开历史对话不亮，只高亮整行。
   // 选中（active）不点亮，避免与运行态指示重复。
   const procStateMap = useProcStore((s) => s.procStateMap);
+  const lastInteractionMap = useProcStore((s) => s.lastInteractionMap);
   const uiQueue = useUiStore((s) => s.uiQueue);
   void uiQueue;
 
@@ -112,11 +114,15 @@ function SessionTree({ dirName }: { dirName: string }) {
         const title = session.title || session.firstMessage || '新对话';
         const ts = session.lastActiveAt || (session as TiffaSessionSummary & { modified?: number; mtime?: number }).modified;
         const timeStr = ts ? relTime(ts) : '';
+        const isTab = activeSessionPaths.includes(session.path);
+        const isRunning = !!procStateMap[session.path]?.agentRunning;
+        const lastInter = lastInteractionMap[session.path];
+        const isFreshInteraction = isTab && !!lastInter && Date.now() - lastInter < INTERACTION_WINDOW_MS;
         const cls = [
           'session-item',
-          activeSessionPaths.includes(session.path) ? 'open' : '',
+          isTab && (isRunning || isFreshInteraction) ? 'open' : '',
           session.path === activeSessionPath ? 'active' : '',
-          procStateMap[session.path]?.agentRunning ? 'running' : '',
+          isRunning ? 'running' : '',
           hasPendingAsk(session.sessionId) || hasPendingAsk(extractSessionId(session.path)) ? 'pending-ask' : '',
         ]
           .filter(Boolean)
