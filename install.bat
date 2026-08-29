@@ -1,10 +1,9 @@
 @echo off
-chcp 65001 >nul
 echo.
-echo   Tiffa å®‰è£…å‘å¯¼
+echo   Tiffa °²×°Ïòµ¼
 echo   ============================================
 echo.
-echo   æ­£åœ¨å¯åŠ¨å®‰è£…ç¨‹åºï¼Œè¯·ç¨å€™...
+echo   ÕýÔÚÆô¶¯°²×°³ÌÐò£¬ÇëÉÔºò...
 echo.
 powershell -ExecutionPolicy Bypass -File "%~dp0install.ps1"
 pause

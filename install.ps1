@@ -850,12 +850,22 @@ if (Test-Path $pyExe) {
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input --disable-pip-version-check 2>&1 | Out-String | Out-Null
+        # 先确保 build 工具（setuptools/wheel）就位：便携 python 首次装依赖时，
+        # MouseInfo/PyAutoGUI/PyGetWindow/PyRect/PyScreeze/pytweening 等 sdist 源码包
+        # 构建需要 setuptools，缺失会崩（Cannot import setuptools.build_meta，整个 pip 退出码 2）。
+        # 单独先装 build 工具（幂等，已装秒过），再对依赖用 --no-build-isolation 用环境里的
+        # setuptools 构建 sdist，绕开 build isolation 环境下载 setuptools 失败的问题。
+        & $pyExe -m pip install setuptools wheel -i "https://pypi.tuna.tsinghua.edu.cn/simple" --disable-pip-version-check 2>&1 | Out-String | Out-Null
+        $buildToolCode = $LASTEXITCODE
+        if ($buildToolCode -ne 0) {
+            Write-Host "    [WARN] build 工具(setuptools/wheel)安装失败（退出码 $buildToolCode），sdist 源码包可能构建失败" -ForegroundColor Yellow
+        }
+        & $pyExe -m pip install -r (Join-Path $ROOT "requirements-python.txt") -i "https://pypi.tuna.tsinghua.edu.cn/simple" --no-input --disable-pip-version-check --no-build-isolation 2>&1 | Out-String | Out-Null
         $pipCode = $LASTEXITCODE
         if ($pipCode -eq 0) {
             OK "Python 依赖已对齐 requirements-python.txt"
         } else {
-            Write-Host "    [WARN] Python 依赖安装未完成（退出码 $pipCode）。联网机器重跑: python -m pip install -r requirements-python.txt -i https://pypi.tuna.tsinghua.edu.cn/simple" -ForegroundColor Yellow
+            Write-Host "    [WARN] Python 依赖安装未完成（退出码 $pipCode）。联网机器重跑: python -m pip install -r requirements-python.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --no-build-isolation" -ForegroundColor Yellow
         }
     } finally {
         $ErrorActionPreference = $prevEAP
