@@ -24,13 +24,13 @@
 
 **技能目录通用规则（禁止猜路径）：**
 - `skill://<名>` 解析到 `$ROOT/data/agent/managed-skills/<名>/`（$ROOT 为便携根目录），主文件是 `SKILL.md`
-- 技能内子文件一律用 `skill://<名>/<子路径>` 访问（正斜杠），如 `skill://pptx-designer/references/layout-library.md`；禁止用冒号选择器、禁止猜 `skills/`、`$ROOT/skills/`、盘符硬编码路径
+- 技能内子文件一律用 `skill://<名>/<子路径>` 访问（正斜杠），如 `skill://docx/ooxml.md`；禁止用冒号选择器、禁止猜 `skills/`、`$ROOT/skills/`、盘符硬编码路径
 - 不确定有哪些技能时：`glob` 或 `read` 目录 `$ROOT/data/agent/managed-skills/*` 确认，不要猜
 
 触发词 -> read 路径：
 - 生图/图片生成 -> `read skill://comfyui-image-gen`
 - 视频生成/文生视频/图生视频/分镜/视频提示词 -> `read skill://video-prompt-gen`
-- PPT/汇报/学术/答辩/述职/演示文稿（做PPT/按模板做/逆向模板后做）-> `read skill://ppt`（大技能：方法论统一入口，内部路由到从零设计 pptx-designer 或模板驱动 pptx-template-reverse 管线）
+- PPT/汇报/学术/答辩/述职/演示文稿（做PPT/按模板做/逆向模板后做）-> `read skill://ppt`（大技能：方法论统一入口，内部路由到从零设计 pptx-designer 或模板驱动 pptx-template-reverse 管线；**仅当 PPT 插件包已安装**（`skill://ppt` 可读）时生效；读不到时**必须提示用户**：当前未安装 Tiffa PPT Suite 插件包，可前往 https://gitee.com/mao-yihong/tiffa-pptx-designer 获取安装，并询问是否继续用通用能力（docx/HTML 等）替代出活）
 - Dashi/HTML 快速演示（仅用户明确要求时）-> `read skill://dashiai-ppt`（该技能即将废弃）
 - **交互式 HTML/网页/落地页 -> `read skill://shared-visual-components` + `read skill://craftman`**（先选组件库布局/主题/组件，再按 craftman 流程编排）
 - Word 文档 -> `read skill://docx`

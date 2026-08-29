@@ -183,6 +183,11 @@ data/agent/managed-skills/*/.cache/
 data/agent/managed-skills/dashiai-ppt/project/node_modules/
 # computer-use 视觉模型配置（含真实 API Key 不入库；仓库提供 grounding.json.example 模板，启动缺失时自动恢复）
 data/agent/managed-skills/computer-use/grounding.json
+# PPT 商业插件包（专有许可，作为独立技能包分发；不随开源仓库，本地安装保留文件）
+data/agent/managed-skills/ppt/
+data/agent/managed-skills/pptx-designer/
+data/agent/managed-skills/pptx-template-reverse/
+data/agent/managed-skills/pptx-from-layouts/
 
 # Qoder 运行时缓存（不入库）
 .cache/

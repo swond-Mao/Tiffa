@@ -505,7 +505,10 @@ function Install-SkillNpm {
 }
 
 # ① pptx-designer：pptxgenjs/react/playwright-core 等（build 编译/预览/编辑器/模板逆向）
-Install-SkillNpm (Join-Path $skillsDir "pptx-designer") "pptxgenjs" "pptx-designer 依赖"
+# PPT 商业插件包：未安装（开源发行版）时跳过，属预期路径
+if (Test-Path (Join-Path $skillsDir "pptx-designer")) {
+    Install-SkillNpm (Join-Path $skillsDir "pptx-designer") "pptxgenjs" "pptx-designer 依赖"
+}
 # ② dashiai-ppt：project/ 渲染与导出依赖（tsx/esbuild/playwright-core/pptxgenjs 等）
 Install-SkillNpm (Join-Path $skillsDir "dashiai-ppt\project") "pptxgenjs" "dashiai-ppt 依赖"
 # ③ pdf 技能：playwright（npm install 的 postinstall 默认会下浏览器，先跳过，浏览器统一在 ⑤ 下载）
