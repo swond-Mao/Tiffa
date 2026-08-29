@@ -620,13 +620,14 @@ if (Test-SkillDep $skillDepsDir "playwright") {
     }
 }
 
-# ⑥ PPT 商业插件（可选，交互安装；不填则跳过，后续可用 pull_ppt_skill.bat / .py 补装）
+# ⑥ PPT 商业插件（可选，交互安装；跳过则日后可用 pull_ppt_skill.bat / .py 补装）
+#    本段输出刻意纯英文：部分机器 chcp 65001 下 PS Write-Host 中文会出现每字重复（console 编码 bug）
 $gitCmd = Get-Command git -ErrorAction SilentlyContinue
 if ($gitCmd) {
-    $pptAns = Read-Host '安装 PPT 商业插件（Tiffa PPT Suite）？[Y/N，默认 N]'
+    $pptAns = Read-Host 'Install PPT commercial plugin (Tiffa PPT Suite)? [Y/N, default N]'
     if ($pptAns -match '^[Yy]') {
-        $pptUser = Read-Host 'Gitee 用户名'
-        $pptToken = Read-Host 'Gitee 私人访问令牌（projects 只读权限即可）'
+        $pptUser = Read-Host 'Gitee username'
+        $pptToken = Read-Host 'Gitee private access token (projects read scope is enough)'
         if ($pptUser -and $pptToken) {
             $pptTmp = Join-Path $env:TEMP "tiffa-ppt-suite-$(Get-Random)"
             $pptUrl = "https://${pptUser}:${pptToken}@gitee.com/mao-yihong/tiffa-pptx-designer.git"
@@ -637,24 +638,32 @@ if ($gitCmd) {
             $ErrorActionPreference = $prevEAP
             if ($cloneOk) {
                 foreach ($pptSkill in @('ppt', 'pptx-designer', 'pptx-template-reverse', 'pptx-from-layouts')) {
-                    Copy-Item -Recurse -Force (Join-Path $pptTmp "skills\$pptSkill") (Join-Path $skillsDir $pptSkill)
-                    OK "PPT 插件技能 $pptSkill 已安装"
+                    # 清掉旧目录再整体拷贝，避免旧版本残留文件与新版本混杂
+                    $pptDst = Join-Path $skillsDir $pptSkill
+                    if (Test-Path $pptDst) { Remove-Item -Recurse -Force $pptDst }
+                    Copy-Item -Recurse -Force (Join-Path $pptTmp "skills\$pptSkill") $pptDst
+                    OK "PPT skill $pptSkill installed"
                 }
-                Install-SkillNpm (Join-Path $skillsDir "pptx-designer") "pptxgenjs" "pptx-designer 依赖"
-                Write-Host "    [TIP] 模板逆向管线还需要 python-pptx: python -m pip install python-pptx" -ForegroundColor Yellow
+                $pptPkg = Join-Path $skillsDir "pptx-designer\package.json"
+                if (Test-Path $pptPkg) {
+                    Install-SkillNpm (Join-Path $skillsDir "pptx-designer") "pptxgenjs" "pptx-designer deps"
+                } else {
+                    Write-Host "    [WARN] package.json missing after copy. Re-run this install step, or run pull_ppt_skill.bat" -ForegroundColor Yellow
+                }
+                Write-Host "    [TIP] template pipeline needs python-pptx: python -m pip install python-pptx" -ForegroundColor Yellow
             } else {
-                Write-Host "    [WARN] PPT 插件安装失败（网络或凭据错误）。可稍后用 pull_ppt_skill.bat / python pull_ppt_skill.py 补装" -ForegroundColor Yellow
+                Write-Host "    [WARN] PPT plugin install failed (network or credential error). Re-run later with pull_ppt_skill.bat / python pull_ppt_skill.py" -ForegroundColor Yellow
             }
             # 清理临时克隆目录（.git 内含令牌 URL，必须删除）
             if (Test-Path $pptTmp) { Remove-Item -Recurse -Force $pptTmp -ErrorAction SilentlyContinue }
         } else {
-            Write-Host "    [SKIP] 未填写用户名/令牌，未安装 PPT 插件" -ForegroundColor Yellow
+            Write-Host "    [SKIP] PPT plugin not installed (no username/token given)" -ForegroundColor Yellow
         }
     } else {
-        Write-Host "    [SKIP] 未安装 PPT 插件（后续可用 pull_ppt_skill.bat / python pull_ppt_skill.py 安装）" -ForegroundColor Yellow
+        Write-Host "    [SKIP] PPT plugin not installed (install later: pull_ppt_skill.bat / python pull_ppt_skill.py)" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "    [SKIP] 未检测到 git，跳过 PPT 插件安装（后续可用 pull_ppt_skill.bat / python pull_ppt_skill.py 安装）" -ForegroundColor Yellow
+    Write-Host "    [SKIP] git not found, PPT plugin skipped (install later: pull_ppt_skill.bat / python pull_ppt_skill.py)" -ForegroundColor Yellow
 }
 
 # Step 7: 初始化目录和配置
