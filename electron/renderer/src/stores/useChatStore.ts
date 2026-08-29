@@ -47,6 +47,8 @@ export interface ChatState {
   /** AI 重命名模式：流式文本转存不渲染 */
   aiRenameMode: boolean;
   aiRenameText: string;
+  /** per-session 输入草稿：切会话自动隔离，杜绝把 A 会话草稿发到 B 会话 */
+  inputDraftMap: Record<string, { text: string; images: MessageImage[] }>;
 
   // ── 历史 ──
   setHistory: (path: string, patch: Partial<HistoryState>) => void;
@@ -85,6 +87,10 @@ export interface ChatState {
   setWelcomePhase: (v: 'showing' | 'done') => void;
   setAiRenameMode: (v: boolean) => void;
   setAiRenameText: (v: string) => void;
+  /** 设置指定会话输入草稿（text + images） */
+  setInputDraft: (path: string | null, text: string, images: MessageImage[]) => void;
+  /** 清除指定会话输入草稿 */
+  clearInputDraft: (path: string | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -98,6 +104,7 @@ export const useChatStore = create<ChatState>((set) => ({
   welcomePhase: 'showing',
   aiRenameMode: false,
   aiRenameText: '',
+  inputDraftMap: {},
 
   // ── 历史 ──
   setHistory: (path, patch) =>
@@ -457,7 +464,12 @@ export const useChatStore = create<ChatState>((set) => ({
         history[newPath] = history[oldPath];
         delete history[oldPath];
       }
-      return { messagesMap, streaming, sessionMessageCache, sessionCacheFresh, history };
+      const inputDraftMap = { ...s.inputDraftMap };
+      if (inputDraftMap[oldPath]) {
+        inputDraftMap[newPath] = inputDraftMap[oldPath];
+        delete inputDraftMap[oldPath];
+      }
+      return { messagesMap, streaming, sessionMessageCache, sessionCacheFresh, history, inputDraftMap };
     }),
 
   // ── 杂项 ──
@@ -471,6 +483,20 @@ export const useChatStore = create<ChatState>((set) => ({
     set({ aiRenameMode: v });
   },
   setAiRenameText: (v) => set({ aiRenameText: v }),
+  setInputDraft: (path, text, images) =>
+    set((s) => {
+      if (!path) return s;
+      const cur = s.inputDraftMap[path];
+      if (cur && cur.text === text && cur.images === images) return s;
+      return { inputDraftMap: { ...s.inputDraftMap, [path]: { text, images } } };
+    }),
+  clearInputDraft: (path) =>
+    set((s) => {
+      if (!path || !s.inputDraftMap[path]) return s;
+      const m = { ...s.inputDraftMap };
+      delete m[path];
+      return { inputDraftMap: m };
+    }),
 }));
 
 /** 供调试/导出：流式文本再应用 output fixes（text_end 完整渲染时用） */

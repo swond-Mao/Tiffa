@@ -7,6 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useChatStore } from './useChatStore';
+import type { MessageImage } from '../types/messages';
 
 const PATH = 'test-session';
 
@@ -60,5 +61,45 @@ describe('textDelta 立即渲染', () => {
       .map((p) => (p as { kind: 'text'; text: string }).text)
       .join('');
     expect(text).toBe('');
+  });
+});
+describe('inputDraftMap per-session 隔离（防草稿发到错误会话）', () => {
+  beforeEach(() => {
+    useChatStore.setState({ inputDraftMap: {} });
+  });
+
+  it('写入正确 path（text + images）', () => {
+    useChatStore.getState().setInputDraft('sess-a', '你好', []);
+    const m = useChatStore.getState().inputDraftMap;
+    expect(m['sess-a'].text).toBe('你好');
+    expect(m['sess-a'].images).toEqual([]);
+  });
+
+  it('跨会话隔离：A 的草稿不影响 B（B 未写则无 key）', () => {
+    useChatStore.getState().setInputDraft('sess-a', 'A 草稿', []);
+    const m = useChatStore.getState().inputDraftMap;
+    expect(m['sess-a'].text).toBe('A 草稿');
+    expect(m['sess-b']).toBeUndefined();
+  });
+
+  it('相同 text + 相同 images 引用不重建（避免无谓 re-render）', () => {
+    const imgs: MessageImage[] = [];
+    useChatStore.getState().setInputDraft('sess-a', 'x', imgs);
+    const before = useChatStore.getState().inputDraftMap['sess-a'];
+    useChatStore.getState().setInputDraft('sess-a', 'x', imgs);
+    const after = useChatStore.getState().inputDraftMap['sess-a'];
+    expect(after).toBe(before);
+  });
+
+  it('null / 空 path 忽略（不产生幽灵 key）', () => {
+    useChatStore.getState().setInputDraft(null, 'x', []);
+    useChatStore.getState().setInputDraft('', 'x', []);
+    expect(Object.keys(useChatStore.getState().inputDraftMap)).toHaveLength(0);
+  });
+
+  it('clearInputDraft 清理指定 path', () => {
+    useChatStore.getState().setInputDraft('sess-a', 'x', []);
+    useChatStore.getState().clearInputDraft('sess-a');
+    expect(useChatStore.getState().inputDraftMap['sess-a']).toBeUndefined();
   });
 });

@@ -684,9 +684,14 @@ body {
   box-shadow: inset 0 -2px 0 hsl(var(--accent-main-000));
 }
 
-/* 已打开但未激活/未运行的 tab：顶部微弱指示条（统一"对话实例存在"逻辑） */
+/* 近期活跃 tab（30 分钟内有真实交互，与对话树小点同标准）：顶部醒目色条 */
 .session-tab.open:not(.active):not(.running) {
-  box-shadow: inset 0 1px 0 hsl(var(--accent-main-000) / 0.3);
+  box-shadow: inset 0 2px 0 hsl(var(--accent-main-000));
+}
+
+/* 当前激活 + 近期活跃：顶部色条 + 底部色条双标记（底部=当前所在，顶部=近期在用） */
+.session-tab.open.active:not(.running) {
+  box-shadow: inset 0 2px 0 hsl(var(--accent-main-000)), inset 0 -2px 0 hsl(var(--accent-main-000));
 }
 
 /* 运行中的对话：顶部蓝色指示条 + 微弱蓝色背景 */

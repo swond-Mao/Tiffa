@@ -36,12 +36,14 @@ function cleanupSessionMemory(sessionPath: string): void {
     const sessionMessageCache = { ...s.sessionMessageCache };
     const sessionCacheFresh = { ...s.sessionCacheFresh };
     const history = { ...s.history };
+    const inputDraftMap = { ...s.inputDraftMap };
     delete messagesMap[sessionPath];
     delete streaming[sessionPath];
     delete sessionMessageCache[sessionPath];
     delete sessionCacheFresh[sessionPath];
     delete history[sessionPath];
-    return { messagesMap, streaming, sessionMessageCache, sessionCacheFresh, history };
+    delete inputDraftMap[sessionPath];
+    return { messagesMap, streaming, sessionMessageCache, sessionCacheFresh, history, inputDraftMap };
   });
   // 立即从项目会话缓存移除（树不残留已删会话）
   const dir = dirNameFromSessionPath(sessionPath) || useProjectsStore.getState().activeProjectDirName;

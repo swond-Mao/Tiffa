@@ -20,6 +20,7 @@ import { dbgLog } from '../services/utils';
 import { compressImageBase64, compressImageFile } from '../services/imageUtils';
 
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
+const EMPTY_IMAGES: MessageImage[] = [];
 
 const SLASH_COMMANDS = [
   { name: '/ask', desc: '提出一个问题，弹卡片回答后发给模型' },
@@ -48,8 +49,13 @@ export default function InputBox() {
   const isEditingQueue = useUiStore((s) => s.isEditingQueue);
   const setIsEditingQueue = useUiStore((s) => s.setIsEditingQueue);
   const [editText, setEditText] = useState('');
-  const [text, setText] = useState('');
-  const [images, setImages] = useState<MessageImage[]>([]);
+  const setInputDraft = useChatStore((s) => s.setInputDraft);
+  const draft = useChatStore((s) => (activeSessionPath ? s.inputDraftMap[activeSessionPath] : undefined));
+  const text = draft?.text ?? '';
+  const images = draft?.images ?? EMPTY_IMAGES;
+  // 写入当前会话的 per-session 草稿：切会话自动隔离，切回草稿还在，杜绝发到错误会话
+  const setText = (t: string) => { if (activeSessionPath) setInputDraft(activeSessionPath, t, images); };
+  const setImages = (imgs: MessageImage[]) => { if (activeSessionPath) setInputDraft(activeSessionPath, text, imgs); };
   const [dragOver, setDragOver] = useState(false);
   const [slashVisible, setSlashVisible] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -119,7 +125,7 @@ export default function InputBox() {
           useUiStore.getState().addToast('error', '窗口快照处理失败');
           return;
         }
-        setImages((prev) => [...prev, img]);
+        setImages([...images, img]);
         useUiStore.getState().addToast('info', `已捕获窗口快照：${p.title}`);
       });
     });
@@ -172,7 +178,7 @@ export default function InputBox() {
         useUiStore.getState().addToast('error', `无法识别的图片格式，无法处理${file.name ? `：${file.name}` : ''}`);
         return;
       }
-      setImages((prev) => [...prev, img]);
+      setImages([...images, img]);
     }).catch((err) => {
       useUiStore.getState().addToast('error', `图片处理失败: ${(err as Error).message}`);
     });
@@ -189,10 +195,8 @@ export default function InputBox() {
       })
       .filter(Boolean) as string[];
     if (paths.length === 0) return;
-    setText((prev) => {
-      const separator = prev && !prev.endsWith('\n') ? '\n' : '';
-      return prev + separator + paths.join('\n') + '\n';
-    });
+    const separator = text && !text.endsWith('\n') ? '\n' : '';
+    setText(text + separator + paths.join('\n') + '\n');
     taRef.current?.focus();
   };
 
@@ -220,8 +224,7 @@ export default function InputBox() {
       setText('');
     } else {
       void sendMessage(messageWithImageRefs(t), images);
-      setText('');
-      setImages([]);
+      if (activeSessionPath) setInputDraft(activeSessionPath, '', []);
     }
   };
 
@@ -398,7 +401,7 @@ export default function InputBox() {
                 type="button"
                 className="image-preview-remove"
                 title="移除"
-                onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                onClick={() => setImages(images.filter((_, j) => j !== i))}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
