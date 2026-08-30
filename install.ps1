@@ -120,12 +120,15 @@ if (-not $Online) {
     }
     # 可选依赖(非核心: 缺了降级不阻断) —— computer-use WPS/Office 与 canvas-design 中文字体
     $optionalChecks = @(
-        "home\AppData\Roaming\Kingsoft\wps|WPS COM 对象(computer-use WPS/Office)",
-        "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)"
+        "home\AppData\Roaming\Kingsoft\wps|WPS Office(computer-use WPS/Office 自动化)|装 WPS Office 后 COM 组件自动注册,无需拷贝;不装则降级,其余功能正常",
+        "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)|canvas-design 中文排版用;需时从源机器拷贝该字体文件"
     )
     foreach ($spec in $optionalChecks) {
-        $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
-        if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name，需时从源机器拷贝" }
+        $parts = $spec.Split('|')
+        $rel = $parts[0]; $name = $parts[1]
+        $tip = '需时从源机器拷贝'
+        if ($parts.Count -gt 2) { $tip = $parts[2] }
+        if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name —— $tip" }
     }
     if ($missing.Count -eq 0) {
         OK "离线模式：关键依赖齐全，跳过联网安装。直接 start-tiffa.bat 使用。"
@@ -1031,12 +1034,15 @@ foreach ($spec in $finalCoreChecks) {
     if (Test-Path (Join-Path $ROOT $rel)) { OK "$name" } else { $finalMissing += $name }
 }
 $finalOptChecks = @(
-    "home\AppData\Roaming\Kingsoft\wps|WPS COM 对象(computer-use WPS/Office)",
-    "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)"
+    "home\AppData\Roaming\Kingsoft\wps|WPS Office(computer-use WPS/Office 自动化)|装 WPS Office 后 COM 组件自动注册,无需拷贝;不装则降级,其余功能正常",
+    "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)|canvas-design 中文排版用;需时从源机器拷贝该字体文件"
 )
 foreach ($spec in $finalOptChecks) {
-    $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
-    if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name，需时从源机器拷贝" }
+    $parts = $spec.Split('|')
+    $rel = $parts[0]; $name = $parts[1]
+    $tip = '需时从源机器拷贝'
+    if ($parts.Count -gt 2) { $tip = $parts[2] }
+    if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name —— $tip" }
 }
 if ($finalMissing.Count -eq 0) {
     OK "依赖完整(10 项齐全)，可直接 start-tiffa.bat 启动"
