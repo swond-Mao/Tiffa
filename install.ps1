@@ -27,20 +27,32 @@ Write-Host "  ==============================================" -ForegroundColor W
 
 # 解析 npm 可执行文件：便携 node 目录优先，其次系统 PATH，最后用 node 直跑 npm-cli.js
 function Resolve-Npm {
-    $cands = @(
-        (Join-Path $ROOT "node\npm.cmd"),
-        (Join-Path $ROOT "node\npm.ps1")
-    )
-    foreach ($c in $cands) { if (Test-Path $c) { return $c } }
-    $sys = Get-Command npm -ErrorAction SilentlyContinue
-    if ($sys) { return $sys.Source }
+    # 便携 node 自带 npm 优先(完整路径,保证指向便携包,不依赖系统 PATH)
     $nodeExe = Join-Path $ROOT "node\node.exe"
     $npmCli = Join-Path $ROOT "node\node_modules\npm\bin\npm-cli.js"
+    foreach ($c in @((Join-Path $ROOT "node\npm.cmd"), (Join-Path $ROOT "node\npm.ps1"))) {
+        if (Test-Path $c) { return $c }
+    }
     if ((Test-Path $nodeExe) -and (Test-Path $npmCli)) { return "$nodeExe|$npmCli" }
+    # 便携 npm 缺失 → 系统 npm 仅作兜底(WARN:依赖可能装到系统 Node,拷内网需补便携)
+    $sys = Get-Command npm -ErrorAction SilentlyContinue
+    if ($sys) {
+        Write-Host "    [WARN] 便携 npm 缺失,回退系统 npm($sys.Source)——依赖可能装到系统 Node;拷内网前请补装便携 node" -ForegroundColor Yellow
+        return $sys.Source
+    }
     return $null
 }
 
 $NPM_CMD = Resolve-Npm
+# 便携 npm 完整调用串(供 cmd /c 子进程用,指向便携,不依赖 PATH)
+# $NPM_CMD 可能是纯路径(npm.cmd)或复合(node.exe|npm-cli.js);复合展开成 "node.exe npm-cli.js"
+function Get-NpmCmdStr {
+    if ($NPM_CMD -like "*|*") {
+        $p = $NPM_CMD -split '\|'
+        return "$($p[0]) $($p[1])"
+    }
+    return "$NPM_CMD"
+}
 
 function Invoke-Npm {
     param(
@@ -392,7 +404,7 @@ if (Test-Path $electronExe) {
             Start-Sleep -Seconds 3
         }
         # 用 cmd /c 在 electron 目录执行 npm install（ELECTRON_MIRROR 已设为 npmmirror）
-        $elCmd = "cd /d `"$electronDir`" && npm install --no-save --loglevel=error"
+        $elCmd = "cd /d `"$electronDir`" && $(Get-NpmCmdStr) install --no-save --loglevel=error"
         cmd /c $elCmd 2>&1 | Out-String | Out-Null
         if ($LASTEXITCODE -eq 0 -and (Test-Path $electronExe)) {
             $elInstalled = $true
@@ -423,7 +435,7 @@ if (-not (Test-Path $elMainJs) -or (-not (Test-Path $elIndex))) {
     $prevEAP2 = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $buildCmd = "cd /d `"$electronDir`" && npm run build"
+        $buildCmd = "cd /d `"$electronDir`" && $(Get-NpmCmdStr) run build"
         cmd /c $buildCmd 2>&1 | Out-String | Out-Null
         $buildCode = $LASTEXITCODE
         if ($buildCode -eq 0 -and (Test-Path $elMainJs) -and (Test-Path $elIndex)) {
@@ -444,7 +456,7 @@ if (Test-Path $viteBin) {
     try {
         for ($attempt = 1; $attempt -le 3; $attempt++) {
             if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
-            cmd /c "cd /d `"$electronDir`" && npm run build 2>&1" | Out-String | Out-Null
+            cmd /c "cd /d `"$electronDir`" && $(Get-NpmCmdStr) run build 2>&1" | Out-String | Out-Null
             if ($LASTEXITCODE -eq 0 -and (Test-Path $elMainJs) -and (Test-Path $elIndex)) { $rebuildOk = $true; break }
             Write-Host "    [WARN] 前端重新编译失败（第 $attempt/3 次，退出码 $LASTEXITCODE）" -ForegroundColor Yellow
         }
@@ -619,7 +631,7 @@ if (Test-SkillDep $skillDepsDir "playwright") {
             if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
             $lockDir = Join-Path $pwCacheRoot "__dirlock"
             if (Test-Path $lockDir) { Remove-Item -Recurse -Force $lockDir -ErrorAction SilentlyContinue }
-            cmd /c "cd /d `"$skillDepsDir`" && node node_modules\playwright-core\cli.js install chromium-headless-shell" 2>&1 | Out-String | Out-Null
+            cmd /c "cd /d `"$skillDepsDir`" && $nodeExe node_modules\playwright-core\cli.js install chromium-headless-shell" 2>&1 | Out-String | Out-Null
             if ($LASTEXITCODE -eq 0) { OK "skill-deps playwright 浏览器内核已匹配"; break }
             if ($attempt -eq 3) { Write-Host "    [WARN] skill-deps playwright 浏览器内核下载失败（MCP 浏览器工具将不可用，其余功能不受影响）。联网重跑 install.ps1 或手动: cd $ROOT\skill-deps && node node_modules\playwright-core\cli.js install chromium-headless-shell" -ForegroundColor Yellow }
         }
@@ -1031,6 +1043,16 @@ if ($finalMissing.Count -eq 0) {
 } else {
     FAIL "以下依赖缺失(建议联网重跑 install.ps1 或从源机器拷贝): $($finalMissing -join ', ')"
 }
+
+# ── 运行时指向验证:确认 install 全程用便携运行时(不依赖系统 PATH)──
+Write-Host ""
+Write-Host "  [运行时指向验证] 全部指向便携包:" -ForegroundColor Cyan
+Write-Host "    node     : $nodeExe" -ForegroundColor Gray
+Write-Host "    npm      : $NPM_CMD" -ForegroundColor Gray
+Write-Host "    bun      : $bunExe" -ForegroundColor Gray
+Write-Host "    electron : $electronExe" -ForegroundColor Gray
+Write-Host "    python   : $pyExe" -ForegroundColor Gray
+Write-Host "  提示:手动验证运行时请用完整路径(如 '$pyExe --version'),别用裸 python/node(会解析到系统版本)" -ForegroundColor DarkGray
 # 完成
 Write-Host ""
 Write-Host "  ==============================================" -ForegroundColor White
