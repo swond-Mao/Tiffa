@@ -28,6 +28,7 @@ export default function ModelPicker({ className }: ModelPickerProps) {
   const [models, setModels] = useState<TiffaModelInfo[] | null>(null);
   const [query, setQuery] = useState('');
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight: number } | null>(null);
+  const [providerNameMap, setProviderNameMap] = useState<Record<string, string>>({});
   const btnRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeSessionPath = useSessionsStore((s) => s.activeSessionPath);
@@ -76,6 +77,15 @@ export default function ModelPicker({ className }: ModelPickerProps) {
     setModels(null);
     // 死列表缓存（sessionController）：命中秒回；首次无缓存才触发一次加载（in-flight 去重）
     void getModelListCached().then((list) => setModels(list ?? []));
+    // 供应商显示名映射（models.yml providers[key].name）：分组头/标题显示用户自定义名而非技术标识
+    void window.tiffaDesktop.readModelsYml().then((r) => {
+      const provs = (r && !r.error && r.data && r.data.providers) || {};
+      const map: Record<string, string> = {};
+      for (const [k, p] of Object.entries(provs)) {
+        if (p && p.name) map[k] = p.name;
+      }
+      setProviderNameMap(map);
+    }).catch(() => {});
   };
 
   // ── 外部点击 / Esc 关闭 ──
@@ -109,7 +119,8 @@ export default function ModelPicker({ className }: ModelPickerProps) {
       ? models.filter((m) => {
           const name = (m.name || m.id || '').toLowerCase();
           const prov = (m.provider || '').toLowerCase();
-          return name.includes(q) || prov.includes(q);
+          const provDisp = (providerNameMap[m.provider || ''] || m.provider || '').toLowerCase();
+          return name.includes(q) || prov.includes(q) || provDisp.includes(q);
         })
       : models
     : null;
@@ -126,6 +137,7 @@ export default function ModelPicker({ className }: ModelPickerProps) {
   }
 
   const activeKey = `${provider || ''}/${currentModel}`;
+  const dispName = (key: string) => (key && providerNameMap[key]) || key;
 
   // 按钮总是显示（有活动会话即可）：指针优先，无记忆/未就绪时显示“选择模型”占位，发送时才物化。
   // 原条件 `!label && tiffaReady` 会误隐藏：tiffaReady 是“任意实例就绪”，
@@ -139,7 +151,7 @@ export default function ModelPicker({ className }: ModelPickerProps) {
         type="button"
         id="currentModel"
         className={className || 'titlebar-model'}
-        title={provider ? `${provider} / ${label}` : label}
+        title={provider ? `${dispName(provider)} / ${label}` : label}
         onClick={(e) => {
           e.stopPropagation();
           void toggle();
@@ -172,7 +184,7 @@ export default function ModelPicker({ className }: ModelPickerProps) {
               {models !== null && visible && visible.length === 0 && <div className="model-item empty">无匹配模型</div>}
               {groups.map((g) => (
                 <div key={g.provider}>
-                  <div className="model-switcher-group-header">{g.provider}</div>
+                  <div className="model-switcher-group-header">{dispName(g.provider)}</div>
                   {g.models.map((m) => {
                     const isActive = activeKey === `${m.provider || ''}/${m.id}` || currentModel === m.name;
                     return (
