@@ -119,7 +119,7 @@ function serializeModelsYaml(data: TiffaModelsConfig | null): string {
   if (!data || !data.providers) return lines.join('\n');
   lines.push('providers:');
   for (const [k, p] of Object.entries(data.providers)) {
-    lines.push(`  ${k}:`, `    baseUrl: "${yq(p.baseUrl)}"`, `    api: "${p.api ? yq(p.api) : 'openai-completions'}"`);
+    lines.push(`  ${k}:`, ...(p.name ? [`    name: "${yq(p.name)}"`] : []), `    baseUrl: "${yq(p.baseUrl)}"`, `    api: "${p.api ? yq(p.api) : 'openai-completions'}"`);
     // apiKey 必须始终落盘：内核 getAvailable() 只收录「有凭据或 keyless」的 provider，
     // 空值省略会导致整个供应商从模型列表消失（健康检查不走内核，仍会显示在线）。
     // 惯例：无认证端点写 "none"（与旁路模型 callCompletion/健康检查口径一致）。
@@ -348,7 +348,7 @@ function ModelConfigSection() {
               onClick={() => setOpenCards((o) => ({ ...o, [key]: !o[key] }))}
             >
               <div>
-                <span className="provider-name">{key}</span>
+                <span className="provider-name">{prov.name || key}</span>
                 <span className="provider-url">{prov.baseUrl || ''}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -368,6 +368,16 @@ function ModelConfigSection() {
                 >
                   删除此供应商
                 </button>
+                <div className="config-field">
+                  <label>显示名（可选）</label>
+                  <input
+                    type="text"
+                    value={prov.name || ''}
+                    placeholder={key}
+                    data-field="name"
+                    onChange={(e) => patchProvider(key, { name: e.target.value || undefined })}
+                  />
+                </div>
                 <div className="config-field">
                   <label>API 地址</label>
                   <input
@@ -711,7 +721,7 @@ function AddProviderModal({
       setError('API 地址不能为空');
       return;
     }
-    onAdd(k, { baseUrl: baseUrl.trim(), api, apiKey: apiKey.trim() || undefined, models: [] });
+    onAdd(k, { baseUrl: baseUrl.trim(), api, apiKey: apiKey.trim() || undefined, name: name.trim() || undefined, models: [] });
     onClose();
   };
 
