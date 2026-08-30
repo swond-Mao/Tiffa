@@ -453,6 +453,17 @@ if (Test-Path $viteBin) {
     }
     if ($rebuildOk) {
         OK "Electron 前端已重新编译（与源码一致）"
+        # ── 防呆：校验产物确实刷新到最新源码，避免 vite 增量缓存产出旧 bundle（静默落后于源码）──
+        # 判据：dist/index.html mtime 必须 >= 最新源码 mtime；否则说明 build 未真正刷新。
+        $srcFiles = Get-ChildItem -Path (Join-Path $electronDir 'renderer\src') -Recurse -Include *.tsx,*.ts,*.css -ErrorAction SilentlyContinue
+        if ($srcFiles) {
+            $newestSrc = $srcFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            $idxFile = Get-Item $elIndex
+            if ($idxFile.LastWriteTime -lt $newestSrc.LastWriteTime) {
+                Write-Host "    [WARN] 产物疑似落后于源码: dist/index.html ($($idxFile.LastWriteTime)) < 最新源码 ($($newestSrc.Name) $($newestSrc.LastWriteTime))" -ForegroundColor Yellow
+                Write-Host "         vite 增量缓存可能未刷新。补救: Remove-Item electron\node_modules\.vite -Recurse 后重跑本脚本, 或 cd electron && npm run build:renderer 并 grep 产物验证新功能标记" -ForegroundColor Yellow
+            }
+        }
     } else {
         Write-Host "    [WARN] 前端重新编译失败，沿用仓库版（仍可用）" -ForegroundColor Yellow
     }
