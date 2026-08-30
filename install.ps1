@@ -54,6 +54,24 @@ function Get-NpmCmdStr {
     return "$NPM_CMD"
 }
 
+# WPS Office 是机器级系统软件(不在便携包内),扫描全局检测是否安装
+# computer-use 的 WPS/Office 自动化依赖其 COM 组件(KWPS=文字/KWpp=演示/KET=表格)
+function Test-WpsOffice {
+    # 1. COM 组件注册(最准确: computer-use 真正依赖的)
+    foreach ($cls in @("HKCR:\KWPS.Application","HKCR:\KWpp.Application","HKCR:\KET.Application")) {
+        if (Test-Path $cls) { return $true }
+    }
+    # 2. 常见安装目录(C 盘默认 + 可能的其他盘)
+    foreach ($d in @("C:\Program Files (x86)\Kingsoft\WPS","C:\Program Files\Kingsoft\WPS","D:\Kingsoft\WPS","E:\Kingsoft\WPS")) {
+        if (Test-Path $d) { return $true }
+    }
+    # 3. 安装注册表
+    foreach ($r in @("HKLM:\SOFTWARE\WOW6432Node\Kingsoft\Office","HKLM:\SOFTWARE\Kingsoft\Office")) {
+        if (Test-Path $r) { return $true }
+    }
+    return $false
+}
+
 function Invoke-Npm {
     param(
         [Parameter(Position=0)][string]$First,
@@ -120,7 +138,6 @@ if (-not $Online) {
     }
     # 可选依赖(非核心: 缺了降级不阻断) —— computer-use WPS/Office 与 canvas-design 中文字体
     $optionalChecks = @(
-        "home\AppData\Roaming\Kingsoft\wps|WPS Office(computer-use WPS/Office 自动化)|装 WPS Office 后 COM 组件自动注册,无需拷贝;不装则降级,其余功能正常",
         "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)|canvas-design 中文排版用;需时从源机器拷贝该字体文件"
     )
     foreach ($spec in $optionalChecks) {
@@ -129,6 +146,10 @@ if (-not $Online) {
         $tip = '需时从源机器拷贝'
         if ($parts.Count -gt 2) { $tip = $parts[2] }
         if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name —— $tip" }
+    }
+    # WPS Office 是机器级系统软件(非便携包),单独扫描全局检测(装没装)
+    if (-not (Test-WpsOffice)) {
+        INFO "可选依赖缺失(降级可用): WPS Office(computer-use WPS/Office 自动化) —— 本机未装 WPS Office;装后 COM 组件自动注册,无需拷贝。不装则降级,其余功能正常"
     }
     if ($missing.Count -eq 0) {
         OK "离线模式：关键依赖齐全，跳过联网安装。直接 start-tiffa.bat 使用。"
@@ -1034,7 +1055,6 @@ foreach ($spec in $finalCoreChecks) {
     if (Test-Path (Join-Path $ROOT $rel)) { OK "$name" } else { $finalMissing += $name }
 }
 $finalOptChecks = @(
-    "home\AppData\Roaming\Kingsoft\wps|WPS Office(computer-use WPS/Office 自动化)|装 WPS Office 后 COM 组件自动注册,无需拷贝;不装则降级,其余功能正常",
     "skills\canvas-design\canvas-fonts\MiSans-Semibold.ttf|MiSans 字体(canvas-design 中文)|canvas-design 中文排版用;需时从源机器拷贝该字体文件"
 )
 foreach ($spec in $finalOptChecks) {
@@ -1043,6 +1063,10 @@ foreach ($spec in $finalOptChecks) {
     $tip = '需时从源机器拷贝'
     if ($parts.Count -gt 2) { $tip = $parts[2] }
     if (-not (Test-Path (Join-Path $ROOT $rel))) { INFO "可选依赖缺失(降级可用): $name —— $tip" }
+}
+# WPS Office 是机器级系统软件(非便携包),单独扫描全局检测
+if (-not (Test-WpsOffice)) {
+    INFO "可选依赖缺失(降级可用): WPS Office(computer-use WPS/Office 自动化) —— 本机未装 WPS Office;装后 COM 组件自动注册,无需拷贝。不装则降级,其余功能正常"
 }
 if ($finalMissing.Count -eq 0) {
     OK "依赖完整(10 项齐全)，可直接 start-tiffa.bat 启动"
