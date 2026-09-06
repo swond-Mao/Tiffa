@@ -41,3 +41,33 @@ features:
   unexpectedStopDetection: true
 providers:
   unexpectedStopModel: "online"
+  # ── Web 搜索（国内优先 + 国外降级）──
+  # 主链：内置本地代理（searxng provider，后端抓必应中国/360搜索），由 electron 主进程
+  #   自动启动并注入 SEARXNG_ENDPOINT，零配置、免费、不连国外。
+  # 降级链：本地代理失败/空结果 → 依次尝试国外免密引擎（mojeek/ecosia/duckduckgo/startpage）。
+  # google 国内必挂故排除；public 为国外引擎聚合、冗余排除；付费/需 key 源无 key 自动跳过，一并排除。
+  webSearchOrder: ["searxng", "mojeek", "ecosia", "duckduckgo", "startpage"]
+  webSearchTimeoutSeconds: 20
+  webSearchExclude:
+    - google
+    - public
+    - perplexity
+    - gemini
+    - anthropic
+    - codex
+    - xai
+    - zai
+    - exa
+    - tinyfish
+    - jina
+    - kagi
+    - tavily
+    - firecrawl
+    - brave
+    - kimi
+    - parallel
+    - synthetic
+
+# 内置搜索代理：endpoint 由主进程注入 SEARXNG_ENDPOINT，无需配置。
+searxng:
+  language: "zh-CN"

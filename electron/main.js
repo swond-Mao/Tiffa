@@ -18,6 +18,7 @@ const js_yaml_1 = __importDefault(require("js-yaml"));
 const yaml_1 = require("yaml");
 const tiffa_instance_1 = require("./modules/tiffa-instance");
 const tiffa_manager_1 = require("./modules/tiffa-manager");
+const web_search_proxy_1 = require("./modules/web-search-proxy");
 const window_setup_1 = require("./modules/window-setup");
 const constants_1 = require("./modules/constants");
 const session_utils_1 = require("./modules/session-utils");
@@ -3174,7 +3175,17 @@ function healKernelExtensionHandlerTimeout() {
         console.warn('[kernel-heal] extension-handler-timeout 打补丁失败:', e.message);
     }
 }
-electron_1.app.whenReady().then(() => {
+electron_1.app.whenReady().then(async () => {
+    // 内置 Web 搜索代理：本地模拟 SearXNG 接口，后端抓必应中国（国内直连、免费）。
+    // 必须在 spawn 任何内核实例之前设好 SEARXNG_ENDPOINT，内核 Bun 子进程自动继承，用户零配置。
+    try {
+        const port = await (0, web_search_proxy_1.startWebSearchProxy)();
+        process.env.SEARXNG_ENDPOINT = `http://127.0.0.1:${port}`;
+        console.log(`[web-search-proxy] 本地搜索代理已启动: http://127.0.0.1:${port}（后端: 必应中国）`);
+    }
+    catch (e) {
+        console.error('[web-search-proxy] 启动失败，web_search 将不可用:', e);
+    }
     healKernelExtensionHandlerTimeout();
     healKernelAskDialog();
     setupIpc();

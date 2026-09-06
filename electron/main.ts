@@ -17,6 +17,7 @@ import { StringDecoder } from 'string_decoder';
 import { TiffaInstance } from './modules/tiffa-instance';
 import { TiffaInstanceManager } from './modules/tiffa-manager';
 import { setMainWindow } from './modules/tiffa-instance';
+import { startWebSearchProxy } from './modules/web-search-proxy';
 import { createWindow, syncCustomStartupImage } from './modules/window-setup';
 import {
   PORTABLE_ROOT, BUN_EXE, TIFFA_CLI, EXTENSION_PATH, COMPUTER_USE_EXTENSION_PATH,
@@ -3027,7 +3028,16 @@ function healKernelExtensionHandlerTimeout(): void {
 
 
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 内置 Web 搜索代理：本地模拟 SearXNG 接口，后端抓必应中国（国内直连、免费）。
+  // 必须在 spawn 任何内核实例之前设好 SEARXNG_ENDPOINT，内核 Bun 子进程自动继承，用户零配置。
+  try {
+    const port = await startWebSearchProxy();
+    process.env.SEARXNG_ENDPOINT = `http://127.0.0.1:${port}`;
+    console.log(`[web-search-proxy] 本地搜索代理已启动: http://127.0.0.1:${port}（后端: 必应中国）`);
+  } catch (e) {
+    console.error('[web-search-proxy] 启动失败，web_search 将不可用:', e);
+  }
   healKernelExtensionHandlerTimeout();
   healKernelAskDialog();
   setupIpc();
