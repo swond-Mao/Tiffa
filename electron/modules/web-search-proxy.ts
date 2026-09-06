@@ -127,11 +127,36 @@ function parseSo360(html: string, max: number): SearchResult[] {
 	return results;
 }
 
+/** 解析 360 页面底部"相关搜索"词（<div id="rs"> 内 <a href="/s?q=<编码词>">），供 agent 迭代查询。 */
+function parseSo360Suggestions(html: string): string[] {
+	const rs = html.match(/<div id="rs"[\s\S]*?<\/table>/);
+	if (!rs) return [];
+	const terms: string[] = [];
+	const seen = new Set<string>();
+	// 只取 q 参数值（到第一个 & 为止），后面还有 src/spid 等附加参数
+	const re = /href="\/s\?q=([^"&]+)[^"]*"/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(rs[0])) !== null) {
+		try {
+			const term = decodeURIComponent(m[1]).trim();
+			if (term && !seen.has(term)) {
+				seen.add(term);
+				terms.push(term);
+			}
+		} catch {
+			// 个别编码异常的词直接跳过
+		}
+		if (terms.length >= 8) break;
+	}
+	return terms;
+}
+
 interface Engine {
 	name: string;
 	buildUrl: (q: string) => string;
 	baseUrl: string;
 	parse: (html: string, max: number) => SearchResult[];
+	parseSuggestions?: (html: string) => string[];
 }
 
 const ENGINES: Engine[] = [
@@ -146,19 +171,33 @@ const ENGINES: Engine[] = [
 		buildUrl: (q) => `https://www.so.com/s?q=${encodeURIComponent(q)}&pn=1`,
 		baseUrl: "https://www.so.com/s",
 		parse: parseSo360,
+		parseSuggestions: parseSo360Suggestions,
 	},
 ];
 
-/** 双引擎并行抓取，交错合并 + URL 去重；全部失败抛汇总错误。 */
-async function searchMerged(q: string, perEngine: number): Promise<SearchResult[]> {
+/** 双引擎并行抓取，交错合并 + URL 去重；顺带收集相关搜索词。全部失败抛汇总错误。 */
+async function searchMerged(
+	q: string,
+	perEngine: number,
+): Promise<{ results: SearchResult[]; suggestions: string[] }> {
 	const settled = await Promise.allSettled(
-		ENGINES.map((eng) => fetchHtml(eng.buildUrl(q), eng.baseUrl).then((html) => eng.parse(html, perEngine))),
+		ENGINES.map((eng) =>
+			fetchHtml(eng.buildUrl(q), eng.baseUrl).then((html) => ({
+				results: eng.parse(html, perEngine),
+				suggestions: eng.parseSuggestions ? eng.parseSuggestions(html) : [],
+			})),
+		),
 	);
 	const perEngineLists: SearchResult[][] = [];
+	const suggestionLists: string[][] = [];
 	const errors: string[] = [];
 	settled.forEach((r, i) => {
-		if (r.status === "fulfilled" && r.value.length > 0) perEngineLists.push(r.value);
-		else errors.push(`${ENGINES[i].name}: ${r.status === "rejected" ? String(r.reason) : "no results parsed"}`);
+		if (r.status === "fulfilled" && r.value.results.length > 0) {
+			perEngineLists.push(r.value.results);
+			if (r.value.suggestions.length > 0) suggestionLists.push(r.value.suggestions);
+		} else {
+			errors.push(`${ENGINES[i].name}: ${r.status === "rejected" ? String(r.reason) : "no results parsed"}`);
+		}
 	});
 	if (perEngineLists.length === 0) throw new Error(errors.join("; "));
 
@@ -176,7 +215,18 @@ async function searchMerged(q: string, perEngine: number): Promise<SearchResult[
 			merged.push(r);
 		}
 	}
-	return merged;
+	// 相关搜索词去重（排除与查询本身相同的）
+	const sugSeen = new Set([q]);
+	const suggestions: string[] = [];
+	for (const list of suggestionLists) {
+		for (const s of list) {
+			if (!sugSeen.has(s)) {
+				sugSeen.add(s);
+				suggestions.push(s);
+			}
+		}
+	}
+	return { results: merged, suggestions };
 }
 
 function sendJson(res: http.ServerResponse, status: number, obj: unknown) {
@@ -207,13 +257,13 @@ export function startWebSearchProxy(): Promise<number> {
 						return;
 					}
 					searchMerged(q, 8)
-						.then((results) => {
+						.then(({ results, suggestions }) => {
 							sendJson(res, 200, {
 								query: q,
 								number_of_results: results.length,
 								results,
 								answers: [],
-								suggestions: [],
+								suggestions,
 								unresponsive_engines: results.length ? [] : [["chain", "no results parsed"]],
 							});
 						})
