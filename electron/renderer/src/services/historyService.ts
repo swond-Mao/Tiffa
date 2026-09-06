@@ -166,9 +166,14 @@ export function earlierRemaining(path: string | null): number {
 
 const autoRenameInFlight = new Set<string>();
 
-export function buildRenamePrompt(recentText: string, oldTitle: string | null): string {
+export function buildRenamePrompt(recentText: string, oldTitle: string | null, persona?: string): string {
   const titleLine = oldTitle ? `原标题「${oldTitle}」（若已不符合最近内容就重命名，符合则保持原样输出）：\n` : '';
-  return `[SYSTEM: title_generation_task] 立即执行，禁止思考、禁止分析、禁止解释。\n操作：根据对话最近的交流内容，为对话生成一个≤10字的中文标题。\n要求：对话主题可能已漂移，以最近的内容为准。\n${titleLine}风格要求：文艺、凝练、有意境，像古诗标题或棋道术语（例如：“填坑即增强”“棋落无声”“墨晕初开”），禁止工程日志风格（禁止“修复XXX问题”“实现XXX功能”）。\n最近对话：\n${recentText}\n输出：`;
+  const p = (persona || '').trim();
+  // 有人设 → 标题用人设口吻（并保证可读）；无人设 → 保留文艺风格兜底
+  const styleLine = p
+    ? `口吻要求：你是这个 AI，人设如下：「${p.length > 120 ? p.substring(0, 120) + '…' : p}」。\n标题必须符合这个人设的口吻和气质，让人一眼认出是它起的名字；同时必须能看出对话在说什么（主题可辨识），禁止空泛意象堆砌。\n`
+    : '风格要求：文艺、凝练、有意境，像古诗标题（例如：“填坑即增强”“墨晕初开”），禁止工程日志风格（禁止“修复XXX问题”“实现XXX功能”）；同时要能大致看出对话主题。\n';
+  return `[SYSTEM: title_generation_task] 立即执行，禁止思考、禁止分析、禁止解释。\n操作：根据对话最近的交流内容，为对话生成一个≤10字的中文标题。\n要求：对话主题可能已漂移，以最近的内容为准。\n${titleLine}${styleLine}最近对话：\n${recentText}\n输出：`;
 }
 
 /** 从会话历史提取最近 N 条可读文本（跳过 thinking 与空内容） */
@@ -210,7 +215,7 @@ export async function autoRenameWithLightModel(session: { path: string; title?: 
     if (!context.trim()) context = session.firstMessage || '';
     if (!context.trim()) return;
     const oldTitle = session.title && session.title !== '新对话' ? session.title : null;
-    const prompt = buildRenamePrompt(context, oldTitle);
+    const prompt = buildRenamePrompt(context, oldTitle, useUiStore.getState().persona);
     const ui = useUiStore.getState();
     const result = (await window.tiffaDesktop.completeWithLightModel(
       prompt,

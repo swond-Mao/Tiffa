@@ -282,7 +282,7 @@ export async function aiRenameTabSession(session: TabSession): Promise<void> {
   ui.addToast('info', '正在生成标题…');
 
   // 2. 走轻量模型补全（旁路模型优先，降级到当前模型/豆包兜底）
-  const prompt = buildRenamePrompt(context, oldTitle);
+  const prompt = buildRenamePrompt(context, oldTitle, ui.persona);
   let result: { text?: string; error?: string; model?: string } | undefined;
   try {
     result = (await window.tiffaDesktop.completeWithLightModel(prompt, 80, ui.currentProvider, ui.currentModel)) as {
