@@ -6,7 +6,8 @@
  *   GET /config          -> 返回可用引擎（供内核 resolveEngineNames 解析）
  *   GET /search?q=...     -> 按链抓取国内引擎并解析，返回 SearXNG 格式
  *
- * 引擎链：必应中国(cn.bing.com) → 360搜索(www.so.com)，前者失败/空结果自动切下一个。
+ * 引擎链：必应中国(cn.bing.com) + 360搜索(www.so.com) **并行抓取、交错合并、URL 去重**。
+ *   - 单引擎对歧义中文词（如"联想""闲鱼"）排序偏差大，合并双引擎保证结果多样性。
  *   - 360 结果块真实 URL 在 <a data-mdurl>（href 是 so.com 跳转链），解析时优先取 data-mdurl。
  * 地址通过 SEARXNG_ENDPOINT 环境变量注入，内核 Bun 子进程自动继承，用户零配置。
  * 免费、纯国内、不连任何国外服务 —— 分发版下载即用。
@@ -114,6 +115,9 @@ function parseSo360(html: string, max: number): SearchResult[] {
 		const mdurl = (attrs.match(/data-mdurl="([^"]*)"/) || [])[1] || "";
 		const url = decodeEntities(mdurl || href);
 		if (!url || !/^https?:\/\//.test(url)) continue;
+		// data-mdurl 为空时 href 可能是 so.com 站内搜索链接（/s?q=...），对用户无效，跳过；
+		// /link?m=... 跳转链保留（国内可解析跳转）。
+		if (/^https?:\/\/(www\.)?so\.com\/s\?/i.test(url)) continue;
 		const title = stripHtml(decodeEntities(a[2]));
 		const desc = b.match(/<p class="res-desc[^>]*>([\s\S]*?)<\/p>/);
 		const content = stripHtml(decodeEntities(desc ? desc[1] : ""));
@@ -145,20 +149,34 @@ const ENGINES: Engine[] = [
 	},
 ];
 
-/** 按引擎链依次抓取，首个拿到结果的引擎胜出；全失败抛出汇总错误。 */
-async function searchChain(q: string, max: number): Promise<SearchResult[]> {
+/** 双引擎并行抓取，交错合并 + URL 去重；全部失败抛汇总错误。 */
+async function searchMerged(q: string, perEngine: number): Promise<SearchResult[]> {
+	const settled = await Promise.allSettled(
+		ENGINES.map((eng) => fetchHtml(eng.buildUrl(q), eng.baseUrl).then((html) => eng.parse(html, perEngine))),
+	);
+	const perEngineLists: SearchResult[][] = [];
 	const errors: string[] = [];
-	for (const eng of ENGINES) {
-		try {
-			const html = await fetchHtml(eng.buildUrl(q), eng.baseUrl);
-			const results = eng.parse(html, max);
-			if (results.length > 0) return results;
-			errors.push(`${eng.name}: no results parsed`);
-		} catch (e) {
-			errors.push(`${eng.name}: ${String(e)}`);
+	settled.forEach((r, i) => {
+		if (r.status === "fulfilled" && r.value.length > 0) perEngineLists.push(r.value);
+		else errors.push(`${ENGINES[i].name}: ${r.status === "rejected" ? String(r.reason) : "no results parsed"}`);
+	});
+	if (perEngineLists.length === 0) throw new Error(errors.join("; "));
+
+	// 交错合并（b1, s1, b2, s2, …）：两个引擎都能进前排，避免单引擎排序偏差
+	const seen = new Set<string>();
+	const merged: SearchResult[] = [];
+	const maxLen = Math.max(...perEngineLists.map((a) => a.length));
+	for (let i = 0; i < maxLen; i++) {
+		for (const list of perEngineLists) {
+			const r = list[i];
+			if (!r) continue;
+			const key = r.url.replace(/\/+$/, "");
+			if (seen.has(key)) continue;
+			seen.add(key);
+			merged.push(r);
 		}
 	}
-	throw new Error(errors.join("; "));
+	return merged;
 }
 
 function sendJson(res: http.ServerResponse, status: number, obj: unknown) {
@@ -188,7 +206,7 @@ export function startWebSearchProxy(): Promise<number> {
 						sendJson(res, 400, { error: "missing q" });
 						return;
 					}
-					searchChain(q, 10)
+					searchMerged(q, 8)
 						.then((results) => {
 							sendJson(res, 200, {
 								query: q,
