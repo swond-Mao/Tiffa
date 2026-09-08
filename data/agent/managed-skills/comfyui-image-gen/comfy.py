@@ -5,7 +5,15 @@ import argparse
 import urllib.request
 import time
 
+import os
+import sys
+import json
+import time
+import base64
+
 COMFY = os.environ.get("COMFY_URL", "http://47.108.197.247:8188").rstrip("/")
+COMFY_USER = os.environ.get("COMFY_USER", "")
+COMFY_PASS = os.environ.get("COMFY_PASS", "")
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 _OUT_DIR_DEFAULT = os.path.join(os.getcwd(), "comfyui_out")
 
@@ -32,6 +40,9 @@ WF_KREA2 = os.path.join(SKILL_DIR, "workflow_krea2_api.json")
 def _post(path, payload, raw=False, headers=None):
     data = payload if raw else json.dumps(payload).encode("utf-8")
     h = {"Content-Type": "application/json"}
+    if COMFY_USER and COMFY_PASS:
+        auth = base64.b64encode(f"{COMFY_USER}:{COMFY_PASS}".encode()).decode()
+        h["Authorization"] = f"Basic {auth}"
     if headers:
         h.update(headers)
     req = urllib.request.Request(COMFY + path, data=data, headers=h, method="POST")
@@ -44,9 +55,11 @@ def _post(path, payload, raw=False, headers=None):
         else:
             sys.stderr.write("[comfy] HTTP %d: %s\n" % (e.code, e))
         sys.exit(2)
-
 def _get(path):
     req = urllib.request.Request(COMFY + path, method="GET")
+    if COMFY_USER and COMFY_PASS:
+        auth = base64.b64encode(f"{COMFY_USER}:{COMFY_PASS}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -68,6 +81,9 @@ def upload_image(path):
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
+    if COMFY_USER and COMFY_PASS:
+        auth = base64.b64encode(f"{COMFY_USER}:{COMFY_PASS}".encode()).decode()
+        req.add_header("Authorization", f"Basic {auth}")
     with urllib.request.urlopen(req, timeout=30) as r:
         resp = json.loads(r.read().decode())
     return resp.get("name", filename)
