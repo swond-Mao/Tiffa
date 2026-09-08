@@ -35,7 +35,7 @@ WF_EDIT = os.path.join(SKILL_DIR, "workflow_edit_api.json")
 WF_ERNIE = os.path.join(SKILL_DIR, "workflow_ernie_turbo_api.json")
 WF_ZIMAGE = os.path.join(SKILL_DIR, "workflow_zimage_api.json")
 WF_KLEIN = os.path.join(SKILL_DIR, "workflow_klein_api.json")
-WF_KREA2 = os.path.join(SKILL_DIR, "workflow_krea2_api.json")
+WF_SEEDVR2 = os.path.join(SKILL_DIR, "workflow_seedvr2_api.json")
 
 def _post(path, payload, raw=False, headers=None):
     data = payload if raw else json.dumps(payload).encode("utf-8")
@@ -146,6 +146,9 @@ def _download_image(filename, subfolder, img_type):
     local_path = os.path.join(out_dir, filename)
     try:
         req = urllib.request.Request(url, method="GET")
+        if COMFY_USER and COMFY_PASS:
+            auth = base64.b64encode(f"{COMFY_USER}:{COMFY_PASS}".encode()).decode()
+            req.add_header("Authorization", f"Basic {auth}")
         with urllib.request.urlopen(req, timeout=60) as r:
             with open(local_path, "wb") as f:
                 f.write(r.read())
@@ -392,7 +395,23 @@ def cmd_zimage(args):
         res = submit_and_wait(wf, args.timeout)
         all_results.extend(res)
 
-    return all_results
+def cmd_upscale(args):
+    global JOB
+    JOB = args.name or "upscale"
+
+    wf = load_wf(WF_SEEDVR2)
+
+    # SeedVR2 workflow: seed=130(SeedVR2VideoUpscaler.seed), resolution=130(SeedVR2VideoUpscaler.resolution)
+    if args.seed and args.seed > 0:
+        wf["130"]["inputs"]["seed"] = args.seed
+    if args.resolution and args.resolution > 0:
+        wf["130"]["inputs"]["resolution"] = args.resolution
+
+    img_name = upload_image(args.image)
+    wf["136"]["inputs"]["image"] = img_name
+
+    print("[comfy] upscale: %s" % args.image, flush=True)
+    return submit_and_wait(wf, args.timeout)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -456,7 +475,14 @@ def main():
     k.add_argument("--timeout", type=int, default=600)
     k.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     k.set_defaults(func=cmd_klein)
-
+    u = sub.add_parser("upscale", help="SeedVR2 image upscaler")
+    u.add_argument("image", help="local image path to upscale")
+    u.add_argument("--seed", type=int, default=0)
+    u.add_argument("--resolution", type=int, default=1024, help="SeedVR2 output resolution (default 1024)")
+    u.add_argument("--name", default="upscale")
+    u.add_argument("--timeout", type=int, default=600)
+    u.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
+    u.set_defaults(func=cmd_upscale)
     a = ap.parse_args()
     global _out_dir_override
     _out_dir_override = resolve_out_dir(getattr(a, "output", "") or None)

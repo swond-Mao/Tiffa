@@ -1,0 +1,263 @@
+{
+  "122": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": false,
+      "encode_tile_size": 256,
+      "encode_tile_overlap": 32,
+      "decode_tiled": false,
+      "decode_tile_size": 256,
+      "decode_tile_overlap": 32,
+      "tile_debug": "false",
+      "offload_device": "none",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load VAE Model"
+    }
+  },
+  "123": {
+    "inputs": {
+      "image": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "GetImageSize+",
+    "_meta": {
+      "title": "🔧 Get Image Size"
+    }
+  },
+  "124": {
+    "inputs": {
+      "width_factor": 4,
+      "height_factor": 3,
+      "overlap_rate": 0.1,
+      "image": [
+        "133",
+        0
+      ]
+    },
+    "class_type": "TTP_Tile_image_size",
+    "_meta": {
+      "title": "TTP_瓦片图像尺寸"
+    }
+  },
+  "125": {
+    "inputs": {
+      "tile_width": [
+        "124",
+        0
+      ],
+      "tile_height": [
+        "124",
+        1
+      ],
+      "image": [
+        "133",
+        0
+      ]
+    },
+    "class_type": "TTP_Image_Tile_Batch",
+    "_meta": {
+      "title": "TTP_图像瓦片批处理"
+    }
+  },
+  "127": {
+    "inputs": {
+      "width": [
+        "123",
+        0
+      ],
+      "height": [
+        "123",
+        1
+      ],
+      "interpolation": "lanczos",
+      "method": "stretch",
+      "condition": "always",
+      "multiple_of": 8,
+      "image": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "ImageResize+",
+    "_meta": {
+      "title": "🔧 Image Resize"
+    }
+  },
+  "128": {
+    "inputs": {
+      "padding": 64,
+      "tiles": [
+        "127",
+        0
+      ],
+      "positions": [
+        "125",
+        1
+      ],
+      "original_size": [
+        "125",
+        2
+      ],
+      "grid_size": [
+        "125",
+        3
+      ]
+    },
+    "class_type": "TTP_Image_Assy",
+    "_meta": {
+      "title": "TTP_图像拼接/重组"
+    }
+  },
+  "129": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 0.25,
+      "image": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "缩放图像（比例）"
+    }
+  },
+  "130": {
+    "inputs": {
+      "seed": 2794489657,
+      "resolution": 1024,
+      "max_resolution": 0,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "wavelet",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "image": [
+        "129",
+        0
+      ],
+      "dit": [
+        "132",
+        0
+      ],
+      "vae": [
+        "122",
+        0
+      ]
+    },
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "SeedVR2 Video Upscaler (v2.5.24)"
+    }
+  },
+  "131": {
+    "inputs": {
+      "model_name": "4x-ClearRealityV1.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "加载放大模型"
+    }
+  },
+  "132": {
+    "inputs": {
+      "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+      "device": "cuda:0",
+      "blocks_to_swap": 36,
+      "swap_io_components": false,
+      "offload_device": "cpu",
+      "cache_model": "sdpa",
+      "attention_mode": "sdpa"
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load DiT Model"
+    }
+  },
+  "133": {
+    "inputs": {
+      "upscale_model": [
+        "131",
+        0
+      ],
+      "image": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "使用模型放大图像"
+    }
+  },
+  "134": {
+    "inputs": {
+      "quality": 85,
+      "image": [
+        "128",
+        0
+      ]
+    },
+    "class_type": "DapaoImageCompressionNode",
+    "_meta": {
+      "title": "🦖画质无损压缩@炮老师的小课堂"
+    }
+  },
+  "136": {
+    "inputs": {
+      "image": "001 (1) (1).jpeg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "137": {
+    "inputs": {
+      "📄 文件名前缀": "dapao",
+      "💾 格式": "PNG",
+      "📉 质量": 100,
+      "😶‍🌫️ 移除元数据": true,
+      "📂 自定义路径": "",
+      "🖼️ 图像": [
+        "134",
+        0
+      ]
+    },
+    "class_type": "DapaoSafeSaveImage",
+    "_meta": {
+      "title": "😶‍🌫️安全保存图像@炮老师的小课堂"
+    }
+  },
+  "155": {
+    "inputs": {
+      "📐 宽高比": "原图",
+      "📏 比例宽度": 1,
+      "📏 比例高度": 1,
+      "🎨 适应模式": "包含",
+      "🔍 缩放算法": "lanczos",
+      "🔢 尺寸倍数": 8,
+      "📏 锁定边长": "锁定最长边",
+      "📏 锁定长度": 1536,
+      "🌈 背景颜色": "#000000",
+      "📸 图像": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "DapaoImageAspectRatioResizeNode",
+    "_meta": {
+      "title": "按宽高比缩放 📐@炮老师的小课堂"
+    }
+  }
+}

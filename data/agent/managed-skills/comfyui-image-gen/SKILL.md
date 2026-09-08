@@ -23,6 +23,7 @@ Unified CLI `comfy.py` drives a remote ComfyUI server. Five subcommands, routed 
 | 写实照片风/快速出图 | `klein` | Flux2-Klein，高写实，自由尺寸 |
 | 人物肖像/人像 | `zimage` | Z-image turbo，蒸馏9步，人像最佳 |
 | 编辑已有图片/P图 | `edit` | 指令式编辑，需提供原图路径 |
+| 图像放大/超分辨率 | `upscale` | SeedVR2 智能放大，适合低分辨率图像放大 |
 
 > **生图实战指南**：读 `image-gen-playbook.md`（管线选择决策/提示词写法/比例预处理[绝不拉伸]/水印处理/批量素材策略/常见踩坑）。商业 deck 批量生图前必读。
 
@@ -88,4 +89,11 @@ python "<comfy.py绝对路径>" edit "<本地图片路径>" "编辑指令" [--se
 craftman 的 plan.json 中 skill 设为 `comfyui`，params 支持：
 - `style`：子命令名（krea2/ernie/klein/zimage/edit），默认 krea2
 - `size`：图片尺寸，如 `1080x1920`
+### upscale - 图像放大
+```bash
+python "<comfy.py绝对路径>" upscale "<本地图片路径>" [--seed N] [--resolution N] [--name 名前缀]
+```
+- 默认分辨率 `1024`（SeedVR2 输出分辨率）
+- 使用 SeedVR2 模型进行智能放大，适合低分辨率图像放大
+- 放大倍数由输入图像和目标分辨率决定
 - `name`：输出文件名前缀，默认 craftman
