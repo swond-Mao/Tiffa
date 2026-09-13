@@ -147,6 +147,13 @@ export interface TiffaDesktopApi {
   compact: (sessionId: string | null) => Promise<unknown>;
   command: (type: string, payload: unknown, sessionId: string | null) => Promise<unknown>;
 
+  // ── 定时任务 ──
+  schedulerList: () => Promise<unknown>;
+  schedulerReload: () => Promise<unknown>;
+  schedulerSave: (task: unknown) => Promise<unknown>;
+  schedulerRemove: (id: string) => Promise<unknown>;
+  schedulerRunNow: (id: string) => Promise<unknown>;
+
   // ── 事件监听 ──
   onEvent: (callback: (data: TiffaEventFrame) => void) => void;
   onExited: (callback: (data: unknown) => void) => void;

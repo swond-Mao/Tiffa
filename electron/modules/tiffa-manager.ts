@@ -79,7 +79,7 @@ export class TiffaInstanceManager {
   }
 
   /** 激活对话级实例（每个对话独立 Tiffa 进程） */
-  async activateSession(cwd: string, sessionId: string): Promise<ActivateResult> {
+  async activateSession(cwd: string, sessionId: string, extraArgs: string[] = []): Promise<ActivateResult> {
     const normalized = path.resolve(cwd);
     const key = this._key(cwd, sessionId);
 
@@ -107,7 +107,7 @@ export class TiffaInstanceManager {
       // 已有会话（findSessionFile 命中）不预写，走原恢复逻辑。
       const existingFile = sessionId ? await findSessionFile(normalized, sessionId) : null;
       const preparedFile = existingFile ? null : prepareNewSessionFile(normalized, sessionId);
-      const inst = new TiffaInstance(normalized, sessionId, preparedFile);
+      const inst = new TiffaInstance(normalized, sessionId, preparedFile, extraArgs);
       this.instances.set(key, inst);
       inst.start();
       await this._waitSpawnReady(inst);

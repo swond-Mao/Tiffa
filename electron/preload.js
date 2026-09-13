@@ -37,6 +37,13 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   compact: (sessionId) => ipcRenderer.invoke('tiffa:compact', sessionId),
   command: (type, payload, sessionId) => ipcRenderer.invoke('tiffa:command', type, payload, sessionId),
 
+  // ── 定时任务 ──
+  schedulerList: () => ipcRenderer.invoke('scheduler:list'),
+  schedulerReload: () => ipcRenderer.invoke('scheduler:reload'),
+  schedulerSave: (task) => ipcRenderer.invoke('scheduler:save', task),
+  schedulerRemove: (id) => ipcRenderer.invoke('scheduler:remove', id),
+  schedulerRunNow: (id) => ipcRenderer.invoke('scheduler:runNow', id),
+
   // ── 事件监听 ──
   onEvent: (callback) => {
     ipcRenderer.on('tiffa:event', (event, data) => callback(data));

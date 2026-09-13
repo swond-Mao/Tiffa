@@ -1416,6 +1416,192 @@ function ConstraintsSection() {
   );
 }
 
+function SchedulerSection() {
+  const addToast = useUiStore((s) => s.addToast);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [kind, setKind] = useState<'cron' | 'every'>('cron');
+  const [form, setForm] = useState({
+    id: '',
+    name: '',
+    schedule: '0 9 * * *',
+    prompt: '',
+    approval: 'auto',
+    cwd: '',
+    catchUp: false,
+  });
+
+  const refresh = async () => {
+    try {
+      const r: any = await (window.tiffaDesktop as any).schedulerList();
+      setTasks(r?.tasks || []);
+      setErrors(r?.errors || []);
+    } catch (e: any) {
+      addToast?.('error', `定时任务读取失败：${e?.message || e}`);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const save = async () => {
+    if (!form.id.trim() || !form.prompt.trim()) {
+      addToast?.('error', 'id 与 prompt 必填');
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload: any = {
+        id: form.id.trim(),
+        name: form.name.trim() || undefined,
+        [kind]: form.schedule.trim(),
+        prompt: form.prompt,
+        approval: form.approval,
+        cwd: form.cwd.trim() || undefined,
+        catchUp: form.catchUp,
+        enabled: true,
+      };
+      const r: any = await (window.tiffaDesktop as any).schedulerSave(payload);
+      if (r?.error) addToast?.('error', r.error);
+      else {
+        addToast?.('success', `已保存任务 ${form.id}`);
+        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', catchUp: false });
+      }
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    const r: any = await (window.tiffaDesktop as any).schedulerRemove(id);
+    if (r?.error) addToast?.('error', r.error);
+    else addToast?.('info', `已删除任务 ${id}`);
+    await refresh();
+  };
+
+  const toggle = async (t: any) => {
+    const r: any = await (window.tiffaDesktop as any).schedulerSave({ ...t, enabled: !(t.enabled !== false) });
+    if (r?.error) addToast?.('error', r.error);
+    await refresh();
+  };
+
+  const runNow = async (id: string) => {
+    addToast?.('info', `正在触发 ${id} ...`);
+    const r: any = await (window.tiffaDesktop as any).schedulerRunNow(id);
+    if (r?.error) addToast?.('error', `触发失败：${r.error}`);
+    else addToast?.('success', `${id} 已投递到任务会话`);
+    await refresh();
+  };
+
+  const fmtTime = (ts?: number) => (ts ? new Date(ts).toLocaleString() : '—');
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">定时任务</div>
+      <div className="settings-section-desc">
+        Tiffa 运行时生效（关闭期间的漏跑默认不补）。cron 五字段「分 时 日 月 周」，或用间隔 every（如 2h / 30m / 1d）。
+        也可以直接在对话里让 AI 用 schedule_task 工具建任务。
+      </div>
+
+      {tasks.length === 0 && <div className="settings-section-desc">（暂无任务）</div>}
+      {tasks.map((t) => (
+        <div className="form-field" key={t.id} style={{ marginBottom: 8 }}>
+          <div className="form-label">
+            {t.name ? `${t.name}（${t.id}）` : t.id}
+            <span style={{ opacity: 0.7, marginLeft: 8 }}>
+              {t.nextRunHint} · 审批 {t.approval} · 上次 {fmtTime(t.lastRunAt)}
+              {t.lastResult && t.lastResult !== 'ok' ? ` · ${t.lastResult}` : ''}
+              {t.running ? ' · 运行中' : ''}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="settings-btn" onClick={() => void runNow(t.id)}>
+              立即运行
+            </button>
+            <button type="button" className="settings-btn" onClick={() => void toggle(t)}>
+              {t.enabled !== false ? '停用' : '启用'}
+            </button>
+            <button type="button" className="settings-btn" onClick={() => void remove(t.id)}>
+              删除
+            </button>
+          </div>
+        </div>
+      ))}
+      {errors.length > 0 && <div className="settings-section-desc">⚠️ {errors.join('；')}</div>}
+
+      <div className="form-field" style={{ marginTop: 12 }}>
+        <div className="form-label">新建 / 覆盖（同 id 会覆盖）</div>
+        <input
+          className="form-input"
+          placeholder="id（英文短名，如 daily-report）"
+          value={form.id}
+          onChange={(e) => setForm({ ...form, id: e.target.value })}
+        />
+        <input
+          className="form-input"
+          placeholder="展示名（可选）"
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+        />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="form-input" value={kind} onChange={(e) => setKind(e.target.value as 'cron' | 'every')}>
+            <option value="cron">cron</option>
+            <option value="every">every</option>
+          </select>
+          <input
+            className="form-input"
+            placeholder={kind === 'cron' ? '0 9 * * *' : '2h'}
+            value={form.schedule}
+            onChange={(e) => setForm({ ...form, schedule: e.target.value })}
+          />
+          <select
+            className="form-input"
+            value={form.approval}
+            onChange={(e) => setForm({ ...form, approval: e.target.value })}
+          >
+            <option value="normal">normal（每步确认）</option>
+            <option value="auto">auto（写操作免确认）</option>
+            <option value="yolo">yolo（全自动）</option>
+          </select>
+        </div>
+        <textarea
+          className="form-input"
+          placeholder="到点要执行的指令（prompt）"
+          rows={3}
+          value={form.prompt}
+          onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+        />
+        <input
+          className="form-input"
+          placeholder="目标项目目录（可选，缺省当前工作区）"
+          value={form.cwd}
+          onChange={(e) => setForm({ ...form, cwd: e.target.value })}
+        />
+        <label className="form-label" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={form.catchUp} onChange={(e) => setForm({ ...form, catchUp: e.target.checked })} />
+          应用关闭期间漏跑则下次启动补跑一次（最多回溯 12 小时）
+        </label>
+        <button type="button" className="settings-btn" disabled={busy} onClick={() => void save()}>
+          {busy ? '保存中…' : '保存任务'}
+        </button>
+        <button
+          type="button"
+          className="settings-btn"
+          onClick={async () => {
+            const root = (await window.tiffaDesktop.getRootPath()) as string;
+            void window.tiffaDesktop.openPath(`${root}\\data\\agent\\scheduled-tasks.json`);
+          }}
+        >
+          用记事本打开任务表
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IdentitySection() {
   const addToast = useUiStore((s) => s.addToast);
   const aiName = useUiStore((s) => s.aiName);
@@ -1652,6 +1838,7 @@ export default function SettingsPanel() {
                 <BypassModelSection kind="grounding" />
                 <ThemeSection />
                 <ConstraintsSection />
+                <SchedulerSection />
                 <IdentitySection />
                 <div className="settings-section">
                   <div className="settings-section-title">关于</div>

@@ -18,6 +18,7 @@ import { TiffaInstance } from './modules/tiffa-instance';
 import { TiffaInstanceManager } from './modules/tiffa-manager';
 import { setMainWindow } from './modules/tiffa-instance';
 import { startWebSearchProxy } from './modules/web-search-proxy';
+import { TaskScheduler, readTasksFile, writeTasksFile } from './modules/scheduler';
 import { createWindow, syncCustomStartupImage } from './modules/window-setup';
 import {
   PORTABLE_ROOT, BUN_EXE, TIFFA_CLI, EXTENSION_PATH, COMPUTER_USE_EXTENSION_PATH,
@@ -187,6 +188,10 @@ try {
 // ── Global State（模块化：实例管理器从 tiffa-manager 导入） ──
 let mainWindow = null;
 const tiffaManager = new TiffaInstanceManager();
+
+// 定时任务调度器：主进程常驻，任务表 data/agent/scheduled-tasks.json。
+// 默认 cwd 取当前工作区，缺省回落到 workspace 目录。
+const taskScheduler = new TaskScheduler(tiffaManager, () => currentWorkspaceDir || DEFAULT_WORKSPACE_DIR);
 
 // 删除/归档会话前关闭持有该会话文件的实例。
 // 根因：实例内存持有 session 状态，只删 jsonl 不关实例时，内核后续任何写盘
@@ -1082,6 +1087,52 @@ function setupIpc() {
       doc.get('tools').set('approvalMode', agentMode);
       fs.writeFileSync(CONFIG_YML, doc.toString(), 'utf8');
       return { success: true, agentMode };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
+  // ── 定时任务（scheduler） ──
+  ipcMain.handle('scheduler:list', async () => taskScheduler.list());
+  ipcMain.handle('scheduler:reload', async () => {
+    taskScheduler.reload();
+    return taskScheduler.list();
+  });
+  ipcMain.handle('scheduler:runNow', async (event, id) => taskScheduler.runNow(id));
+  ipcMain.handle('scheduler:save', async (event, task) => {
+    try {
+      if (!task || !task.id || !String(task.prompt || '').trim()) {
+        return { error: '任务需要 id 和 prompt' };
+      }
+      const { tasks } = readTasksFile();
+      const idx = tasks.findIndex(t => t.id === task.id);
+      const clean = {
+        id: String(task.id).trim(),
+        name: task.name ? String(task.name) : undefined,
+        cron: task.cron ? String(task.cron).trim() : undefined,
+        every: task.every ? String(task.every).trim() : undefined,
+        enabled: task.enabled !== false,
+        cwd: task.cwd ? String(task.cwd) : undefined,
+        session: task.session ? String(task.session) : undefined,
+        approval: task.approval || 'auto',
+        catchUp: !!task.catchUp,
+        prompt: String(task.prompt),
+      };
+      if (!clean.cron && !clean.every) return { error: '需要填 cron（如 0 9 * * *）或 every（如 2h）' };
+      if (idx >= 0) tasks[idx] = clean as any; else tasks.push(clean as any);
+      writeTasksFile(tasks);
+      taskScheduler.reload();
+      return { success: true, task: clean };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+  ipcMain.handle('scheduler:remove', async (event, id) => {
+    try {
+      const { tasks } = readTasksFile();
+      writeTasksFile(tasks.filter(t => t.id !== id));
+      taskScheduler.reload();
+      return { success: true };
     } catch (err) {
       return { error: err.message };
     }
@@ -3041,6 +3092,12 @@ app.whenReady().then(async () => {
   healKernelExtensionHandlerTimeout();
   healKernelAskDialog();
   setupIpc();
+  // 定时任务调度器：30s tick，读 data/agent/scheduled-tasks.json
+  try {
+    taskScheduler.start();
+  } catch (e) {
+    console.error('[scheduler] 启动失败:', e);
+  }
   mainWindow = createWindow();
   // 懒启动：不在此处启动 Tiffa，等前端 loadProjects 切换项目时再 activate
   //（此处不再 activate 默认工作区，避免启动时创建两个 Tiffa 实例）
@@ -3062,6 +3119,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (e) => {
   globalShortcut.unregisterAll(); // 窗口快照热键清理
+  taskScheduler.stop();           // 停止定时任务 tick，避免退出期触发新任务
   if (gracefulShutdownStarted) return;        // 第二次（app.quit 再次触发）直接放行退出
   gracefulShutdownStarted = true;
   e.preventDefault();                          // 先拦住，等内核 drain+dispose 自退后再 quit

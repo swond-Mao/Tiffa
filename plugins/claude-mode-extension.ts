@@ -177,9 +177,160 @@ function hasStackLeak(text: string): boolean {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 定时任务工具（schedule_task）
+// 任务表 data/agent/scheduled-tasks.json，由主进程调度器
+// （electron/modules/scheduler.ts）每 30s 轮询执行；Tiffa 关闭时不运行。
+// 选 JSON 而非 YAML：中文 prompt 里的冒号/换行/引号用 JSON.stringify 不会翻车。
+// ═══════════════════════════════════════════════════════════
+const SCHEDULE_TASKS_FILE = join(AGENT_DIR, "scheduled-tasks.json")
+
+function readScheduleTasks(): { tasks: any[]; errors: string[] } {
+  try {
+    if (!existsSync(SCHEDULE_TASKS_FILE)) return { tasks: [], errors: [] }
+    const raw = JSON.parse(readFileSync(SCHEDULE_TASKS_FILE, "utf8"))
+    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.tasks) ? raw.tasks : []
+    return { tasks: list.filter((t: any) => t && typeof t === "object"), errors: [] }
+  } catch (e: any) {
+    return { tasks: [], errors: [e?.message || String(e)] }
+  }
+}
+
+function writeScheduleTasks(tasks: any[]): void {
+  ensureDir(AGENT_DIR)
+  writeFileSync(SCHEDULE_TASKS_FILE, JSON.stringify({ tasks }, null, 2), "utf8")
+}
+
+/** 轻量 cron 校验：5 字段且字段内只允许数字 * , - / */
+function looksLikeCron(expr: string): boolean {
+  const f = String(expr || "").trim().split(/\s+/)
+  if (f.length !== 5) return false
+  return f.every((x) => /^[0-9*,\-/]+$/.test(x))
+}
+
+function registerScheduleTaskTool(pi: any): void {
+  const Type = pi?.typebox?.Type
+  if (!Type || typeof pi?.registerTool !== "function") {
+    log("schedule_task.skip", "内核未提供 typebox/registerTool，工具未注册")
+    return
+  }
+  try {
+    pi.registerTool({
+      name: "schedule_task",
+      label: "定时任务",
+      description: [
+        "管理 Tiffa 定时任务（应用内调度，仅 Tiffa 运行时生效）。",
+        "action=list：列出全部任务；action=create：新建或覆盖同 id 任务；",
+        "action=remove：删除；action=enable/disable：启用或停用。",
+        "调度二选一：cron（5 字段：分 时 日 月 周，如 \"0 9 * * *\" 表示每天 9:00）或 every（间隔，如 \"2h\"/\"30m\"/\"1d\"）。",
+        "approval：normal=每步确认 / auto=写操作免确认（默认）/ yolo=全自动。",
+        "catchUp=true 时，应用关闭期间漏跑的任务在下次启动后补跑一次（最多回溯 12 小时）。",
+        "任务每次运行使用独立会话 sched-<id>，结果可追溯。用户问\"能不能定时/每天/每周做某事\"时用本工具登记。",
+      ].join(" "),
+      parameters: Type.Object({
+        action: Type.String({ description: "list | create | remove | enable | disable" }),
+        id: Type.Optional(Type.String({ description: "任务 id，kebab-case 英文短名，如 daily-report" })),
+        name: Type.Optional(Type.String({ description: "任务展示名（中文可）" })),
+        cron: Type.Optional(Type.String({ description: "5 字段 cron，如 0 9 * * *（每天 9:00）" })),
+        every: Type.Optional(Type.String({ description: "固定间隔，如 30m / 2h / 1d（与 cron 二选一）" })),
+        prompt: Type.Optional(Type.String({ description: "到点要执行的指令（agent 提示词）" })),
+        cwd: Type.Optional(Type.String({ description: "目标项目目录绝对路径，缺省用当前项目" })),
+        approval: Type.Optional(Type.String({ description: "normal | auto | yolo" })),
+        catchUp: Type.Optional(Type.Boolean({ description: "是否补跑漏掉的任务，默认 false" })),
+      }),
+      async execute(_toolCallId: string, params: any) {
+        const action = String(params?.action || "list").toLowerCase()
+        const { tasks, errors } = readScheduleTasks()
+        const errNote = errors.length ? `\n⚠️ 任务表读取告警：${errors.join("; ")}` : ""
+
+        const render = () =>
+          tasks.length
+            ? tasks
+                .map(
+                  (t: any) =>
+                    `- ${t.id}${t.name ? `（${t.name}）` : ""} | ${t.cron ? `cron ${t.cron}` : `每 ${t.every}`} | ${t.enabled === false ? "已停用" : "启用"} | 审批 ${t.approval || "auto"}${t.catchUp ? " | 补跑" : ""}`,
+                )
+                .join("\n")
+            : "（当前没有定时任务）"
+
+        if (action === "list") {
+          return { content: [{ type: "text", text: `定时任务 ${tasks.length} 个：\n${render()}${errNote}` }] }
+        }
+
+        if (action === "remove") {
+          const id = String(params?.id || "").trim()
+          if (!id) return { content: [{ type: "text", text: "remove 需要 id" }] }
+          const next = tasks.filter((t: any) => t.id !== id)
+          if (next.length === tasks.length) {
+            return { content: [{ type: "text", text: `未找到任务 ${id}` }] }
+          }
+          writeScheduleTasks(next)
+          return { content: [{ type: "text", text: `已删除任务 ${id}。剩余：\n${next.map((t: any) => `- ${t.id}`).join("\n") || "（无）"}` }] }
+        }
+
+        if (action === "enable" || action === "disable") {
+          const id = String(params?.id || "").trim()
+          if (!id) return { content: [{ type: "text", text: `${action} 需要 id` }] }
+          const t = tasks.find((x: any) => x.id === id)
+          if (!t) return { content: [{ type: "text", text: `未找到任务 ${id}` }] }
+          t.enabled = action === "enable"
+          writeScheduleTasks(tasks)
+          return { content: [{ type: "text", text: `任务 ${id} 已${action === "enable" ? "启用" : "停用"}。` }] }
+        }
+
+        // create / 覆盖
+        const id = String(params?.id || "").trim()
+        const prompt = String(params?.prompt || "").trim()
+        const cron = params?.cron ? String(params.cron).trim() : undefined
+        const every = params?.every ? String(params.every).trim() : undefined
+        if (!id) return { content: [{ type: "text", text: "create 需要 id（kebab-case 英文短名）" }] }
+        if (!prompt) return { content: [{ type: "text", text: "create 需要 prompt（到点要做什么）" }] }
+        if (!cron && !every) return { content: [{ type: "text", text: "create 需要 cron 或 every 之一" }] }
+        if (cron && !looksLikeCron(cron)) {
+          return { content: [{ type: "text", text: `cron 写法非法：${cron}（需要 5 字段：分 时 日 月 周）` }] }
+        }
+        if (every && !/^\d+\s*[smhd]$/i.test(every)) {
+          return { content: [{ type: "text", text: `every 写法非法：${every}（示例 30m / 2h / 1d）` }] }
+        }
+        const approval = ["normal", "auto", "yolo"].includes(String(params?.approval))
+          ? String(params.approval)
+          : "auto"
+        const entry = {
+          id,
+          name: params?.name ? String(params.name) : undefined,
+          ...(cron ? { cron } : { every }),
+          enabled: true,
+          cwd: params?.cwd ? String(params.cwd) : pi?.cwd || undefined,
+          approval,
+          catchUp: !!params?.catchUp,
+          prompt,
+        }
+        const idx = tasks.findIndex((t: any) => t.id === id)
+        if (idx >= 0) tasks[idx] = { ...tasks[idx], ...entry }
+        else tasks.push(entry)
+        writeScheduleTasks(tasks)
+        const when = cron ? `cron「${cron}」` : `每 ${every}`
+        return {
+          content: [
+            {
+              type: "text",
+              text: `已${idx >= 0 ? "更新" : "创建"}定时任务 ${id}（${when}，审批 ${approval}${entry.catchUp ? "，含补跑" : ""}）。\n主进程调度器 30 秒内自动生效；任务会话 sched-${id}。\n当前任务表：\n${render()}`,
+            },
+          ],
+        }
+      },
+    })
+    log("schedule_task.registered", SCHEDULE_TASKS_FILE)
+  } catch (e: any) {
+    log("schedule_task.error", e?.message || String(e))
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 扩展入口
 // ═══════════════════════════════════════════════════════════
 export default async function (pi: any) {
+  registerScheduleTaskTool(pi)
+
   let agentTurnCount = 0
   let silentToolCallCount = 0
   let consecutiveBlockCount = 0  // 连续被拦截次数（熔断用）

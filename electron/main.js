@@ -19,6 +19,7 @@ const yaml_1 = require("yaml");
 const tiffa_instance_1 = require("./modules/tiffa-instance");
 const tiffa_manager_1 = require("./modules/tiffa-manager");
 const web_search_proxy_1 = require("./modules/web-search-proxy");
+const scheduler_1 = require("./modules/scheduler");
 const window_setup_1 = require("./modules/window-setup");
 const constants_1 = require("./modules/constants");
 const session_utils_1 = require("./modules/session-utils");
@@ -171,6 +172,9 @@ catch (e) {
 // ── Global State（模块化：实例管理器从 tiffa-manager 导入） ──
 let mainWindow = null;
 const tiffaManager = new tiffa_manager_1.TiffaInstanceManager();
+// 定时任务调度器：主进程常驻，任务表 data/agent/scheduled-tasks.json。
+// 默认 cwd 取当前工作区，缺省回落到 workspace 目录。
+const taskScheduler = new scheduler_1.TaskScheduler(tiffaManager, () => constants_1.currentWorkspaceDir || constants_1.DEFAULT_WORKSPACE_DIR);
 // 删除/归档会话前关闭持有该会话文件的实例。
 // 根因：实例内存持有 session 状态，只删 jsonl 不关实例时，内核后续任何写盘
 // （agent_end flush / switch_session / 消息追加）都会把文件"复活"，历史面板残留记录；
@@ -1097,6 +1101,57 @@ function setupIpc() {
             doc.get('tools').set('approvalMode', agentMode);
             fs_1.default.writeFileSync(CONFIG_YML, doc.toString(), 'utf8');
             return { success: true, agentMode };
+        }
+        catch (err) {
+            return { error: err.message };
+        }
+    });
+    // ── 定时任务（scheduler） ──
+    electron_1.ipcMain.handle('scheduler:list', async () => taskScheduler.list());
+    electron_1.ipcMain.handle('scheduler:reload', async () => {
+        taskScheduler.reload();
+        return taskScheduler.list();
+    });
+    electron_1.ipcMain.handle('scheduler:runNow', async (event, id) => taskScheduler.runNow(id));
+    electron_1.ipcMain.handle('scheduler:save', async (event, task) => {
+        try {
+            if (!task || !task.id || !String(task.prompt || '').trim()) {
+                return { error: '任务需要 id 和 prompt' };
+            }
+            const { tasks } = (0, scheduler_1.readTasksFile)();
+            const idx = tasks.findIndex(t => t.id === task.id);
+            const clean = {
+                id: String(task.id).trim(),
+                name: task.name ? String(task.name) : undefined,
+                cron: task.cron ? String(task.cron).trim() : undefined,
+                every: task.every ? String(task.every).trim() : undefined,
+                enabled: task.enabled !== false,
+                cwd: task.cwd ? String(task.cwd) : undefined,
+                session: task.session ? String(task.session) : undefined,
+                approval: task.approval || 'auto',
+                catchUp: !!task.catchUp,
+                prompt: String(task.prompt),
+            };
+            if (!clean.cron && !clean.every)
+                return { error: '需要填 cron（如 0 9 * * *）或 every（如 2h）' };
+            if (idx >= 0)
+                tasks[idx] = clean;
+            else
+                tasks.push(clean);
+            (0, scheduler_1.writeTasksFile)(tasks);
+            taskScheduler.reload();
+            return { success: true, task: clean };
+        }
+        catch (err) {
+            return { error: err.message };
+        }
+    });
+    electron_1.ipcMain.handle('scheduler:remove', async (event, id) => {
+        try {
+            const { tasks } = (0, scheduler_1.readTasksFile)();
+            (0, scheduler_1.writeTasksFile)(tasks.filter(t => t.id !== id));
+            taskScheduler.reload();
+            return { success: true };
         }
         catch (err) {
             return { error: err.message };
@@ -3189,6 +3244,13 @@ electron_1.app.whenReady().then(async () => {
     healKernelExtensionHandlerTimeout();
     healKernelAskDialog();
     setupIpc();
+    // 定时任务调度器：30s tick，读 data/agent/scheduled-tasks.json
+    try {
+        taskScheduler.start();
+    }
+    catch (e) {
+        console.error('[scheduler] 启动失败:', e);
+    }
     mainWindow = (0, window_setup_1.createWindow)();
     // 懒启动：不在此处启动 Tiffa，等前端 loadProjects 切换项目时再 activate
     //（此处不再 activate 默认工作区，避免启动时创建两个 Tiffa 实例）
@@ -3206,6 +3268,7 @@ electron_1.app.on('window-all-closed', () => {
 });
 electron_1.app.on('before-quit', (e) => {
     electron_1.globalShortcut.unregisterAll(); // 窗口快照热键清理
+    taskScheduler.stop(); // 停止定时任务 tick，避免退出期触发新任务
     if (gracefulShutdownStarted)
         return; // 第二次（app.quit 再次触发）直接放行退出
     gracefulShutdownStarted = true;

@@ -95,10 +95,19 @@ export class TiffaInstance {
     TiffaInstance._titleGenerateCallback = fn;
   }
 
-  constructor(cwd: string, sessionId: string | null = null, initialSessionFile: string | null = null) {
+  /** 额外 CLI 参数（如调度任务实例的 --approval-mode=<mode>），插在内核参数末尾 */
+  private extraArgs: string[] = [];
+
+  constructor(
+    cwd: string,
+    sessionId: string | null = null,
+    initialSessionFile: string | null = null,
+    extraArgs: string[] = [],
+  ) {
     this.cwd = cwd;
     this.sessionId = sessionId;
     this.initialSessionFile = initialSessionFile;
+    this.extraArgs = extraArgs;
     this.sessionDir = path.join(SESSIONS_DIR, stableSessionDirName(cwd));
   }
 
@@ -144,6 +153,11 @@ export class TiffaInstance {
     // 新建会话：预写正式文件已就绪 → 启动即加载（resume 语义），身份在 spawn 时确定
     if (this.initialSessionFile) {
       args.push('--session', this.initialSessionFile);
+    }
+
+    // 调度任务专用参数（如 --approval-mode=yolo），仅该类实例携带，不影响普通对话
+    if (this.extraArgs.length > 0) {
+      args.push(...this.extraArgs);
     }
 
     console.log(`[TiffaInstance] Starting Tiffa cwd=${this.cwd}`, BUN_EXE, args.join(' '));
