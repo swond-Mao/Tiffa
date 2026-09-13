@@ -1810,11 +1810,78 @@ function IdentitySection() {
 
 // ── 主组件 ──
 
+type SettingsTabId =
+  | 'model-config'
+  | 'model-list'
+  | 'aux-model'
+  | 'identity'
+  | 'constraints'
+  | 'computer-use'
+  | 'playwright'
+  | 'scheduler'
+  | 'theme'
+  | 'about';
+
+/** 左侧导航：分组 + 页签。新增设置区块时在这里登记一项即可。 */
+const SETTINGS_TABS: { group: string; items: { id: SettingsTabId; label: string }[] }[] = [
+  {
+    group: '模型',
+    items: [
+      { id: 'model-config', label: '模型配置' },
+      { id: 'model-list', label: '模型列表' },
+      { id: 'aux-model', label: '辅助模型' },
+    ],
+  },
+  {
+    group: '人格',
+    items: [
+      { id: 'identity', label: 'AI 身份' },
+      { id: 'constraints', label: '约束规则' },
+    ],
+  },
+  {
+    group: '能力',
+    items: [
+      { id: 'computer-use', label: '电脑控制' },
+      { id: 'playwright', label: '浏览器自动化' },
+      { id: 'scheduler', label: '定时任务' },
+    ],
+  },
+  {
+    group: '其它',
+    items: [
+      { id: 'theme', label: '主题风格' },
+      { id: 'about', label: '关于' },
+    ],
+  },
+];
+
+const SETTINGS_TAB_KEY = 'tiffa.settingsTab';
+
+function loadSavedTab(): SettingsTabId {
+  try {
+    const saved = localStorage.getItem(SETTINGS_TAB_KEY) as SettingsTabId | null;
+    if (saved && SETTINGS_TABS.some((g) => g.items.some((i) => i.id === saved))) return saved;
+  } catch {
+    /* ignore */
+  }
+  return 'model-config';
+}
+
 export default function SettingsPanel() {
   const open = useUiStore((s) => s.settingsOpen);
   const toggleSettings = useUiStore((s) => s.toggleSettings);
+  const [tab, setTab] = useState<SettingsTabId>(loadSavedTab);
   const close = () => {
     if (useUiStore.getState().settingsOpen) toggleSettings();
+  };
+  const select = (id: SettingsTabId) => {
+    setTab(id);
+    try {
+      localStorage.setItem(SETTINGS_TAB_KEY, id);
+    } catch {
+      /* ignore */
+    }
   };
 
   return (
@@ -1829,29 +1896,55 @@ export default function SettingsPanel() {
                   ×
                 </button>
               </div>
-              <div className="settings-body">
-                <ModelConfigSection />
-                <ModelListSection />
-                <BypassModelSection kind="bypass" />
-                <ComputerUseSection />
-                <PlaywrightSection />
-                <BypassModelSection kind="grounding" />
-                <ThemeSection />
-                <ConstraintsSection />
-                <SchedulerSection />
-                <IdentitySection />
-                <div className="settings-section">
-                  <div className="settings-section-title">关于</div>
-                  <div className="about-info">
-                    <div className="about-row">
-                      <span>Tiffa 桌面端</span>
-                      <span>v1.4</span>
+              <div className="settings-main">
+                <nav className="settings-nav">
+                  {SETTINGS_TABS.map((g) => (
+                    <div className="settings-nav-group" key={g.group}>
+                      <div className="settings-nav-group-label">{g.group}</div>
+                      {g.items.map((it) => (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className={`settings-nav-item${tab === it.id ? ' active' : ''}`}
+                          onClick={() => select(it.id)}
+                        >
+                          {it.label}
+                        </button>
+                      ))}
                     </div>
-                    <div className="about-row">
-                      <span>oh-my-tiffa 内核</span>
-                      <span>v17.0.7</span>
+                  ))}
+                </nav>
+                {/* key={tab}：切换页签时重建滚动容器，滚动位置回到顶部 */}
+                <div className="settings-body" key={tab}>
+                  {tab === 'model-config' && <ModelConfigSection />}
+                  {tab === 'model-list' && <ModelListSection />}
+                  {tab === 'aux-model' && (
+                    <>
+                      <BypassModelSection kind="bypass" />
+                      <BypassModelSection kind="grounding" />
+                    </>
+                  )}
+                  {tab === 'identity' && <IdentitySection />}
+                  {tab === 'constraints' && <ConstraintsSection />}
+                  {tab === 'computer-use' && <ComputerUseSection />}
+                  {tab === 'playwright' && <PlaywrightSection />}
+                  {tab === 'scheduler' && <SchedulerSection />}
+                  {tab === 'theme' && <ThemeSection />}
+                  {tab === 'about' && (
+                    <div className="settings-section">
+                      <div className="settings-section-title">关于</div>
+                      <div className="about-info">
+                        <div className="about-row">
+                          <span>Tiffa 桌面端</span>
+                          <span>v1.4</span>
+                        </div>
+                        <div className="about-row">
+                          <span>oh-my-tiffa 内核</span>
+                          <span>v17.0.7</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
