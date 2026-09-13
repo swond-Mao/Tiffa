@@ -3865,6 +3865,8 @@ html[data-mode="light"] .muse-tint {
   font-size: 13px;
   color: hsl(var(--text-200));
   cursor: pointer;
+  /* 「其他」「不强调」等多字选项在窄容器里会被逐字换行（看起来像竖排），禁止折行 */
+  white-space: nowrap;
 }
 .persona-gender-item input {
   accent-color: hsl(var(--accent-main-000));

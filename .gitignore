@@ -200,3 +200,9 @@ data/agent/managed-skills/pptx-from-layouts/
 
 # Qoder 运行时缓存（不入库）
 .cache/
+
+# 临时调试目录（不入库）
+tmp/
+
+# 用户自定义启动图：运行时从 data/ 复制到 dist/assets/，属个人素材且体积大（数 MB）
+electron/renderer/dist/assets/startup-custom.*
