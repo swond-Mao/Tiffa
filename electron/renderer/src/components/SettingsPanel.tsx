@@ -400,7 +400,7 @@ function ModelConfigSection() {
   return (
     <div className="settings-section">
       <div className="settings-section-title">模型配置</div>
-      <div className="settings-section-desc">添加、编辑或删除模型供应商和模型，保存后需重启 Tiffa 生效</div>
+      <div className="settings-section-desc">添加、编辑或删除模型供应商与模型；改动自动保存，点「重启」后生效</div>
       <div className="model-config">
         {Object.keys(providers).length === 0 && <div className="model-item empty">暂无供应商配置</div>}
         {Object.entries(providers).map(([key, prov]) => (
@@ -1027,7 +1027,7 @@ function BypassModelSection({ kind }: { kind: 'bypass' | 'grounding' }) {
       <div className="settings-section-title">{label}</div>
       <div className="settings-section-desc">
         {kind === 'bypass'
-          ? '用于 AI 会话重命名、上下文压缩总结与轻量补全的独立模型。建议配置便宜快速的模型，让总结等后台任务不占用主模型。保存即时生效'
+          ? '用于 AI 会话重命名、上下文压缩总结与轻量补全的独立模型。建议配置便宜快速的模型，让总结等后台任务不占用主模型。改动自动保存、即时生效'
           : 'computer-use grounding：ui_tars 视觉定位点击。修改后需重启 Tiffa 生效'}
       </div>
       <div className="bypass-model-form">
