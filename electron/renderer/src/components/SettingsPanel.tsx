@@ -1887,9 +1887,7 @@ type SettingsTabId =
   | 'model-list'
   | 'aux-model'
   | 'identity'
-  | 'constraints'
   | 'computer-use'
-  | 'playwright'
   | 'scheduler'
   | 'theme'
   | 'about';
@@ -1906,16 +1904,12 @@ const SETTINGS_TABS: { group: string; items: { id: SettingsTabId; label: string 
   },
   {
     group: '人格',
-    items: [
-      { id: 'identity', label: 'AI 身份' },
-      { id: 'constraints', label: '约束规则' },
-    ],
+    items: [{ id: 'identity', label: 'AI 身份 · 约束' }],
   },
   {
     group: '能力',
     items: [
-      { id: 'computer-use', label: '电脑控制' },
-      { id: 'playwright', label: '浏览器自动化' },
+      { id: 'computer-use', label: '电脑控制 · 浏览器' },
       { id: 'scheduler', label: '定时任务' },
     ],
   },
@@ -1996,10 +1990,18 @@ export default function SettingsPanel() {
                       <BypassModelSection kind="grounding" />
                     </>
                   )}
-                  {tab === 'identity' && <IdentitySection />}
-                  {tab === 'constraints' && <ConstraintsSection />}
-                  {tab === 'computer-use' && <ComputerUseSection />}
-                  {tab === 'playwright' && <PlaywrightSection />}
+                  {tab === 'identity' && (
+                    <>
+                      <IdentitySection />
+                      <ConstraintsSection />
+                    </>
+                  )}
+                  {tab === 'computer-use' && (
+                    <>
+                      <ComputerUseSection />
+                      <PlaywrightSection />
+                    </>
+                  )}
                   {tab === 'scheduler' && <SchedulerSection />}
                   {tab === 'theme' && <ThemeSection />}
                   {tab === 'about' && (

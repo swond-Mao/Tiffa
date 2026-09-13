@@ -3002,7 +3002,9 @@ html[data-mode="light"] .muse-tint {
   font-size: 12px;
   color: hsl(var(--text-200));
 }
-.bypass-field input {
+/* 只作用于文本类输入框：radio/checkbox 若被 width:100% 撑满整行，
+   会把同一行的文字挤成一条缝（表现为每个字各自换行 = 竖排）。 */
+.bypass-field input:not([type="radio"]):not([type="checkbox"]) {
   width: 100%;
   padding: 6px 10px;
   border: 1px solid hsl(var(--border-200));
@@ -3867,6 +3869,12 @@ html[data-mode="light"] .muse-tint {
 .persona-gender-item input {
   accent-color: hsl(var(--accent-main-000));
   margin: 0;
+  /* 防御：祖先的表单样式（如 .bypass-field input）不得把 radio 撑开或加文本框外观 */
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 .persona-chips {
   display: flex;
