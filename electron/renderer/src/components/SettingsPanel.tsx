@@ -248,6 +248,7 @@ function AutoSaveHint({ saving, savedAt, extra }: { saving: boolean; savedAt: nu
 function ModelConfigSection() {
   const [cfg, setCfg] = useState<TiffaModelsConfig | null>(null);
   const [status, setStatus] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
   const [addProviderOpen, setAddProviderOpen] = useState(false);
   const addToast = useUiStore((s) => s.addToast);
@@ -258,7 +259,8 @@ function ModelConfigSection() {
     try {
       const r = await window.tiffaDesktop.readModelsYml();
       if (r && !r.error) {
-        const data = r.data || null;
+        // 空文件也要给出可编辑的空配置，否则会一直停在“加载中”
+        const data = (r.data || { providers: {} }) as TiffaModelsConfig;
         // 「Qwen3.8 深度」勾选态归一化：磁盘已有 compat 块（手写或上次保存落盘）时反映到 qwen38，
         // 保证勾选框状态与实际落盘一致（序列化只看 qwen38，防止取消勾选后旧 compat 残留重新写回）。
         for (const p of Object.values((data && data.providers) || {})) {
@@ -267,11 +269,14 @@ function ModelConfigSection() {
           }
         }
         setCfg(data);
+        setLoadError('');
         // 记录基线：之后只有内容真的变了才落盘
-        lastSavedYaml.current = data ? serializeModelsYaml(data) : null;
+        lastSavedYaml.current = serializeModelsYaml(data);
+      } else {
+        setLoadError(`读取 models.yml 失败：${(r && r.error) || '未知错误'}`);
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      setLoadError(`读取 models.yml 失败：${(err as Error).message}`);
     }
   }, []);
 
@@ -297,9 +302,14 @@ function ModelConfigSection() {
     }
   }, [cfg, addToast]);
 
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   const { saving, savedAt } = useAutoSave(persist, [cfg], { delay: 900 });
 
-  if (!cfg) return <div className="model-item loading">加载中...</div>;
+  // 读取失败时也要有反馈，否则会永远停在“加载中”
+  if (!cfg) return <div className="model-item loading">{loadError || '加载中...'}</div>;
   const providers = cfg.providers || {};
 
   const patchProvider = (key: string, patch: Partial<TiffaProviderConfig>) => {
