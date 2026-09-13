@@ -182,12 +182,77 @@ interface ModelEntry {
   cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
 }
 
+/**
+ * 设置项防抖自动保存。
+ * deps 变化后 delay 毫秒执行一次 save；期间再次变化会重置计时；首次挂载不触发。
+ * 由各 Section 的 save 回调自行判断“内容与上次一致则跳过”，避免打开面板就重写磁盘。
+ */
+function useAutoSave(
+  save: () => unknown,
+  deps: unknown[],
+  opts: { delay?: number; enabled?: boolean } = {},
+): { saving: boolean; savedAt: number | null } {
+  const { delay = 900, enabled = true } = opts;
+  const saveRef = useRef(save);
+  const first = useRef(true);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    saveRef.current = save;
+  });
+
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!enabled) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (cancelled) return;
+        setSaving(true);
+        try {
+          await saveRef.current();
+          if (!cancelled) setSavedAt(Date.now());
+        } catch {
+          /* 失败提示由调用方 save 内部负责 */
+        } finally {
+          if (!cancelled) setSaving(false);
+        }
+      })();
+    }, delay);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, delay, enabled]);
+
+  return { saving, savedAt };
+}
+
+/** 自动保存状态提示（替代原来的「保存」按钮） */
+function AutoSaveHint({ saving, savedAt, extra }: { saving: boolean; savedAt: number | null; extra?: string }) {
+  const time = savedAt ? new Date(savedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  const text = saving ? '保存中…' : savedAt ? `已自动保存 ${time}` : '改动将自动保存';
+  return (
+    <span className="autosave-hint">
+      {text}
+      {extra && savedAt && !saving ? ` · ${extra}` : ''}
+    </span>
+  );
+}
+
 function ModelConfigSection() {
   const [cfg, setCfg] = useState<TiffaModelsConfig | null>(null);
   const [status, setStatus] = useState('');
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
   const [addProviderOpen, setAddProviderOpen] = useState(false);
   const addToast = useUiStore((s) => s.addToast);
+  // 上次成功落盘的 models.yml 内容，用于跳过无变化的自动保存
+  const lastSavedYaml = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -202,15 +267,37 @@ function ModelConfigSection() {
           }
         }
         setCfg(data);
+        // 记录基线：之后只有内容真的变了才落盘
+        lastSavedYaml.current = data ? serializeModelsYaml(data) : null;
       }
     } catch {
       /* ignore */
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // 自动保存：只写盘，不自动重启（编辑过程中反复重启会打断操作；重启走下方「重启」按钮）
+  const persist = useCallback(async () => {
+    if (!cfg) return;
+    try {
+      const yaml = serializeModelsYaml(cfg);
+      if (yaml === lastSavedYaml.current) return; // 内容未变（含首次加载）→ 不写盘
+      const r = (await window.tiffaDesktop.writeModelsYml(yaml)) as { success?: boolean; error?: string };
+      if (r && r.success) {
+        lastSavedYaml.current = yaml;
+        setStatus('');
+        // 死列表缓存失效：下次点开模型列表时按新配置重载
+        invalidateModelListCache();
+      } else {
+        setStatus(`保存失败: ${(r && r.error) || ''}`);
+        addToast('error', `保存失败: ${(r && r.error) || '未知错误'}`);
+      }
+    } catch (err) {
+      setStatus(`保存失败: ${(err as Error).message}`);
+      addToast('error', `保存失败: ${(err as Error).message}`);
+    }
+  }, [cfg, addToast]);
+
+  const { saving, savedAt } = useAutoSave(persist, [cfg], { delay: 900 });
 
   if (!cfg) return <div className="model-item loading">加载中...</div>;
   const providers = cfg.providers || {};
@@ -220,41 +307,6 @@ function ModelConfigSection() {
       if (!c || !c.providers) return c;
       return { ...c, providers: { ...c.providers, [key]: { ...c.providers[key], ...patch } } };
     });
-  };
-
-  const save = async () => {
-    setStatus('保存中...');
-    try {
-      const yaml = serializeModelsYaml(cfg);
-      const r = (await window.tiffaDesktop.writeModelsYml(yaml)) as { success?: boolean; error?: string };
-      setStatus(r && r.success ? '已保存' : `保存失败: ${(r && r.error) || ''}`);
-      if (r && r.success) {
-        addToast('success', '模型配置已保存');
-        // 死列表缓存失效：下次点开模型列表时按新配置重载
-        invalidateModelListCache();
-        // 等价旧版 applyModelsConfigChange：agent 运行中不强行重启（避免中断任务），
-        // 配置在下次重启 / 新对话时生效；空闲时才重启实例让配置立即生效。
-        const activePath = useSessionsStore.getState().activeSessionPath;
-        const running = activePath ? useProcStore.getState().procStateMap[activePath]?.agentRunning : false;
-        if (running) {
-          addToast('info', '模型配置已保存，将在重启 / 新对话后生效（也可点「重启」立即生效）');
-          return;
-        }
-        try {
-          const rr = (await window.tiffaDesktop.restartTiffa()) as { success?: boolean; error?: string };
-          if (rr && rr.success) addToast('info', 'Tiffa 已重启，新配置生效');
-          else if (rr && rr.error) addToast('warning', `重启失败: ${rr.error}`);
-        } catch {
-          /* ignore */
-        }
-      } else {
-        addToast('error', `保存失败: ${(r && r.error) || '未知错误'}`);
-      }
-    } catch (err) {
-      setStatus(`保存失败: ${(err as Error).message}`);
-      addToast('error', `保存失败: ${(err as Error).message}`);
-    }
-    setTimeout(() => setStatus(''), 8000);
   };
 
   const deleteProvider = async (key: string) => {
@@ -273,7 +325,7 @@ function ModelConfigSection() {
         return { ...c, providers };
       });
       addToast('success', `已删除供应商 ${key}`);
-      await save();
+      // 落盘交给 cfg 变化触发的自动保存
     } catch (err) {
       addToast('error', `删除失败: ${(err as Error).message}`);
     }
@@ -434,13 +486,11 @@ function ModelConfigSection() {
         <button type="button" className="btn-add-model" style={{ borderStyle: 'dashed' }} onClick={() => setAddProviderOpen(true)}>
           + 添加供应商
         </button>
-        <button type="button" className="settings-btn" style={{ background: 'var(--accent)', color: 'white', borderColor: 'var(--accent)' }} onClick={() => void save()}>
-          保存
-        </button>
         <button type="button" className="settings-btn" onClick={() => void window.tiffaDesktop.restartTiffa()}>
           重启
         </button>
-        <span className={`config-status${status ? (status.startsWith('保存') ? ' saved' : '') : ''}`}>{status}</span>
+        <AutoSaveHint saving={saving} savedAt={savedAt} extra="点「重启」生效" />
+        {status && <span className="config-status saved">{status}</span>}
       </div>
       {addProviderOpen && createPortal(
         <AddProviderModal
@@ -903,6 +953,8 @@ function BypassModelSection({ kind }: { kind: 'bypass' | 'grounding' }) {
   const addToast = useUiStore((s) => s.addToast);
   const [form, setForm] = useState({ baseUrl: '', apiKey: '', model: '', enabled: true });
   const [checked, setChecked] = useState(false);
+  // 上次落盘内容，用于跳过无变化的自动保存
+  const lastSaved = useRef<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -910,12 +962,14 @@ function BypassModelSection({ kind }: { kind: 'bypass' | 'grounding' }) {
         const cfg = kind === 'bypass' ? await window.tiffaDesktop.getBypassModel() : await window.tiffaDesktop.getGroundingModel();
         const c = cfg as { baseUrl?: string; api_base?: string; apiKey?: string; api_key?: string; model?: string; enabled?: unknown; error?: string } | undefined;
         if (!c || c.error) return;
-        setForm({
+        const next = {
           baseUrl: c.baseUrl || c.api_base || '',
           apiKey: c.apiKey || c.api_key || '',
           model: c.model || '',
           enabled: kind === 'grounding' ? String(c.enabled) === '1' || c.enabled === true : c.enabled !== false,
-        });
+        };
+        setForm(next);
+        lastSaved.current = JSON.stringify({ ...next, kind });
       } catch {
         /* ignore */
       }
@@ -923,19 +977,23 @@ function BypassModelSection({ kind }: { kind: 'bypass' | 'grounding' }) {
     void load();
   }, [kind]);
 
-  const save = async () => {
-    if (!form.baseUrl || !form.model) {
-      addToast('warning', kind === 'bypass' ? '旁路模型需填写 Base URL 与 Model ID' : 'MCP 模型需填写 Base URL 与 Model ID');
-      return;
-    }
+  // 自动保存：Base URL 与 Model ID 都填了才写，避免录到一半落盘半成品
+  const persist = useCallback(async () => {
+    const key = JSON.stringify({ ...form, kind });
+    if (key === lastSaved.current) return;
     const cfg = kind === 'bypass' ? { baseUrl: form.baseUrl, apiKey: form.apiKey, model: form.model, enabled: form.enabled } : { api_base: form.baseUrl, api_key: form.apiKey, model: form.model, enabled: form.enabled };
     const res = (kind === 'bypass' ? await window.tiffaDesktop.saveBypassModel(cfg) : await window.tiffaDesktop.saveGroundingModel(cfg)) as { success?: boolean; error?: string };
     if (res && res.success) {
-      addToast('success', kind === 'bypass' ? `旁路模型已保存：${form.model}${form.enabled ? '（启用）' : '（未启用）'}` : `MCP 模型已保存：${form.model}${form.enabled ? '（启用）' : '（未启用）'}（重启 Tiffa 后电脑控制生效）`);
+      lastSaved.current = key;
     } else {
       addToast('error', `保存失败: ${(res && res.error) || '未知错误'}`);
     }
-  };
+  }, [kind, form, addToast]);
+
+  const { saving, savedAt } = useAutoSave(persist, [form], {
+    delay: 1000,
+    enabled: !!form.baseUrl.trim() && !!form.model.trim(),
+  });
 
   const checkHealth = async () => {
     if (!form.baseUrl || !form.model) {
@@ -982,13 +1040,11 @@ function BypassModelSection({ kind }: { kind: 'bypass' | 'grounding' }) {
           </label>
           <span className="model-toggle-label">{form.enabled ? '已启用' : '未启用'}</span>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button type="button" className="settings-btn" style={{ background: 'var(--accent)', color: 'white', borderColor: 'var(--accent)' }} onClick={() => void save()}>
-            保存
-          </button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
           <button type="button" className="settings-btn" disabled={checked} onClick={() => void checkHealth()}>
             {checked ? '检查中...' : '健康检查'}
           </button>
+          <AutoSaveHint saving={saving} savedAt={savedAt} extra={kind === 'grounding' ? '重启后生效' : '即时生效'} />
         </div>
       </div>
     </div>
@@ -1209,6 +1265,8 @@ function ThemeSection() {
 function ComputerUseSection() {
   const addToast = useUiStore((s) => s.addToast);
   const [enabled, setEnabled] = useState(false);
+  const [hotkey, setHotkey] = useState('');
+  const lastHotkey = useRef<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -1241,15 +1299,27 @@ function ComputerUseSection() {
       try {
         const cfg = (await window.tiffaDesktop.getWindowSnapshotHotkey()) as any;
         if (cfg && cfg.hotkey) {
-          const el = document.getElementById('snapshotHotkeyInput') as HTMLInputElement | null;
-          if (el) el.value = cfg.hotkey;
+          setHotkey(cfg.hotkey);
+          lastHotkey.current = cfg.hotkey;
         }
       } catch {
         /* ignore */
       }
     };
     void loadHotkey();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 快照热键自动保存（去抖 1s，停止输入后写入并重新注册全局热键）
+  const persistHotkey = useCallback(async () => {
+    const v = hotkey.trim();
+    if (!v || v === lastHotkey.current) return;
+    lastHotkey.current = v;
+    await window.tiffaDesktop.setWindowSnapshotHotkey({ enabled: true, hotkey: v });
+    await window.tiffaDesktop.reloadWindowSnapshotHotkey();
+  }, [hotkey]);
+
+  const { saving: hkSaving, savedAt: hkSavedAt } = useAutoSave(persistHotkey, [hotkey], { delay: 1000 });
 
   return (
     <div className="settings-section">
@@ -1319,21 +1389,13 @@ function ComputerUseSection() {
         <input
           id="snapshotHotkeyInput"
           placeholder="Ctrl+Alt+K"
-          defaultValue="CommandOrControl+Alt+K"
+          value={hotkey}
+          onChange={(e) => setHotkey(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
           style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
         />
-        <button
-          type="button"
-          className="settings-btn"
-          onClick={async () => {
-            const hotkey = (document.getElementById('snapshotHotkeyInput') as HTMLInputElement).value.trim();
-            await window.tiffaDesktop.setWindowSnapshotHotkey({ enabled: true, hotkey });
-            await window.tiffaDesktop.reloadWindowSnapshotHotkey();
-            addToast('success', `快照热键已更新：${hotkey}`);
-          }}
-        >
-          保存热键
-        </button>
+        <AutoSaveHint saving={hkSaving} savedAt={hkSavedAt} />
       </div>
     </div>
   );
