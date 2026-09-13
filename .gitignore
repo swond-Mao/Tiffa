@@ -9,6 +9,7 @@ install/
 
 # Dependencies & runtime
 npm-global/
+npm-global-stage/
 node/
 python/
 home/
@@ -30,6 +31,7 @@ data/agent/sessions/
 data/agent/sessions-archive/
 data/agent/agent.db*
 data/agent/models.db*
+data/agent/history.db*
 data/agent/hidden-models.json
 data/agent/session-model-map.json
 data/agent/projects.json
@@ -68,6 +70,7 @@ plugins/*.log
 skills/*/*.log
 electron/stdout.log
 electron/stderr.log
+electron/ui-smoke.log
 
 # Tencent Docs export temp files
 .tx_export_tmp_*
@@ -135,6 +138,8 @@ data/agent/vision-fallback.json
 data/agent/current-model.json
 data/agent/last-compact-route.json
 data/agent/last-compact-summary.md
+data/agent/session-thinking-level-map.json
+data/agent/thinking-efforts-cache.json
 data/agent/computer-use-enabled
 # mcp.json：Computer Use MCP 运行时状态（syncComputerUseMcp 每次启动写回真实便携根目录，机器相关，不入库）
 # 仓库提供 data/agent/mcp.json.example 模板（{{PORTABLE_ROOT}} 占位符版）；main.ts 启动时缺失自动恢复
