@@ -223,6 +223,8 @@ function registerScheduleTaskTool(pi: any): void {
         "action=remove：删除；action=enable/disable：启用或停用。",
         "调度二选一：cron（5 字段：分 时 日 月 周，如 \"0 9 * * *\" 表示每天 9:00）或 every（间隔，如 \"2h\"/\"30m\"/\"1d\"）。",
         "approval：normal=每步确认 / auto=写操作免确认（默认）/ yolo=全自动。",
+        "model：可选，指定该任务使用的模型（模型 id 或名称，如 qwen3.6-27b）；不填则沿用默认模型。",
+        "带了 model 时可同时给 provider（供应商标识）以确保精确命中；只给 model 时系统会在可用模型里自动反查供应商。",
         "catchUp=true 时，应用关闭期间漏跑的任务在下次启动后补跑一次（最多回溯 12 小时）。",
         "任务每次运行使用独立会话 sched-<id>，结果可追溯。用户问\"能不能定时/每天/每周做某事\"时用本工具登记。",
       ].join(" "),
@@ -235,6 +237,8 @@ function registerScheduleTaskTool(pi: any): void {
         prompt: Type.Optional(Type.String({ description: "到点要执行的指令（agent 提示词）" })),
         cwd: Type.Optional(Type.String({ description: "目标项目目录绝对路径，缺省用当前项目" })),
         approval: Type.Optional(Type.String({ description: "normal | auto | yolo" })),
+        model: Type.Optional(Type.String({ description: "该任务使用的模型 id 或名称（可选，缺省沿用默认模型）" })),
+        provider: Type.Optional(Type.String({ description: "模型供应商标识（可选，配合 model 使用；只给 model 时自动反查）" })),
         catchUp: Type.Optional(Type.Boolean({ description: "是否补跑漏掉的任务，默认 false" })),
       }),
       async execute(_toolCallId: string, params: any) {
@@ -247,7 +251,7 @@ function registerScheduleTaskTool(pi: any): void {
             ? tasks
                 .map(
                   (t: any) =>
-                    `- ${t.id}${t.name ? `（${t.name}）` : ""} | ${t.cron ? `cron ${t.cron}` : `每 ${t.every}`} | ${t.enabled === false ? "已停用" : "启用"} | 审批 ${t.approval || "auto"}${t.catchUp ? " | 补跑" : ""}`,
+                    `- ${t.id}${t.name ? `（${t.name}）` : ""} | ${t.cron ? `cron ${t.cron}` : `每 ${t.every}`} | ${t.enabled === false ? "已停用" : "启用"} | 审批 ${t.approval || "auto"}${t.model ? ` | 模型 ${t.provider ? t.provider + "/" : ""}${t.model}` : ""}${t.catchUp ? " | 补跑" : ""}`,
                 )
                 .join("\n")
             : "（当前没有定时任务）"
@@ -294,6 +298,9 @@ function registerScheduleTaskTool(pi: any): void {
         const approval = ["normal", "auto", "yolo"].includes(String(params?.approval))
           ? String(params.approval)
           : "auto"
+        // 不传 model/provider 时不写这两个键：覆盖同 id 任务时保留原有模型设置
+        const model = params?.model ? String(params.model).trim() : ""
+        const provider = params?.provider ? String(params.provider).trim() : ""
         const entry = {
           id,
           name: params?.name ? String(params.name) : undefined,
@@ -301,6 +308,7 @@ function registerScheduleTaskTool(pi: any): void {
           enabled: true,
           cwd: params?.cwd ? String(params.cwd) : pi?.cwd || undefined,
           approval,
+          ...(model ? { model, ...(provider ? { provider } : {}) } : {}),
           catchUp: !!params?.catchUp,
           prompt,
         }
@@ -313,7 +321,7 @@ function registerScheduleTaskTool(pi: any): void {
           content: [
             {
               type: "text",
-              text: `已${idx >= 0 ? "更新" : "创建"}定时任务 ${id}（${when}，审批 ${approval}${entry.catchUp ? "，含补跑" : ""}）。\n主进程调度器 30 秒内自动生效；任务会话 sched-${id}。\n当前任务表：\n${render()}`,
+              text: `已${idx >= 0 ? "更新" : "创建"}定时任务 ${id}（${when}，审批 ${approval}${entry.model ? `，模型 ${provider ? provider + "/" : ""}${entry.model}` : ""}${entry.catchUp ? "，含补跑" : ""}）。\n主进程调度器 30 秒内自动生效；任务会话 sched-${id}。\n当前任务表：\n${render()}`,
             },
           ],
         }

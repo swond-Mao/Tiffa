@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom';
 import { useUiStore } from '../stores/useUiStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useProcStore } from '../stores/useProcStore';
-import { switchModel, invalidateModelListCache } from '../services/sessionController';
+import { switchModel, invalidateModelListCache, getModelListCached } from '../services/sessionController';
 import { showModalConfirm } from '../services/tabActions';
 import { escapeHtml } from '../services/utils';
 import { PERSONA_KEYWORDS, buildFallbackPersona, buildPersonaPrompt } from '../services/personaTemplate';
@@ -1494,6 +1494,7 @@ function SchedulerSection() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<'cron' | 'every'>('cron');
+  const [models, setModels] = useState<Array<{ id: string; name?: string; provider?: string }>>([]);
   const [form, setForm] = useState({
     id: '',
     name: '',
@@ -1501,8 +1502,21 @@ function SchedulerSection() {
     prompt: '',
     approval: 'auto',
     cwd: '',
+    // 模型选择：空串 = 跟随默认模型；否则为 `${provider}::${modelId}` 编码
+    modelKey: '',
     catchUp: false,
   });
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await getModelListCached();
+        setModels((list || []).map((m) => ({ id: m.id, name: m.name, provider: m.provider })));
+      } catch {
+        setModels([]);
+      }
+    })();
+  }, []);
 
   const refresh = async () => {
     try {
@@ -1525,6 +1539,7 @@ function SchedulerSection() {
     }
     setBusy(true);
     try {
+      const picked = form.modelKey ? models.find((m) => `${m.provider || ''}::${m.id}` === form.modelKey) : null;
       const payload: any = {
         id: form.id.trim(),
         name: form.name.trim() || undefined,
@@ -1532,6 +1547,8 @@ function SchedulerSection() {
         prompt: form.prompt,
         approval: form.approval,
         cwd: form.cwd.trim() || undefined,
+        model: picked ? picked.id : undefined,
+        provider: picked && picked.provider ? picked.provider : undefined,
         catchUp: form.catchUp,
         enabled: true,
       };
@@ -1539,7 +1556,7 @@ function SchedulerSection() {
       if (r?.error) addToast?.('error', r.error);
       else {
         addToast?.('success', `已保存任务 ${form.id}`);
-        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', catchUp: false });
+        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', modelKey: '', catchUp: false });
       }
       await refresh();
     } finally {
@@ -1584,7 +1601,7 @@ function SchedulerSection() {
           <div className="form-label">
             {t.name ? `${t.name}（${t.id}）` : t.id}
             <span style={{ opacity: 0.7, marginLeft: 8 }}>
-              {t.nextRunHint} · 审批 {t.approval} · 上次 {fmtTime(t.lastRunAt)}
+              {t.nextRunHint} · 审批 {t.approval} · 模型 {t.model ? `${t.provider ? t.provider + '/' : ''}${t.model}` : '默认'} · 上次 {fmtTime(t.lastRunAt)}
               {t.lastResult && t.lastResult !== 'ok' ? ` · ${t.lastResult}` : ''}
               {t.running ? ' · 运行中' : ''}
             </span>
@@ -1639,6 +1656,24 @@ function SchedulerSection() {
             <option value="yolo">yolo（全自动）</option>
           </select>
         </div>
+        <label className="form-label" style={{ marginTop: 8 }}>使用模型</label>
+        <select
+          className="form-input"
+          value={form.modelKey}
+          onChange={(e) => setForm({ ...form, modelKey: e.target.value })}
+        >
+          <option value="">跟随默认模型</option>
+          {models.map((m) => (
+            <option key={`${m.provider || ''}::${m.id}`} value={`${m.provider || ''}::${m.id}`}>
+              {m.provider ? `${m.provider} / ` : ''}{m.name || m.id}
+            </option>
+          ))}
+        </select>
+        {models.length === 0 && (
+          <div className="settings-section-desc" style={{ marginTop: 2 }}>
+            未读到模型列表（引擎未启动时仅能从 models.yml 兜底；启动后可选项会补齐）。
+          </div>
+        )}
         <textarea
           className="form-input"
           placeholder="到点要执行的指令（prompt）"

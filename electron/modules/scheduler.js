@@ -57,6 +57,23 @@ function log(category, detail) {
     }
     catch { }
 }
+/** 给内核命令加超时护栏：冷启动实例上 set_model / get_available_models 可能长时间不返回 */
+function withTimeout(p, ms, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${label} 超时(${Math.round(ms / 1000)}s)`)), ms);
+        p.then((v) => {
+            clearTimeout(timer);
+            resolve(v);
+        }, (e) => {
+            clearTimeout(timer);
+            reject(e);
+        });
+    });
+}
+/** 模型名归一化：去空白/点/下划线/连字符并小写，用于模糊匹配（各内核标签风格不一） */
+function normalizeModelKey(s) {
+    return String(s ?? '').toLowerCase().replace(/[\s._\-]/g, '');
+}
 // ── cron 解析 / 匹配 ──
 const CRON_BOUNDS = [
     [0, 59], // minute
@@ -351,6 +368,51 @@ class TaskScheduler {
         if (dirty)
             writeState(state);
     }
+    /**
+     * 给任务会话切换模型（任务自带 model 时才动作）。
+     * - provider 已填 -> 直接下发 set_model
+     * - provider 缺失 -> 用实例可用模型列表按 id/名称反查（精确 → 归一化 → 包含）
+     * 任何失败都只记日志、不阻断任务：跑起来（哪怕用默认模型）比整轮不跑有价值。
+     */
+    async _applyTaskModel(inst, task) {
+        const wantId = String(task.model || '').trim();
+        if (!wantId)
+            return;
+        let provider = String(task.provider || '').trim();
+        let modelId = wantId;
+        if (!provider) {
+            try {
+                const list = await withTimeout(inst.sendCommand({ type: 'get_available_models' }), 20_000, 'get_available_models');
+                const models = Array.isArray(list?.models) ? list.models : Array.isArray(list) ? list : [];
+                const want = normalizeModelKey(wantId);
+                const hit = models.find((m) => String(m?.id) === wantId) ||
+                    models.find((m) => normalizeModelKey(m?.id) === want || normalizeModelKey(m?.name) === want) ||
+                    models.find((m) => {
+                        const n = normalizeModelKey(m?.name);
+                        const i = normalizeModelKey(m?.id);
+                        return (!!n && (n.includes(want) || want.includes(n))) || (!!i && (i.includes(want) || want.includes(i)));
+                    });
+                if (hit && hit.provider) {
+                    provider = String(hit.provider);
+                    modelId = String(hit.id || wantId);
+                }
+            }
+            catch (e) {
+                log('model.warn', `任务 ${task.id} 反查模型供应商失败：${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+        if (!provider) {
+            log('model.warn', `任务 ${task.id} 无法确定模型「${wantId}」的供应商，沿用默认模型`);
+            return;
+        }
+        try {
+            await withTimeout(inst.sendCommand({ type: 'set_model', provider, modelId }), 30_000, 'set_model');
+            log('model', `任务 ${task.id} 模型已切换为 ${provider}/${modelId}`);
+        }
+        catch (e) {
+            log('model.warn', `任务 ${task.id} 切换模型 ${provider}/${modelId} 失败（沿用默认模型）：${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
     async _run(task, trigger) {
         const sessionId = task.session || `sched-${task.id}`;
         const cwd = task.cwd || this._defaultCwd();
@@ -372,7 +434,9 @@ class TaskScheduler {
                 return { success: false, error: '会话正忙，本轮跳过' };
             }
             this._running.set(task.id, Date.now());
-            log('run', `任务 ${task.id} 开始 trigger=${trigger} cwd=${cwd} session=${sessionId} approval=${approval}`);
+            // 先切模型再投递提示词：内核按会话当前模型处理本次 prompt
+            await this._applyTaskModel(inst, task);
+            log('run', `任务 ${task.id} 开始 trigger=${trigger} cwd=${cwd} session=${sessionId} approval=${approval}${task.model ? ` model=${task.provider ? task.provider + '/' : ''}${task.model}` : ''}`);
             await inst.sendCommand({ type: 'prompt', message: task.prompt });
             const state = readState();
             const st = state.tasks[task.id] || {};

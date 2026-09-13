@@ -1129,6 +1129,8 @@ function setupIpc() {
                 cwd: task.cwd ? String(task.cwd) : undefined,
                 session: task.session ? String(task.session) : undefined,
                 approval: task.approval || 'auto',
+                model: task.model ? String(task.model).trim() : undefined,
+                provider: task.provider ? String(task.provider).trim() : undefined,
                 catchUp: !!task.catchUp,
                 prompt: String(task.prompt),
             };
