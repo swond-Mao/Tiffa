@@ -1540,6 +1540,8 @@ function SchedulerSection() {
     setBusy(true);
     try {
       const picked = form.modelKey ? models.find((m) => `${m.provider || ''}::${m.id}` === form.modelKey) : null;
+      // 模型已从列表消失（被删/引擎未启动）时按编码拆分保留原值，避免保存时把模型静默清空
+      const [encProvider, encModel] = form.modelKey ? form.modelKey.split('::') : ['', ''];
       const payload: any = {
         id: form.id.trim(),
         name: form.name.trim() || undefined,
@@ -1547,8 +1549,8 @@ function SchedulerSection() {
         prompt: form.prompt,
         approval: form.approval,
         cwd: form.cwd.trim() || undefined,
-        model: picked ? picked.id : undefined,
-        provider: picked && picked.provider ? picked.provider : undefined,
+        model: picked ? picked.id : encModel || undefined,
+        provider: picked ? (picked.provider || undefined) : encProvider || undefined,
         catchUp: form.catchUp,
         enabled: true,
       };
@@ -1587,6 +1589,22 @@ function SchedulerSection() {
 
   const fmtTime = (ts?: number) => (ts ? new Date(ts).toLocaleString() : '—');
 
+  /** 把已有任务回填到表单（含模型），改完点「保存任务」即按同 id 覆盖 */
+  const edit = (t: any) => {
+    setKind(t.cron ? 'cron' : 'every');
+    setForm({
+      id: t.id,
+      name: t.name || '',
+      schedule: String(t.cron || t.every || ''),
+      prompt: t.prompt || '',
+      approval: t.approval || 'auto',
+      cwd: t.cwd || '',
+      modelKey: t.model ? `${t.provider || ''}::${t.model}` : '',
+      catchUp: !!t.catchUp,
+    });
+    addToast?.('info', `已载入任务 ${t.id}，改完点「保存任务」覆盖`);
+  };
+
   return (
     <div className="settings-section">
       <div className="settings-section-title">定时任务</div>
@@ -1607,6 +1625,9 @@ function SchedulerSection() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="settings-btn" onClick={() => edit(t)}>
+              编辑
+            </button>
             <button type="button" className="settings-btn" onClick={() => void runNow(t.id)}>
               立即运行
             </button>
@@ -1622,7 +1643,7 @@ function SchedulerSection() {
       {errors.length > 0 && <div className="settings-section-desc">⚠️ {errors.join('；')}</div>}
 
       <div className="form-field" style={{ marginTop: 12 }}>
-        <div className="form-label">新建 / 覆盖（同 id 会覆盖）</div>
+        <div className="form-label">新建 / 编辑（同 id 覆盖；点上方任务「编辑」可载入现有配置）</div>
         <input
           className="form-input"
           placeholder="id（英文短名，如 daily-report）"
@@ -1663,6 +1684,9 @@ function SchedulerSection() {
           onChange={(e) => setForm({ ...form, modelKey: e.target.value })}
         >
           <option value="">跟随默认模型</option>
+          {form.modelKey && !models.some((m) => `${m.provider || ''}::${m.id}` === form.modelKey) && (
+            <option value={form.modelKey}>{form.modelKey.split('::').join(' / ')}（当前值，不在列表中）</option>
+          )}
           {models.map((m) => (
             <option key={`${m.provider || ''}::${m.id}`} value={`${m.provider || ''}::${m.id}`}>
               {m.provider ? `${m.provider} / ` : ''}{m.name || m.id}
