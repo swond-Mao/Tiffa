@@ -490,13 +490,53 @@ export class TaskScheduler {
 			if (elapsed > MAX_RUN_MS) {
 				clearInterval(timer);
 				this._running.delete(task.id);
-				log(
-					'timeout',
-					`任务 ${task.id} 超过 ${Math.round(MAX_RUN_MS / 60_000)} 分钟仍未结束（疑似卡在审批或模型无响应），已解除运行占位`,
-				);
+				this._forceReleaseTask(task, sessionId, elapsed);
 			}
 		}, 3_000);
 		if (timer.unref) timer.unref();
+	}
+
+	/**
+	 * 任务超时后的强制释放：取消挂起审批 → abort → 强复位前端 → 仍不空闲则终止实例。
+	 *
+	 * 只「解除运行占位」不够 —— 卡住的实例仍占着实例池（MAX_INSTANCES=8），
+	 * 且它所在会话一直是「运行中」，用户进去再发消息会被排队、停止按钮也无效
+	 * （内核 ask 阻塞 + RPC 命令串行）。终止实例等价于手动关闭对话，是唯一可靠出路；
+	 * 实例被移除后，下次任务触发或用户发言都会重新 spawn 并按会话文件恢复上下文。
+	 */
+	private _forceReleaseTask(task: ScheduledTask, sessionId: string, elapsed: number): void {
+		const inst = this._manager.getBySessionIdAnywhere(sessionId);
+		const mins = Math.round(elapsed / 60_000);
+		if (!inst) {
+			log('timeout', `任务 ${task.id} 超过 ${mins} 分钟仍未结束，已解除运行占位（实例已不在池中）`);
+			return;
+		}
+		const releaseAt = Date.now();
+		const cancelled = inst.cancelPendingAsks('task-timeout');
+		try {
+			inst.sendRaw({ type: 'abort' });
+		} catch {
+			/* 进程可能已退出 */
+		}
+		inst.forceReset('task-timeout');
+		log(
+			'timeout',
+			`任务 ${task.id} 超过 ${mins} 分钟未结束（疑似卡在审批或模型无响应），已取消 ${cancelled} 个挂起审批并强制复位运行态`,
+		);
+		const killTimer = setTimeout(() => {
+			try {
+				// 用真实 agent_end 判定内核是否真的空闲：forceReset 已把 agentRunning
+				// 置 false，拿它判断会永远不兜底（实例仍卡着但看起来"已恢复"）
+				if (inst.lastRealAgentEndAt >= releaseAt) return;
+				const key = this._manager.keyOf(inst);
+				if (key) this._manager.closeByKey(key);
+				else inst.kill(true);
+				log('timeout', `任务 ${task.id} abort 无效，已终止实例以释放实例池（会话可重开恢复）`);
+			} catch (e) {
+				log('timeout', `任务 ${task.id} 终止实例失败: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}, 10_000);
+		if (killTimer.unref) killTimer.unref();
 	}
 
 	private async _run(task: ScheduledTask, trigger: string): Promise<{ success: boolean; error?: string }> {

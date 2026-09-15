@@ -313,6 +313,11 @@ function handleEvent(event: TiffaEventFrame): void {
       break;
     }
     case 'agent_end': {
+      // 合成 agent_end：主进程判定 abort 未生效、强制复位该实例时补发。
+      // 让用户知道「刚才不是自己看错了，是引擎没响应，现已恢复」
+      if ((event as { _synthetic?: boolean })._synthetic) {
+        ui.addToast('warning', '引擎未响应停止信号，已强制复位该会话，可以继续发送消息');
+      }
       // AI 重命名模式：提取标题并应用
       if (ui.aiRenameSession) {
         const targetSession = ui.aiRenameSession as { path: string; title?: string };

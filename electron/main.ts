@@ -440,7 +440,31 @@ function setupIpc() {
     const inst = sessionId
       ? (tiffaManager.getBySessionIdAnywhere(sessionId) || tiffaManager.resolve(tiffaManager.activeCwd, sessionId))
       : tiffaManager.getActive();
-    if (inst) inst.sendRaw({ type: 'abort' });
+    if (!inst) return { error: 'no active instance' };
+    // ① 先取消挂起中的人工确认（审批/提问）。
+    //    内核的 ask 是阻塞式 await，且 RPC 命令是**串行**处理的 —— 不先应答它，
+    //    abort 会永远排在阻塞命令后面不执行，用户看到的就是「停止无效、引导也无效」。
+    const cancelledAsks = inst.cancelPendingAsks('abort');
+    // ② 再发停止信号
+    inst.sendRaw({ type: 'abort' });
+    // ③ 看门狗：abort 若始终不生效，先强复位前端运行态，再终止实例。
+    //    「终止实例」等价于用户手动关闭该对话（实测是唯一能恢复的手段）；
+    //    实例从池中移除后，下次发消息会重新 spawn 并按会话文件恢复上下文。
+    const key = tiffaManager.keyOf(inst);
+    inst.armAbortWatchdog((dead) => {
+      dead.forceReset('abort-kill');
+      if (key && tiffaManager.keyOf(dead) === key) {
+        mainLog(`[tiffa:abort] abort 未生效，强制关闭实例 key=${key}（会话可重开恢复）`);
+        tiffaManager.closeByKey(key);
+      } else {
+        try {
+          dead.kill(true);
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+    return { cancelledAsks };
   });
 
   ipcMain.handle('tiffa:setModel', async (event, provider, modelId, sessionId) => {
