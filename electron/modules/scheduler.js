@@ -413,6 +413,51 @@ class TaskScheduler {
             log('model.warn', `任务 ${task.id} 切换模型 ${provider}/${modelId} 失败（沿用默认模型）：${e instanceof Error ? e.message : String(e)}`);
         }
     }
+    /**
+     * 投递后异步守候任务真实结束，只写日志（不阻塞 _run 的返回）。
+     *
+     * 背景：原先只有 `[done] 已投递` —— 那只代表 prompt 送进内核，看不出任务跑了多久、
+     * 有没有真的结束。排查「任务起来后对话卡住」时无从下手，故补齐 finish/timeout 两条记录。
+     *
+     * 判定：先等 agentRunning 变 true（避免刚投递时的瞬时 false 被误判成"已结束"），
+     * 之后再等它变 false 记 finish；超过 MAX_RUN_MS 记 timeout 并解除运行占位。
+     */
+    _watchTaskFinish(task, sessionId) {
+        const startedAt = Date.now();
+        let sawRunning = false;
+        const timer = setInterval(() => {
+            let running = false;
+            try {
+                const cur = this._manager.getBySessionIdAnywhere(sessionId);
+                running = !!(cur && cur.agentRunning);
+            }
+            catch {
+                running = false;
+            }
+            const elapsed = Date.now() - startedAt;
+            if (running) {
+                if (!sawRunning) {
+                    sawRunning = true;
+                    log('running', `任务 ${task.id} 内核已开始执行（投递后 ${Math.round(elapsed / 1000)}s）`);
+                }
+            }
+            else if (sawRunning || elapsed > 30_000) {
+                clearInterval(timer);
+                this._running.delete(task.id);
+                log('finish', sawRunning
+                    ? `任务 ${task.id} 结束，执行耗时 ${Math.round(elapsed / 1000)}s`
+                    : `任务 ${task.id} 投递后 30s 内未见内核启动执行（可能被拒/模型无响应）`);
+                return;
+            }
+            if (elapsed > MAX_RUN_MS) {
+                clearInterval(timer);
+                this._running.delete(task.id);
+                log('timeout', `任务 ${task.id} 超过 ${Math.round(MAX_RUN_MS / 60_000)} 分钟仍未结束（疑似卡在审批或模型无响应），已解除运行占位`);
+            }
+        }, 3_000);
+        if (timer.unref)
+            timer.unref();
+    }
     async _run(task, trigger) {
         const sessionId = task.session || `sched-${task.id}`;
         const cwd = task.cwd || this._defaultCwd();
@@ -438,6 +483,8 @@ class TaskScheduler {
             await this._applyTaskModel(inst, task);
             log('run', `任务 ${task.id} 开始 trigger=${trigger} cwd=${cwd} session=${sessionId} approval=${approval}${task.model ? ` model=${task.provider ? task.provider + '/' : ''}${task.model}` : ''}`);
             await inst.sendCommand({ type: 'prompt', message: task.prompt });
+            // 投递成功只说明 prompt 进了内核；真正的结束时刻由 watchdog 记 finish/timeout
+            this._watchTaskFinish(task, sessionId);
             const state = readState();
             const st = state.tasks[task.id] || {};
             state.tasks[task.id] = {
@@ -447,7 +494,7 @@ class TaskScheduler {
                 lastResult: 'ok',
             };
             writeState(state);
-            log('done', `任务 ${task.id} 已投递`);
+            log('done', `任务 ${task.id} prompt 已投递`);
             return { success: true };
         }
         catch (e) {
