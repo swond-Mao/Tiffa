@@ -2,7 +2,7 @@
 name: craftman
 description: "多 skill 工作流编排：评估需求→设计方案→确认→按方案调用 skill→合并成品。当用户需要组合多个能力（如做交互式网页+生图+视觉设计）时使用。"
 name_cn: "工匠模式 — 多 skill 工作流编排"
-description_cn: "评估用户需求，设计多 skill 协作方案，询问用户确认后依次调用技能，最后合并输出。典型场景：\n- '帮我做一份民航史的交互式网页演示，封面用canvas设计'\n- '做一个产品发布会海报+交互式网页'\n支持 pptgen（交互式 HTML 网页）、comfyui（AI生图）、canvas-design（视觉设计）三种技能。需要生成 PPT 文件请用 dashiai-ppt skill。"
+description_cn: "评估用户需求，设计多 skill 协作方案，询问用户确认后依次调用技能，最后合并输出。典型场景：\n- '帮我做一份民航史的交互式网页演示，封面用canvas设计'\n- '做一个产品发布会海报+交互式网页'\n支持 pptgen（交互式 HTML 网页）、comfyui（AI生图）、canvas-design（视觉设计）三种技能。"
 ---
 
 # craftman — 多 skill 工作流编排
@@ -239,7 +239,7 @@ node "$env:PORTABLE_ROOT/skills/shared-visual-components/tools/html2pdf.js" "<�
 ```
 
 **注意**：
-- html2png/html2pdf 需要 playwright-core（dashiai-ppt 项目内已装）和系统 Chrome/Edge，自动探测无需配置
+- html2png/html2pdf 需要 playwright-core（pptx-designer 技能内已装）和系统 Chrome/Edge，自动探测无需配置
 - 海报建议 `--selector "#poster"` 只截画布区域，避免截到自适应缩放后的窗口背景
 - 工具会自动用 PORTABLE_ROOT 解析路径，**禁止硬编码盘符**
 
