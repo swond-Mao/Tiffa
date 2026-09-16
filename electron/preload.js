@@ -56,6 +56,16 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   readImage: (filePath) => ipcRenderer.invoke('fs:readImage', filePath),
+  // ── 侧边栏实时预览 ──
+  previewRegister: (filePath) => ipcRenderer.invoke('preview:register', filePath),
+  previewInfo: () => ipcRenderer.invoke('preview:info'),
+  previewRelease: (id) => ipcRenderer.invoke('preview:release', id),
+  onPreviewChanged: (callback) => {
+    const h = (event, data) => callback(data);
+    ipcRenderer.on('preview:changed', h);
+    // 返回反订阅：面板卸载时不清掉的话，重挂载会叠监听、rev 被重复推进
+    return () => ipcRenderer.removeListener('preview:changed', h);
+  },
   // 自定义启动页图片（<PORTABLE_ROOT>/data/startup-image.*），无则返回 null
   getStartupImage: () => ipcRenderer.invoke('custom:getStartupImage'),
   fetchProviderModels: (baseUrl, apiKey) => ipcRenderer.invoke('fetch:providerModels', baseUrl, apiKey),

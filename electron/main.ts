@@ -18,6 +18,13 @@ import { TiffaInstance } from './modules/tiffa-instance';
 import { TiffaInstanceManager } from './modules/tiffa-manager';
 import { setMainWindow } from './modules/tiffa-instance';
 import { startWebSearchProxy } from './modules/web-search-proxy';
+import {
+  startPreviewServer,
+  stopPreviewServer,
+  registerPreview,
+  unregisterPreview,
+  setPreviewMainWindowGetter,
+} from './modules/preview-server';
 import { TaskScheduler, readTasksFile, writeTasksFile } from './modules/scheduler';
 import { createWindow, syncCustomStartupImage } from './modules/window-setup';
 import {
@@ -717,6 +724,27 @@ function setupIpc() {
     } catch (err) {
       return { error: err.message };
     }
+  });
+
+  // ── 预览 IPC ──
+  // title / sessionPath 不进服务端登记（preview-server 只认文件路径），
+  // 由前端自己持有并写进 usePreviewStore，故这里原样透传登记结果。
+  ipcMain.handle('preview:register', async (_e, filePath) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) return { ok: false, error: 'filePath required' };
+    try {
+      return registerPreview(filePath);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('preview:info', async () => {
+    const origin = process.env.TIFFA_PREVIEW_ORIGIN;
+    return origin ? { origin } : null;
+  });
+  ipcMain.handle('preview:release', async (_e, id) => {
+    if (typeof id !== 'string' || !id) return false;
+    unregisterPreview(id);
+    return true;
   });
 
   ipcMain.handle('fs:readImage', async (event, filePath) => {
@@ -3130,6 +3158,20 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('[web-search-proxy] 启动失败，web_search 将不可用:', e);
   }
+  // ── 侧边栏实时预览：回环服务 ──
+  // 渲染层以 file:// 加载，AI 产出的 HTML 需要真实 http origin 才能被 iframe 正常渲染，
+  // 且不能靠给 iframe 开 allow-same-origin 解决（那等于关掉 sandbox）。
+  try {
+    const previewPort = await startPreviewServer();
+    setPreviewMainWindowGetter(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null));
+    // 内核 Bun 子进程继承 process.env（tiffa-instance 里 ...process.env），
+    // 扩展据此判断服务是否就绪：拿不到就如实报错，不推一帧让面板渲染空白框
+    process.env.TIFFA_PREVIEW_ORIGIN = `http://127.0.0.1:${previewPort}`;
+    console.log(`[preview] 预览回环服务已启动: http://127.0.0.1:${previewPort}`);
+  } catch (e) {
+    console.error('[preview] 启动失败，实时预览不可用:', e);
+    delete process.env.TIFFA_PREVIEW_ORIGIN;
+  }
   healKernelExtensionHandlerTimeout();
   healKernelAskDialog();
   setupIpc();
@@ -3160,7 +3202,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (e) => {
   globalShortcut.unregisterAll(); // 窗口快照热键清理
-  taskScheduler.stop();           // 停止定时任务 tick，避免退出期触发新任务
+  taskScheduler.stop();
+  // 关预览回环服务：漏关会占住端口，下次启动端口自增，长期把 18890 那段吃光
+  try { stopPreviewServer(); } catch { /* 退出期忽略 */ }           // 停止定时任务 tick，避免退出期触发新任务
   if (gracefulShutdownStarted) return;        // 第二次（app.quit 再次触发）直接放行退出
   gracefulShutdownStarted = true;
   e.preventDefault();                          // 先拦住，等内核 drain+dispose 自退后再 quit

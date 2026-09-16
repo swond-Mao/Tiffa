@@ -147,6 +147,12 @@ class TiffaInstance {
         delete env.NODE_OPTIONS;
         delete env.ELECTRON_RUN_AS_NODE;
         const args = [constants_1.TIFFA_CLI, '--mode', 'rpc-ui', '-e', constants_1.EXTENSION_PATH, '-e', constants_1.COMPUTER_USE_EXTENSION_PATH];
+        // 预览扩展可选装：用户删掉该文件时不应导致内核起不来，故先探测再追加
+        try {
+            if (fs_1.default.existsSync(constants_1.PREVIEW_EXTENSION_PATH))
+                args.push('-e', constants_1.PREVIEW_EXTENSION_PATH);
+        }
+        catch { /* 探测失败按未安装处理 */ }
         const stableSessionDir = path_1.default.join(constants_1.SESSIONS_DIR, (0, session_utils_1.stableSessionDirName)(this.cwd));
         args.push('--session-dir', stableSessionDir);
         // 新建会话：预写正式文件已就绪 → 启动即加载（resume 语义），身份在 spawn 时确定

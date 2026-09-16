@@ -153,6 +153,44 @@ function isDangerousPath(fp: string): boolean {
   return DANGER_PATH_PATTERNS.some(p => p.test(fp))
 }
 
+// ── 维护态授权（基础目录写入的唯一放行路径）──
+// 默认关闭。由用户手动写 data/agent/maintain-allow.json 授予一段窗口：
+//   { grantedAt, expiresAt, scopes: ["electron", ...], note }
+// 命中 scope（目录前缀或精确文件路径）才放行，并且：
+//   - 硬上限 6 小时：JSON 里写更久的 expiresAt 也不认，防止「一开到底」
+//   - 每次放行打 tool_call.maintain_allow 日志，事后可审计
+//   - 删掉该文件即刻失效，无需重启会话
+const MAINTAIN_ALLOW_FILE = join(DATA_DIR, "agent", "maintain-allow.json")
+const MAINTAIN_HARD_TTL_MS = 6 * 60 * 60 * 1000
+
+function readMaintainScopes(): string[] {
+  try {
+    if (!existsSync(MAINTAIN_ALLOW_FILE)) return []
+    const j = JSON.parse(readFileSync(MAINTAIN_ALLOW_FILE, "utf8")) as {
+      grantedAt?: unknown; expiresAt?: unknown; scopes?: unknown
+    }
+    const now = Date.now()
+    const expiresAt = Number(j.expiresAt)
+    const grantedAt = Number(j.grantedAt)
+    if (!Number.isFinite(expiresAt) || expiresAt < now) return []
+    if (!Number.isFinite(grantedAt) || now - grantedAt > MAINTAIN_HARD_TTL_MS) return []
+    const list = Array.isArray(j.scopes) ? j.scopes : []
+    const rootNorm = resolve(PORTABLE_ROOT).replace(/\\/g, "/").toLowerCase()
+    return list
+      .map((s) => String(s).trim().replace(/\\/g, "/").toLowerCase().replace(/^\/+/, "").replace(/\/+$/, ""))
+      .filter((s) => s.length > 0)
+      .map((s) => (s.startsWith(rootNorm + "/") ? s : rootNorm + "/" + s))
+  } catch {
+    return []
+  }
+}
+
+/** 该绝对路径是否落在维护态放行范围内 */
+function maintainAllowsPath(absFp: string): boolean {
+  const norm = resolve(absFp).replace(/\\/g, "/").toLowerCase()
+  return readMaintainScopes().some((p) => norm === p || norm.startsWith(p + "/"))
+}
+
 // ── 密钥/配置文件路径检测 ──
 function isSecretFilePath(fp: string): boolean {
   const norm = String(fp).replace(/\//g, "\\").toLowerCase()
@@ -937,6 +975,10 @@ export default async function (pi: any) {
 
   // ── 2. tool_call ── 危险路径/配置文件/.env 拦截 + 静默工具调用检测
   pi.on("tool_call", async (event: any) => {
+    // 静默提醒标志：必须声明在 try 块「之外」。
+    // 它要在 catch 之后的收尾逻辑里被读取，而 try{} 是块级作用域 ——
+    // 若声明在 try 内，catch 后面引用它会 TS2304 + 运行时 ReferenceError。
+    let pendingSteer: string | undefined
     try {
       const tool = event.toolName || ""
       const input = event.input || {}
@@ -953,13 +995,15 @@ export default async function (pi: any) {
       consecutiveBlockCount++  // 每次进入 hook 先加 1，如果工具最终放行则在末尾重置为 0
 
       // 静默工具调用检测
+      // ⚠️ 这里绝不能提前 return：危险路径 / 配置自改 / 基础目录禁写 / 密钥读取 /
+      // craftman 强制等检查都在本 hook 的同一个 try 块里顺序执行，提前返回会把它们
+      // 全部跳过。旧实现正是如此 —— 每累计 3 次工具调用就有 1 次写入完全不受守卫检查。
+      // 改为记标志（pendingSteer 声明在 try 外），跑完全部检查后在末尾随 steer 一起返回。
       silentToolCallCount++
       if (silentToolCallCount >= SILENT_TOOL_CALL_THRESHOLD) {
         log("tool_call.silent_warn", `silentToolCallCount=${silentToolCallCount}, tool=${tool}`)
         silentToolCallCount = 0
-        return {
-          steer: "你已连续调用多次工具但没有向用户说明你在做什么。请先用中文简要说明当前的进展和发现，再继续操作。",
-        }
+        pendingSteer = "你已连续调用多次工具但没有向用户说明你在做什么。请先用中文简要说明当前的进展和发现，再继续操作。"
       }
 
       // 写入工具：检查文件路径安全性
@@ -979,8 +1023,14 @@ export default async function (pi: any) {
             norm.endsWith("\\models.yml") ||
             norm.includes("\\plugins\\claude-mode-extension.ts")
           ) {
-            log("tool_call.blocked", `${tool} -> ${fp} (config self-modification)`)
-            return { block: true, reason: `[claude-mode] 禁止 AI 修改配置文件 ${fp}。` }
+            // 维护态可放行「扩展自身」这一项（改守卫必须显式授权）；
+            // config.yml / models.yml 属凭据面，任何情况下都不放行。
+            const selfMod = norm.includes("\\plugins\\claude-mode-extension.ts")
+            if (!(selfMod && maintainAllowsPath(fp))) {
+              log("tool_call.blocked", `${tool} -> ${fp} (config self-modification)`)
+              return { block: true, reason: `[claude-mode] 禁止 AI 修改配置文件 ${fp}。` }
+            }
+            log("tool_call.maintain_allow", `${tool} -> ${fp} (extension self-mod via maintain window)`)
           }
           // 禁止在 workspace 根目录下新建一级子目录
           const workspaceDir = join(PORTABLE_ROOT, "workspace")
@@ -998,8 +1048,11 @@ export default async function (pi: any) {
           // 工作产物只能放 workspace/ 下的项目目录；维护基础目录文件需用户明确要求并手动操作
           const normRoot = resolve(PORTABLE_ROOT).replace(/\\/g, "/").toLowerCase()
           if (normFp.startsWith(normRoot + "/") && !normFp.startsWith(normWs + "/")) {
-            log("tool_call.blocked", `${tool} -> ${fp} (write to Tiffa base dir)`)
-            return { block: true, reason: `[claude-mode] 禁止向 Tiffa 基础目录写文件：${fp}。Tiffa 的运行目录（data/、electron/、python/、plugins/ 等）不允许 AI 写入，工作产物请放到 workspace/ 下的项目目录。如需维护基础目录文件（如技能、配置），请由用户手动操作。` }
+            if (!maintainAllowsPath(fp)) {
+              log("tool_call.blocked", `${tool} -> ${fp} (write to Tiffa base dir)`)
+              return { block: true, reason: `[claude-mode] 禁止向 Tiffa 基础目录写文件：${fp}。Tiffa 的运行目录（data/、electron/、python/、plugins/ 等）不允许 AI 写入，工作产物请放到 workspace/ 下的项目目录。如需维护基础目录文件（如技能、配置），请由用户手动操作。` }
+            }
+            log("tool_call.maintain_allow", `${tool} -> ${fp} (maintain window)`)
           }
         }
       }
@@ -1144,6 +1197,8 @@ export default async function (pi: any) {
     }
     // 工具放行（没有被任何拦截规则 block）→ 重置连续拦截计数
     consecutiveBlockCount = 0
+    // 安全检查已全部跑完，此时才补发静默提醒
+    if (pendingSteer) return { steer: pendingSteer }
   })
 
   // ── 旁路模型压缩（Phase B：复刻 Claude Code subagent 总结）──

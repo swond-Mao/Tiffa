@@ -163,6 +163,24 @@ export interface TiffaDesktopApi {
   readFile: (filePath: string) => Promise<{ content?: string; error?: string } | undefined>;
   writeFile: (filePath: string, content: string) => Promise<unknown>;
   readImage: (filePath: string) => Promise<unknown>;
+  // ── 侧边栏实时预览（主进程 electron/modules/preview-server.ts）──
+  /** 登记文件用于预览；服务端幂等返回同一 id，并自动挂上文件监听 */
+  previewRegister: (filePath: string) => Promise<{
+    ok: boolean;
+    id?: string;
+    url?: string;
+    file?: string;
+    rev?: number;
+    error?: string;
+  }>;
+  /** 回环服务地址；服务未起时 null */
+  previewInfo: () => Promise<{ origin: string } | null>;
+  /** 撤掉某条目的文件监听（关闭预览条目时必须调，否则 watcher 泄漏） */
+  previewRelease: (id: string) => Promise<boolean>;
+  /** 订阅文件变更；返回反订阅函数 */
+  onPreviewChanged: (
+    callback: (e: { id: string; file: string; rev: number }) => void,
+  ) => () => void;
   // 自定义启动页图片（<PORTABLE_ROOT>/data/startup-image.*，主进程已复制到 dist/assets），无则 null
   getStartupImage: () => Promise<{ url: string } | null>;
   fetchProviderModels: (baseUrl: string, apiKey: string) => Promise<{ models?: Array<{ id: string; name?: string; reasoning?: boolean }>; error?: string } | undefined>;

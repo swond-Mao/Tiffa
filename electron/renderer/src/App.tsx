@@ -18,6 +18,7 @@ import SessionTabs from './components/SessionTabs';
 import ProjectSidebar from './components/ProjectSidebar';
 import StartupRitual from './components/StartupRitual';
 import RightSidebar from './components/RightSidebar';
+import PreviewPanel from './components/PreviewPanel';
 import AskModal from './components/AskModal';
 import SettingsPanel from './components/SettingsPanel';
 import ToastContainer from './components/ToastContainer';
@@ -71,7 +72,9 @@ export default function App() {
             <InputBox />
           </div>
         </div>
-        <RightSidebar />
+        {/* 实时预览：独立一栏，不与 RightSidebar 抢空间 */}
+      <PreviewPanel />
+      <RightSidebar />
       </div>
       {/* 全局 ask 队列：队列头常显（含后台会话 ask） */}
       <AskModal />

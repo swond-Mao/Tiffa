@@ -17,6 +17,7 @@ import {
   TIFFA_CLI,
   EXTENSION_PATH,
   COMPUTER_USE_EXTENSION_PATH,
+  PREVIEW_EXTENSION_PATH,
   SESSIONS_DIR,
 } from './constants';
 import { stableSessionDirName, extractSessionIdFromPath, parseSessionHeader, mainLog } from './session-utils';
@@ -179,6 +180,10 @@ export class TiffaInstance {
     delete env.ELECTRON_RUN_AS_NODE;
 
     const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH, '-e', COMPUTER_USE_EXTENSION_PATH];
+    // 预览扩展可选装：用户删掉该文件时不应导致内核起不来，故先探测再追加
+    try {
+      if (fs.existsSync(PREVIEW_EXTENSION_PATH)) args.push('-e', PREVIEW_EXTENSION_PATH);
+    } catch { /* 探测失败按未安装处理 */ }
 
     const stableSessionDir = path.join(SESSIONS_DIR, stableSessionDirName(this.cwd));
     args.push('--session-dir', stableSessionDir);

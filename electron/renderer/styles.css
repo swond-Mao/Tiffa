@@ -5163,3 +5163,256 @@ html[data-mode="light"] .muse-tint {
 .mermaid-diagram svg { max-width: 100%; height: auto; }
 .mermaid-loading { opacity: 0.7; }
 .mermaid-fallback-hint { color: hsl(var(--text-300)); font-size: 12px; margin-bottom: 4px; }
+
+/* ═══════════ 侧边栏实时预览面板（PreviewPanel）═══════════ */
+/**
+ * PreviewPanel 样式（待并入 electron/renderer/styles.css）
+ *
+ * 布局：#main-layout 用 flex order 排布（#projectPanel/#mainArea = 0，
+ * .sidebar-resize-handle = 1，#sidebar = 2）。本面板两块元素 order 同为 1，
+ * 靠 DOM 顺序落在 mainArea 之后、既有 sidebar 手柄之前 —— 不改既有 order 值，
+ * 避免牵动其它面板的排布假设。
+ *
+ * 颜色一律走主题变量（hsl(var(--bg-100)) 等），不写死色值，跟随明暗主题。
+ */
+
+.preview-resize-handle {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  position: relative;
+  z-index: 10;
+  order: 1;
+}
+
+.preview-resize-handle:hover,
+.preview-resize-handle.dragging {
+  background: hsl(var(--accent-main-000));
+  opacity: 0.4;
+}
+
+#previewPanel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 260px;
+  /* 上限交给 JS 的 clampWidth（80vw），这里只保证不被 flex 压没 */
+  background: hsl(var(--bg-100));
+  border-left: 1px solid hsl(var(--border-200));
+  border-right: 1px solid hsl(var(--border-200));
+  overflow: hidden;
+  order: 1;
+}
+
+/* ── 头部 ── */
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid hsl(var(--border-200));
+  flex-shrink: 0;
+}
+
+.preview-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--text-100));
+  letter-spacing: 0.02em;
+}
+
+.preview-meta {
+  font-size: 11px;
+  color: hsl(var(--text-400));
+  /* 时间戳是辅助信息，太抢眼会让人误以为它是主要内容 */
+  white-space: nowrap;
+}
+
+.preview-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.preview-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: hsl(var(--text-300));
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.preview-btn:hover:not(:disabled) {
+  background: hsl(var(--bg-300));
+  color: hsl(var(--text-100));
+}
+
+.preview-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── 多条目 tab ── */
+.preview-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid hsl(var(--border-200));
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+}
+
+.preview-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 160px;
+  padding: 3px 6px;
+  border: 1px solid hsl(var(--border-200));
+  border-radius: var(--radius-sm, 4px);
+  background: hsl(var(--bg-200));
+  color: hsl(var(--text-300));
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.preview-tab.active {
+  border-color: hsl(var(--accent-main-100));
+  background: hsl(var(--bg-300));
+  color: hsl(var(--text-100));
+}
+
+.preview-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-tab-rev {
+  font-size: 10px;
+  color: hsl(var(--text-400));
+  /* rev 变化是「这份预览被更新过几次」的信号，不该抢标题 */
+  flex-shrink: 0;
+}
+
+.preview-tab-close {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: hsl(var(--text-400));
+  font-size: 12px;
+  line-height: 1;
+}
+
+.preview-tab-close:hover {
+  background: hsl(var(--bg-400));
+  color: hsl(var(--text-100));
+}
+
+/* ── 主体 ── */
+.preview-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: hsl(var(--bg-200));
+  overflow: hidden;
+}
+
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: #fff;
+  /* iframe 内容自带白底：预览页多是浅色设计，宿主深色时用白底避免误判为渲染失败 */
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+  margin: auto;
+  padding: 8px;
+}
+
+.preview-loading {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  background: hsl(var(--bg-400));
+  color: hsl(var(--text-200));
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.preview-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px;
+  text-align: center;
+  color: hsl(var(--text-400));
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* ── 底部 ── */
+.preview-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid hsl(var(--border-200));
+  flex-shrink: 0;
+}
+
+.preview-file {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: hsl(var(--text-400));
+  white-space: nowrap;
+  overflow: hidden;
+  /* 路径常在中间（…/项目名/文件.html），截中间才看得到文件名 */
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.preview-collapse {
+  border: 0;
+  background: transparent;
+  color: hsl(var(--text-300));
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm, 4px);
+  flex-shrink: 0;
+}
+
+.preview-collapse:hover {
+  background: hsl(var(--bg-300));
+  color: hsl(var(--text-100));
+}
+
