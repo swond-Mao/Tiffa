@@ -158,6 +158,17 @@ def _download_image(filename, subfolder, img_type):
         return None
 
 def load_wf(path):
+    # 工作流文件属机器本地配置（绑本机 checkpoint 名、megapixels 可调），不入库；
+    # 新装/误删时从同名 .example 模板自愈恢复，避免 edit 命令直接 FileNotFoundError。
+    if not os.path.exists(path) and os.path.exists(path + ".example"):
+        try:
+            with open(path + ".example", "r", encoding="utf-8") as src:
+                data = src.read()
+            with open(path, "w", encoding="utf-8") as dst:
+                dst.write(data)
+            sys.stderr.write("[comfy] workflow missing, restored from %s.example\n" % os.path.basename(path))
+        except Exception as e:
+            sys.stderr.write("[comfy] restore workflow from example failed: %s\n" % e)
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
