@@ -370,6 +370,7 @@ export class TiffaInstance {
         type: 'agent_end',
         messages: [],
         _synthetic: true,
+        _resetReason: reason,
         _cwd: this.cwd,
         _sessionId: this.sessionId,
         _sessionPath: this.sessionFilePath || null,

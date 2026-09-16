@@ -313,10 +313,19 @@ function handleEvent(event: TiffaEventFrame): void {
       break;
     }
     case 'agent_end': {
-      // 合成 agent_end：主进程判定 abort 未生效、强制复位该实例时补发。
-      // 让用户知道「刚才不是自己看错了，是引擎没响应，现已恢复」
-      if ((event as { _synthetic?: boolean })._synthetic) {
-        ui.addToast('warning', '引擎未响应停止信号，已强制复位该会话，可以继续发送消息');
+      // 合成 agent_end：主进程强制复位该实例时补发（内核没回 agent_end，或前端与
+      // 实例状态脱同步）。按 _resetReason 区分措辞 —— abort 场景是「引擎没听话」，
+      // 而实例本就空闲的场景是「前端状态卡住了」，后者说「未响应停止信号」会误导人去查模型。
+      const isSynthetic = !!(event as { _synthetic?: boolean })._synthetic;
+      const resetReason = String((event as { _resetReason?: string })._resetReason || '');
+      if (isSynthetic) {
+        const engineStalled = resetReason === 'abort-grace' || resetReason === 'abort-kill';
+        ui.addToast(
+          'warning',
+          engineStalled
+            ? '引擎未响应停止信号，已强制复位该会话，可以继续发送消息'
+            : '已复位该会话的运行状态，可以继续发送消息',
+        );
       }
       // AI 重命名模式：提取标题并应用
       if (ui.aiRenameSession) {
@@ -350,8 +359,10 @@ function handleEvent(event: TiffaEventFrame): void {
       chat.finalizeAssistant(pathAe);
       // 空回复检测：模型不可达/出错时内核不发 error 事件（只发 notice/message_end），
       // 用户看到"模型不回复"却没有原因。agent_end 时检查最后一条 assistant 是否真的产出了内容。
+      // 合成事件跳过：它不是模型的真实回合结束（可能是被打断/复位），此刻消息本就没内容，
+      // 报「模型未返回任何内容」会把用户引去查并不存在的模型配置问题。
       const ap = pathAe;
-      if (ap) {
+      if (ap && !isSynthetic) {
         const msgs = useChatStore.getState().messagesMap[ap] || [];
         const lastMsg = msgs[msgs.length - 1];
         if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.error) {

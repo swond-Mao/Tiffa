@@ -147,4 +147,29 @@ describe('TiffaInstance 卡死恢复', () => {
       vi.useRealTimers();
     }
   });
+
+  it('合成 agent_end 必须带上 _resetReason（渲染层靠它区分「引擎没响应」与「前端状态卡住」）', () => {
+    const sent: Array<Record<string, unknown>> = [];
+    setMainWindow({
+      isDestroyed: () => false,
+      webContents: {
+        send: (_ch: string, payload: Record<string, unknown>) => {
+          sent.push(payload);
+        },
+      },
+    } as unknown as Parameters<typeof setMainWindow>[0]);
+    try {
+      const inst = new TiffaInstance('C:\\proj', 'sched-x');
+      stubSendRaw(inst);
+
+      inst.forceReset('abort-idle');
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('agent_end');
+      expect(sent[0]._synthetic).toBe(true);
+      expect(sent[0]._resetReason).toBe('abort-idle');
+    } finally {
+      setMainWindow(null);
+    }
+  });
 });
