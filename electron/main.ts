@@ -447,7 +447,15 @@ function setupIpc() {
     const cancelledAsks = inst.cancelPendingAsks('abort');
     // ② 再发停止信号
     inst.sendRaw({ type: 'abort' });
-    // ③ 看门狗：abort 若始终不生效，先强复位前端运行态，再终止实例。
+    // ③ 实例本就空闲：没有东西可 abort，但前端可能还停在「运行中」（状态脱同步）。
+    //    直接复位把前端解放出来，**不装看门狗** —— 看门狗等的是「真实 agent_end」，
+    //    而空闲实例根本不会再发，25s 后会把一个好好的实例杀掉。
+    if (!inst.agentRunning && !inst.userPromptInFlight) {
+      inst.forceReset('abort-idle');
+      mainLog(`[tiffa:abort] 实例已空闲，只复位前端运行态 key=${tiffaManager.keyOf(inst)}`);
+      return { cancelledAsks, alreadyIdle: true };
+    }
+    // ④ 看门狗：abort 若始终不生效，先强复位前端运行态，再终止实例。
     //    「终止实例」等价于用户手动关闭该对话（实测是唯一能恢复的手段）；
     //    实例从池中移除后，下次发消息会重新 spawn 并按会话文件恢复上下文。
     const key = tiffaManager.keyOf(inst);
@@ -1944,6 +1952,13 @@ function setupIpc() {
   // （TiffaInstance 类定义在模块顶层，无法直接访问 setupIpc 闭包内的函数）
   TiffaInstance._titleGenerateCallback = _tryGenerateSessionTitle;
 
+  // 真实会话文件命名契约：<ISO时间戳>_<uuid>.jsonl（内核与前端 prepareNewSessionFile 一致）。
+  // 子任务（subagent/task）会话以 <任务名>.jsonl 落盘（如 DFlashSearch.jsonl，无时间戳前缀），
+  // 无论位于父会话目录内、孤儿目录还是旧内核直接写到顶层，一律不视为独立对话，
+  // 否则任务指令文本（"Complete assignment thoroughly:..."）会作为标题污染左侧对话树。
+  const SESSION_FILE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
+  const isRealSessionFile = (name) => SESSION_FILE_RE.test(name);
+
   ipcMain.handle('sessions:listProjects', async () => {
     try {
       // 每次列出项目时也自动发现 workspace 子目录
@@ -1990,7 +2005,7 @@ function setupIpc() {
               // 内部 jsonl 不是独立会话（否则一个对话的归档会分裂成多个列表项）
               if (isTop && isAttachmentDir(entry.name)) continue;
               countJsonl(full, false);
-            } else if (entry.isFile() && entry.name.endsWith('.jsonl')) sessionCount++;
+            } else if (entry.isFile() && isRealSessionFile(entry.name)) sessionCount++;
           }
         };
         if (fs.existsSync(projectPath)) countJsonl(projectPath, true);
@@ -2078,7 +2093,7 @@ function setupIpc() {
           if (entry.isDirectory()) {
             if (isTop && isAttachmentDir(entry.name)) continue;
             walk(full, false);
-          } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          } else if (entry.isFile() && isRealSessionFile(entry.name)) {
             files.push(full);
           }
         }
