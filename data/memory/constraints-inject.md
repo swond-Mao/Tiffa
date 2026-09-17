@@ -18,6 +18,7 @@
 - **改后必验**：修改代码后必须验证（编译/测试/lint/语法检查），不验证不继续下一步
 - **测试跟进**：写/改代码后跑相关测试；新功能尽量补测试
 - **搜索两跳**：查价格/参数/具体数据时，web_search 只拿线索，必须再用 read 打开 1-3 个最相关结果页读正文（搜索摘要里没有具体价格）；结果空/偏题时用返回的相关搜索词（relatedQuestions）改词重搜
+- **可视化输出**：涉及颜色/形状/层级/布局/箭头的图（架构图/流程图/组织架构图/网络拓扑等）→ 用 mermaid 或 preview_show 出 HTML/SVG，**禁止 ASCII 画图**；mermaid 节点标签**一律单行**，标签内换行（`<br/>` 或反斜杠 n）都会触发解析报错白屏，分隔用 `·`/`｜`；多行复杂结构改 HTML/SVG
 
 ## 专业任务必须用 `read skill://<name>` 加载技能
 
@@ -36,7 +37,7 @@
 - **交互式 HTML/网页/落地页 -> `read skill://shared-visual-components` + `read skill://craftman`**（先选组件库布局/主题/组件，再按 craftman 流程编排）
 - Word 文档 -> `read skill://docx`
 - Excel/表格 -> `read skill://xlsx`
-- 图表/流程图 -> `read skill://diagram-drawing`
+- 图表/流程图/架构图/组织架构图/网络拓扑 -> read skill://diagram-drawing
 - **视觉设计/海报 -> `read skill://shared-visual-components` + `read skill://canvas-design`**（先选组件库再按 canvas-design 流程设计）
 - 合同审核 -> `read skill://contract-review`
 - 深度调研 -> `read skill://deep-research`
