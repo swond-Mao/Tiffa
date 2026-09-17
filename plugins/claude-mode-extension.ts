@@ -1401,31 +1401,50 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
     return String(baseUrl).replace(/\/+$/, "") + path
   }
 
-  // 单次探测请求：200/400/401/403 均视为「server 在跑且路径正确」（400=参数/模型问题，交给后续真实调用报错；401/403=仅认证问题）
-  async function probeFetch(url: string, init: RequestInit, timeoutMs: number): Promise<boolean> {
+  // 单次探测请求：三态。
+  //   "ok"   server 在跑且路径正确（400=参数/模型问题，交给后续真实调用报错）
+  //   "auth" 401/403：server 在跑但 apiKey 无效 —— 选候选时必须跳过，否则真实调用必然 401
+  //   "down" 连接失败/超时/404 等
+  // （2026-09-17 修复：401/403 曾被当「可达」返回 true，坏 key 的旁路永远排第一候选，
+  //   每次压缩/记账都白打一发 401 再降级 —— 日志里 compact-bypass.error HTTP 401 已积累 145 次。）
+  async function probeFetch(url: string, init: RequestInit, timeoutMs: number): Promise<"ok" | "auth" | "down"> {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
       const resp = await fetch(url, { ...init, signal: ctrl.signal })
-      return resp.ok || resp.status === 400 || resp.status === 401 || resp.status === 403
+      if (resp.ok || resp.status === 400) return "ok"
+      if (resp.status === 401 || resp.status === 403) return "auth"
+      return "down"
     } catch {
-      return false
+      return "down"
     } finally {
       clearTimeout(timer)
     }
   }
 
-  // HTTP probe：检测 endpoint 是否可达（每路径 2s 超时）。两级：
+  // HTTP probe：检测 endpoint 是否可用（每路径 2s 超时）。两级：
   // ① GET {baseUrl}/models（OpenAI 兼容标准探测，llama.cpp/火山方舟等均有）；
-  // ② 404 时改 POST {baseUrl}/chat/completions 最小请求（无 model 字段 → 多数服务回 400，同样证明可达），与总结调用路径完全同构。
+  // ② 无应答时改 POST {baseUrl}/chat/completions 最小请求（无 model 字段 → 多数服务回 400，同样证明可达），与总结调用路径完全同构。
+  // 返回 false 时若因认证失败，会打 compact-bypass.probe.auth-fail 日志（含 baseUrl，便于定位该改哪个文件的 key）。
   async function probeEndpoint(baseUrl: string, apiKey: string): Promise<boolean> {
     const auth = apiKey && apiKey !== "EMPTY" ? { Authorization: `Bearer ${apiKey}` } : {}
-    if (await probeFetch(chatUrlOf(baseUrl, "/models"), { method: "GET", headers: auth }, 2000)) return true
-    return probeFetch(chatUrlOf(baseUrl, "/chat/completions"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...auth },
-      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
-    }, 2000)
+    const r1 = await probeFetch(chatUrlOf(baseUrl, "/models"), { method: "GET", headers: auth }, 2000)
+    if (r1 !== "down") {
+      if (r1 === "auth") {
+        log(
+          "compact-bypass.probe.auth-fail",
+          `${baseUrl} 认证失败(401/403)：apiKey 无效，该候选将被跳过 —— 请更新 bypass-model.json / models.yml 对应 provider 的 apiKey`,
+        )
+      }
+      return r1 === "ok"
+    }
+    return (
+      (await probeFetch(chatUrlOf(baseUrl, "/chat/completions"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...auth },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+      }, 2000)) === "ok"
+    )
   }
 
   // 判断任意 provider/modelId 是否视觉（读 models.yml 的 input 声明）
@@ -1513,7 +1532,11 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
         clearTimeout(timer)
         if (signal) signal.removeEventListener("abort", onAbort)
       }
-      if (!resp.ok) { log("compact-bypass.error", `HTTP ${resp.status}`); return null }
+      if (!resp.ok) {
+        // 带上 endpoint/model：裸「HTTP 401」无法定位是哪个候选挂的（多候选串行时尤其难查）
+        log("compact-bypass.error", `HTTP ${resp.status} @ ${ep?.model || "?"} (${ep?.baseUrl || "?"})`)
+        return null
+      }
       const data = await resp.json() as { choices?: { message?: { content?: string } }[] }
       const text = data?.choices?.[0]?.message?.content?.trim()
       if (!text) return null
