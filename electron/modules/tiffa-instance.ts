@@ -40,6 +40,12 @@ const ABORT_GRACE_MS = 8000;
 /** abort 后多久仍未恢复到空闲，判定 abort 已失效，终止实例（等价手动「关闭对话」） */
 const ABORT_KILL_MS = 25000;
 
+/** 上下文超限错误的识别（与内核 ContextOverflow 正则同源的子集） */
+const CONTEXT_OVERFLOW_RE =
+  /prompt is too long|input is too long|exceeds?( the)?( model'?s?)?( maximum)? context|maximum context length|context (window|length|size).{0,20}(exceeded|overflow|too small)|too many tokens|token limit exceeded|exceeds the limit of \d+ tokens|n_ctx|requested tokens?.{0,20}exceed/i;
+/** 上下文超限自动恢复的冷却窗：每实例 10 分钟最多触发一次，压缩失败也不循环 */
+const OVERFLOW_RECOVER_COOLDOWN_MS = 10 * 60 * 1000;
+
 // ── 依赖注入 ──
 let _mainWindow: BrowserWindow | null = null;
 let _migrateSessionId: ((cwd: string, oldSid: string | null, newSid: string) => void) | null = null;
@@ -114,6 +120,9 @@ export class TiffaInstance {
    * （forceReset 的合成事件直接推给渲染层、不经 _handleEvent，不会污染此值。）
    */
   _lastRealAgentEndAt = 0;
+  /** 上下文超限自动恢复：上次触发时间（冷却用）+ 进行中防重入 */
+  _overflowRecoverAt = 0;
+  _overflowRecovering = false;
 
   get lastRealAgentEndAt(): number {
     return this._lastRealAgentEndAt;
@@ -384,6 +393,80 @@ export class TiffaInstance {
   }
 
   /**
+   * 上下文超限自动恢复（2026-09-17）。
+   *
+   * 现象：会话上下文超过模型真实窗口后，每次发送都顶着超限请求失败——
+   * 内核对 ContextOverflow 不做自动重试（内核源码 #z 对该类错误直接 return false），
+   * 扩展 session_stop 的「续行一次」对超限同样无意义（同样的请求再打一遍还是超限），
+   * 且内核出错不发 error 事件 → 前端毫无反应，看起来就是「发送不回应」。
+   * 手动 /compact 之所以能救，是因为强制压缩把上下文砍了下来。
+   *
+   * 修复：agent_end 识别超限错误 → 写 compact-force-next.json（扩展本次强制走
+   * ③ 旁路结构化摘要）→ 发 compact 命令 → 压缩成功后自动重发最后一条用户消息。
+   * 冷却 10 分钟 + 进行中防重入；任何一步失败只提示用户手动处理，绝不循环。
+   */
+  private _maybeRecoverContextOverflow(event: TiffaEvent): void {
+    if (event._wasPrewarming) return;
+    const msgs = Array.isArray(event.messages) ? (event.messages as Array<Record<string, unknown>>) : [];
+    const lastAssistant = [...msgs].reverse().find((m) => m && m.role === 'assistant');
+    if (!lastAssistant || lastAssistant.stopReason !== 'error') return;
+    const errMsg = typeof lastAssistant.errorMessage === 'string' ? lastAssistant.errorMessage : '';
+    if (!errMsg || !CONTEXT_OVERFLOW_RE.test(errMsg)) return;
+    if (this._overflowRecovering) return;
+    const now = Date.now();
+    if (now - this._overflowRecoverAt < OVERFLOW_RECOVER_COOLDOWN_MS) {
+      mainLog(`[${this._shortCwd()}#${this.sessionId}] 上下文超限但处于恢复冷却期，跳过自动压缩`);
+      return;
+    }
+    const prompt = this.lastPromptMessage;
+    this._overflowRecoverAt = now;
+    this._overflowRecovering = true;
+    mainLog(`[${this._shortCwd()}#${this.sessionId}] 上下文超限 -> 自动压缩+重试（err=${errMsg.slice(0, 160)}）`);
+    this._sendNotice('warning', '上下文超出模型窗口，正在自动压缩会话并重试…');
+    void (async () => {
+      const flagPath = path.join(PORTABLE_ROOT, 'data', 'agent', 'compact-force-next.json');
+      try {
+        // 强制扩展走 ③ 旁路结构化摘要（跳过 ①②snapcompact），与 main.ts 帧预算兜底同一机制
+        fs.mkdirSync(path.dirname(flagPath), { recursive: true });
+        fs.writeFileSync(flagPath, JSON.stringify({ ts: Date.now(), sessionId: this.sessionId }), 'utf8');
+        try {
+          await this.sendCommand({ type: 'compact' });
+        } finally {
+          try { fs.unlinkSync(flagPath); } catch { /* 已被删除，no-op */ }
+        }
+        mainLog(`[${this._shortCwd()}#${this.sessionId}] 超限自动压缩完成`);
+        if (!prompt) {
+          this._sendNotice('info', '已自动压缩会话，请重新发送你的消息');
+          return;
+        }
+        await this.sendCommand({ type: 'prompt', message: prompt });
+        mainLog(`[${this._shortCwd()}#${this.sessionId}] 超限恢复：已重发原消息`);
+        this._sendNotice('info', '会话已压缩，原消息已自动重新发送');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        mainLog(`[${this._shortCwd()}#${this.sessionId}] 超限自动恢复失败：${msg}`);
+        this._sendNotice('error', `上下文超限且自动压缩失败（${msg}）。请手动压缩会话，或新建对话。`);
+      } finally {
+        this._overflowRecovering = false;
+      }
+    })();
+  }
+
+  /** 直接向渲染层推一条 notice（前端 eventRouter 的 notice 分支会弹 toast/状态栏） */
+  private _sendNotice(level: 'info' | 'warning' | 'error', message: string): void {
+    if (_mainWindow && !_mainWindow.isDestroyed()) {
+      _mainWindow.webContents.send('tiffa:event', {
+        type: 'notice',
+        message,
+        level,
+        _cwd: this.cwd,
+        _sessionId: this.sessionId,
+        _sessionPath: this.sessionFilePath || null,
+      });
+    }
+  }
+
+  /**
    * abort 看门狗：abort 发出后若实例仍未回到空闲，说明 abort 没能生效
    * （内核串行链被卡住，或停在等模型响应上）。分级处置：
    * - ABORT_GRACE_MS：先 forceReset（把前端从「运行中/排队」里解放出来）
@@ -612,6 +695,8 @@ export class TiffaInstance {
           if (TiffaInstance._titleGenerateCallback) TiffaInstance._titleGenerateCallback(this);
         }, 6000);
       }
+      // 上下文超限自动恢复（识别 stopReason=error + 超限文案，强制③压缩后重发原消息）
+      this._maybeRecoverContextOverflow(event);
     }
 
     // RPC chunked responses

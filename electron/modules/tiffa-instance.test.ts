@@ -173,3 +173,77 @@ describe('TiffaInstance 卡死恢复', () => {
     }
   });
 });
+
+describe('TiffaInstance 上下文超限自动恢复', () => {
+  const FLAG = 'G:/Tiffa/data/agent/compact-force-next.json';
+
+  afterEach(() => {
+    setMainWindow(null);
+    try { require('fs').unlinkSync(FLAG); } catch { /* no-op */ }
+    vi.restoreAllMocks();
+  });
+
+  function overflowEvent(): Record<string, unknown> {
+    return {
+      type: 'agent_end',
+      messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', stopReason: 'error', errorMessage: "This model's maximum context length is 8192 tokens. However, you requested 12000 tokens." },
+      ],
+    };
+  }
+
+  it('识别超限错误：先压缩（带 force 标记）再重发原消息', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.spyOn(TiffaInstance.prototype, 'sendCommand').mockImplementation(async (frame: Record<string, unknown>) => {
+      sent.push(frame);
+      return {};
+    });
+    const inst = new TiffaInstance('C://proj', 'uuid-ovf');
+    (inst as unknown as { lastPromptMessage: string }).lastPromptMessage = '帮我总结这个会话';
+
+    (inst as unknown as { _maybeRecoverContextOverflow: (e: unknown) => void })._maybeRecoverContextOverflow(overflowEvent());
+    await vi.waitFor(() => expect(sent.length).toBe(2));
+
+    expect(sent[0].type).toBe('compact');
+    expect(sent[1]).toMatchObject({ type: 'prompt', message: '帮我总结这个会话' });
+    // 压缩完成后 force 标记应被清理
+    expect(require('fs').existsSync(FLAG)).toBe(false);
+    expect((inst as unknown as { _overflowRecovering: boolean })._overflowRecovering).toBe(false);
+  });
+
+  it('非超限错误 / 非错误结束不触发恢复', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.spyOn(TiffaInstance.prototype, 'sendCommand').mockImplementation(async (frame) => {
+      sent.push(frame);
+      return {};
+    });
+    const inst = new TiffaInstance('C://proj', 'uuid-ovf2');
+
+    const spy = inst as unknown as { _maybeRecoverContextOverflow: (e: unknown) => void };
+    spy._maybeRecoverContextOverflow({ type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'error', errorMessage: 'connection refused' }] });
+    spy._maybeRecoverContextOverflow({ type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'stop', errorMessage: 'maximum context length is 8192' }] });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sent).toHaveLength(0);
+  });
+
+  it('冷却期内不重复触发（防压缩失败时循环）', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    vi.spyOn(TiffaInstance.prototype, 'sendCommand').mockImplementation(async (frame) => {
+      sent.push(frame);
+      return {};
+    });
+    const inst = new TiffaInstance('C://proj', 'uuid-ovf3');
+    (inst as unknown as { lastPromptMessage: string }).lastPromptMessage = '再试一次';
+    const spy = inst as unknown as { _maybeRecoverContextOverflow: (e: unknown) => void };
+
+    spy._maybeRecoverContextOverflow(overflowEvent());
+    await vi.waitFor(() => expect(sent.length).toBe(2));
+
+    // 立刻再来一次超限：应被冷却拦住
+    (inst as unknown as { _overflowRecoverAt: number })._overflowRecoverAt = Date.now();
+    spy._maybeRecoverContextOverflow(overflowEvent());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sent).toHaveLength(2);
+  });
+});

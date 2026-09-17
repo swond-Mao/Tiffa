@@ -2064,6 +2064,11 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
 
   let hasContinuedAfterError = false  // 本轮是否已续行过一次
 
+  // 上下文超限识别（与内核 ContextOverflow 正则同源的子集，与
+  // electron/modules/tiffa-instance.ts 的 CONTEXT_OVERFLOW_RE 保持一致）
+  const CONTEXT_OVERFLOW_RE =
+    /prompt is too long|input is too long|exceeds?( the)?( model'?s?)?( maximum)? context|maximum context length|context (window|length|size).{0,20}(exceeded|overflow|too small)|too many tokens|token limit exceeded|exceeds the limit of \d+ tokens|n_ctx|requested tokens?.{0,20}exceed/i
+
   // ── 4. session_stop ── error 续行一次，5 秒后执行
   pi.on("session_stop", async (event: any) => {
     try {
@@ -2090,6 +2095,17 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
 
       auditLog({ event: "session_stop", reason, stopReason: lastMsg?.stopReason, hasContinuedAfterError })
       log("session_stop", `reason=${reason} hasContinuedAfterError=${hasContinuedAfterError}`)
+
+      // 上下文超限：盲目续行无意义（同样的超限请求必然再失败一次），
+      // 主进程 tiffa-instance 的 _maybeRecoverContextOverflow 会自动压缩+重试，这里直接放行。
+      if (reason === "error") {
+        const em = lastMsg && typeof lastMsg === "object" ? String((lastMsg as any).errorMessage || "") : ""
+        if (em && CONTEXT_OVERFLOW_RE.test(em)) {
+          log("session_stop", "context overflow -> 跳过盲目续行（主进程将自动压缩+重试）")
+          auditLog({ event: "session_stop", reason: "context-overflow" })
+          return
+        }
+      }
 
       // error 且本轮未续行过：5 秒后续行一次
       if (reason === "error" && !hasContinuedAfterError) {
