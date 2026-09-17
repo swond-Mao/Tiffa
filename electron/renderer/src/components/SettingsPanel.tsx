@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom';
 import { useUiStore } from '../stores/useUiStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useProcStore } from '../stores/useProcStore';
-import { switchModel, invalidateModelListCache } from '../services/sessionController';
+import { switchModel, invalidateModelListCache, getModelListCached } from '../services/sessionController';
 import { showModalConfirm } from '../services/tabActions';
 import { escapeHtml } from '../services/utils';
 import { PERSONA_KEYWORDS, buildFallbackPersona, buildPersonaPrompt } from '../services/personaTemplate';
@@ -1494,6 +1494,7 @@ function SchedulerSection() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState<'cron' | 'every'>('cron');
+  const [models, setModels] = useState<Array<{ id: string; name?: string; provider?: string }>>([]);
   const [form, setForm] = useState({
     id: '',
     name: '',
@@ -1501,8 +1502,21 @@ function SchedulerSection() {
     prompt: '',
     approval: 'auto',
     cwd: '',
+    // 模型选择：空串 = 跟随默认模型；否则为 `${provider}::${modelId}` 编码
+    modelKey: '',
     catchUp: false,
   });
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await getModelListCached();
+        setModels((list || []).map((m) => ({ id: m.id, name: m.name, provider: m.provider })));
+      } catch {
+        setModels([]);
+      }
+    })();
+  }, []);
 
   const refresh = async () => {
     try {
@@ -1525,6 +1539,9 @@ function SchedulerSection() {
     }
     setBusy(true);
     try {
+      const picked = form.modelKey ? models.find((m) => `${m.provider || ''}::${m.id}` === form.modelKey) : null;
+      // 模型已从列表消失（被删/引擎未启动）时按编码拆分保留原值，避免保存时把模型静默清空
+      const [encProvider, encModel] = form.modelKey ? form.modelKey.split('::') : ['', ''];
       const payload: any = {
         id: form.id.trim(),
         name: form.name.trim() || undefined,
@@ -1532,6 +1549,8 @@ function SchedulerSection() {
         prompt: form.prompt,
         approval: form.approval,
         cwd: form.cwd.trim() || undefined,
+        model: picked ? picked.id : encModel || undefined,
+        provider: picked ? (picked.provider || undefined) : encProvider || undefined,
         catchUp: form.catchUp,
         enabled: true,
       };
@@ -1539,7 +1558,7 @@ function SchedulerSection() {
       if (r?.error) addToast?.('error', r.error);
       else {
         addToast?.('success', `已保存任务 ${form.id}`);
-        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', catchUp: false });
+        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', modelKey: '', catchUp: false });
       }
       await refresh();
     } finally {
@@ -1570,6 +1589,22 @@ function SchedulerSection() {
 
   const fmtTime = (ts?: number) => (ts ? new Date(ts).toLocaleString() : '—');
 
+  /** 把已有任务回填到表单（含模型），改完点「保存任务」即按同 id 覆盖 */
+  const edit = (t: any) => {
+    setKind(t.cron ? 'cron' : 'every');
+    setForm({
+      id: t.id,
+      name: t.name || '',
+      schedule: String(t.cron || t.every || ''),
+      prompt: t.prompt || '',
+      approval: t.approval || 'auto',
+      cwd: t.cwd || '',
+      modelKey: t.model ? `${t.provider || ''}::${t.model}` : '',
+      catchUp: !!t.catchUp,
+    });
+    addToast?.('info', `已载入任务 ${t.id}，改完点「保存任务」覆盖`);
+  };
+
   return (
     <div className="settings-section">
       <div className="settings-section-title">定时任务</div>
@@ -1584,12 +1619,15 @@ function SchedulerSection() {
           <div className="form-label">
             {t.name ? `${t.name}（${t.id}）` : t.id}
             <span style={{ opacity: 0.7, marginLeft: 8 }}>
-              {t.nextRunHint} · 审批 {t.approval} · 上次 {fmtTime(t.lastRunAt)}
+              {t.nextRunHint} · 审批 {t.approval} · 模型 {t.model ? `${t.provider ? t.provider + '/' : ''}${t.model}` : '默认'} · 上次 {fmtTime(t.lastRunAt)}
               {t.lastResult && t.lastResult !== 'ok' ? ` · ${t.lastResult}` : ''}
               {t.running ? ' · 运行中' : ''}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="settings-btn" onClick={() => edit(t)}>
+              编辑
+            </button>
             <button type="button" className="settings-btn" onClick={() => void runNow(t.id)}>
               立即运行
             </button>
@@ -1605,7 +1643,7 @@ function SchedulerSection() {
       {errors.length > 0 && <div className="settings-section-desc">⚠️ {errors.join('；')}</div>}
 
       <div className="form-field" style={{ marginTop: 12 }}>
-        <div className="form-label">新建 / 覆盖（同 id 会覆盖）</div>
+        <div className="form-label">新建 / 编辑（同 id 覆盖；点上方任务「编辑」可载入现有配置）</div>
         <input
           className="form-input"
           placeholder="id（英文短名，如 daily-report）"
@@ -1639,6 +1677,27 @@ function SchedulerSection() {
             <option value="yolo">yolo（全自动）</option>
           </select>
         </div>
+        <label className="form-label" style={{ marginTop: 8 }}>使用模型</label>
+        <select
+          className="form-input"
+          value={form.modelKey}
+          onChange={(e) => setForm({ ...form, modelKey: e.target.value })}
+        >
+          <option value="">跟随默认模型</option>
+          {form.modelKey && !models.some((m) => `${m.provider || ''}::${m.id}` === form.modelKey) && (
+            <option value={form.modelKey}>{form.modelKey.split('::').join(' / ')}（当前值，不在列表中）</option>
+          )}
+          {models.map((m) => (
+            <option key={`${m.provider || ''}::${m.id}`} value={`${m.provider || ''}::${m.id}`}>
+              {m.provider ? `${m.provider} / ` : ''}{m.name || m.id}
+            </option>
+          ))}
+        </select>
+        {models.length === 0 && (
+          <div className="settings-section-desc" style={{ marginTop: 2 }}>
+            未读到模型列表（引擎未启动时仅能从 models.yml 兜底；启动后可选项会补齐）。
+          </div>
+        )}
         <textarea
           className="form-input"
           placeholder="到点要执行的指令（prompt）"

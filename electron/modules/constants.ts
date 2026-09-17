@@ -47,6 +47,8 @@ export const COMPUTER_USE_MCP_JSON = path.join(PORTABLE_ROOT, 'data', 'agent', '
 export const PLAYWRIGHT_ENABLED_FILE = path.join(PORTABLE_ROOT, 'data', 'agent', 'playwright-enabled');
 export const AGENT_DIR = path.join(PORTABLE_ROOT, 'data', 'agent');
 export const MAX_INSTANCES = 8;
+/** 侧边栏实时预览：AI 侧扩展（注册 preview_show 工具）。可选装，缺文件不影响内核启动 */
+export const PREVIEW_EXTENSION_PATH = path.join(PORTABLE_ROOT, 'plugins', 'preview-extension.ts');
 export const LRU_KEEP_ALIVE_MS = 5 * 60 * 1000;
 
 export let currentWorkspaceDir = DEFAULT_WORKSPACE_DIR;

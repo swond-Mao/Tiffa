@@ -11,6 +11,8 @@ import { useSessionsStore } from '../stores/useSessionsStore';
 import { useChatStore } from '../stores/useChatStore';
 import { useUiStore, type AskItem, type ThinkingLevel } from '../stores/useUiStore';
 import { useProjectsStore } from '../stores/useProjectsStore';
+import { usePreviewStore } from '../stores/usePreviewStore';
+import { registerPreviewFile, previewRelease, previewUnavailableReason } from './previewBridge';
 import {
   startStallCheck, stopStallCheck,
   startFirstResponseCheck, stopFirstResponseCheck,
@@ -313,6 +315,20 @@ function handleEvent(event: TiffaEventFrame): void {
       break;
     }
     case 'agent_end': {
+      // 合成 agent_end：主进程强制复位该实例时补发（内核没回 agent_end，或前端与
+      // 实例状态脱同步）。按 _resetReason 区分措辞 —— abort 场景是「引擎没听话」，
+      // 而实例本就空闲的场景是「前端状态卡住了」，后者说「未响应停止信号」会误导人去查模型。
+      const isSynthetic = !!(event as { _synthetic?: boolean })._synthetic;
+      const resetReason = String((event as { _resetReason?: string })._resetReason || '');
+      if (isSynthetic) {
+        const engineStalled = resetReason === 'abort-grace' || resetReason === 'abort-kill';
+        ui.addToast(
+          'warning',
+          engineStalled
+            ? '引擎未响应停止信号，已强制复位该会话，可以继续发送消息'
+            : '已复位该会话的运行状态，可以继续发送消息',
+        );
+      }
       // AI 重命名模式：提取标题并应用
       if (ui.aiRenameSession) {
         const targetSession = ui.aiRenameSession as { path: string; title?: string };
@@ -345,8 +361,10 @@ function handleEvent(event: TiffaEventFrame): void {
       chat.finalizeAssistant(pathAe);
       // 空回复检测：模型不可达/出错时内核不发 error 事件（只发 notice/message_end），
       // 用户看到"模型不回复"却没有原因。agent_end 时检查最后一条 assistant 是否真的产出了内容。
+      // 合成事件跳过：它不是模型的真实回合结束（可能是被打断/复位），此刻消息本就没内容，
+      // 报「模型未返回任何内容」会把用户引去查并不存在的模型配置问题。
       const ap = pathAe;
-      if (ap) {
+      if (ap && !isSynthetic) {
         const msgs = useChatStore.getState().messagesMap[ap] || [];
         const lastMsg = msgs[msgs.length - 1];
         if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.error) {
@@ -598,10 +616,19 @@ function handleEvent(event: TiffaEventFrame): void {
       }
       // 非交互型：即时处理，不入队、不弹窗
       switch (method) {
-        case 'setWidget':
-          // 终端 UI 控件展示（ask 工具的交互面板等），桌面端不需要渲染，直接确认
-          resp({ confirmed: true });
+        case 'setWidget': {
+          // 终端 UI 控件展示：桌面端不渲染文本控件，但**预览帧要上屏** ——
+          // AI 侧 preview_show 走的就是 setWidget（widgetKey 以 'preview:' 开头），
+          // 内核 rpc-ui 模式下的 ExtensionUIContext 会把这些字段摊平到帧顶层。
+          const widgetKey = String(event.widgetKey || event.key || '');
+          if (widgetKey.startsWith('preview:')) {
+            void handlePreviewWidget(event, ssid, resp);
+          } else {
+            // 非交互控件：桌面端无终端 UI，直接确认避免内核侧 await 悬挂
+            resp({ confirmed: true });
+          }
           break;
+        }
         case 'notify': {
           const loc = localizeKernelMessage(String(event.message || ''));
           ui.addToast(loc.level || (event.notifyType === 'error' ? 'error' : event.notifyType === 'warning' ? 'warning' : 'info'), loc.text);
@@ -896,6 +923,75 @@ function handleExited(data: { sessionId?: string; cwd?: string; autoRestarting?:
 // ── 订阅 ──
 
 let subscribed = false;
+
+/**
+ * 处理 preview_show 推来的 setWidget 帧。
+ *
+ * widgetLines 是内核里唯一能承载结构化载荷的通道（字符串数组）。约定首行为
+ * JSON 元数据 `{file,title}`，其余行忽略 —— 不用正文行做解析，避免 HTML 里的
+ * 花括号把解析带偏。真正的内容由主进程按 file 读盘服务，前端只拿 id+url。
+ */
+async function handlePreviewWidget(
+  event: TiffaEventFrame,
+  ssid: string | null,
+  resp: (v: unknown) => void,
+): Promise<void> {
+  const lines = Array.isArray(event.widgetLines) ? event.widgetLines : [];
+  const head = typeof lines[0] === 'string' ? lines[0].trim() : '';
+  let file = '';
+  let title = '';
+  try {
+    const parsed: unknown = JSON.parse(head);
+    if (parsed && typeof parsed === 'object' && 'file' in parsed) {
+      const h: Record<string, unknown> = parsed;
+      if (typeof h.file === 'string') file = h.file.trim();
+      if (typeof h.title === 'string') title = h.title.trim();
+    }
+  } catch {
+    // 首行不是 JSON：回落到「整段就是路径」的裸格式
+    file = head;
+  }
+  if (!file) {
+    useUiStore.getState().addToast('warning', '预览请求缺少文件路径');
+    resp({ confirmed: false });
+    return;
+  }
+  const unavailable = previewUnavailableReason();
+  if (unavailable) {
+    // 能力缺失要说明原因，否则用户只看到一个没动静的预览区
+    useUiStore.getState().addToast('warning', unavailable);
+    resp({ confirmed: false });
+    return;
+  }
+  // 会话归属：非当前会话的预览不自动抢屏，防多会话串台。
+  // 本函数是 async，跨 await 后 sessions 快照可能已过期（用户中途切了会话），
+  // 所以这里重新 getState()，不复用调用点的旧快照。
+  const now = useSessionsStore.getState();
+  // resolveBgPath 是本文件既有的会话路径解析（tab → tabMeta → 会话列表三级回退），
+  // 别自己写 findSessionPathById：那个 utils 函数要第二个参数 activeSessionPaths。
+  const sessionPath = ssid ? resolveBgPath(ssid, now) : null;
+  // 单会话常态（拿不到 ssid 或尚未定名）时按前台处理，别把预览憋在队列里不动
+  const claimScreen = !ssid || !now.activeSessionId || ssid === now.activeSessionId;
+  const r = await registerPreviewFile(file);
+  if (!r.ok || !r.id || !r.url) {
+    useUiStore.getState().addToast('error', '预览登记失败：' + (r.error || '未知原因'));
+    resp({ confirmed: false });
+    return;
+  }
+  const filePath = r.file || file;
+  const dropped = usePreviewStore.getState().push({
+    id: r.id,
+    file: filePath,
+    title: title || filePath.split(/[\\/]/).filter(Boolean).pop() || filePath,
+    url: r.url,
+    rev: typeof r.rev === 'number' ? r.rev : 0,
+    sessionPath,
+    ts: Date.now(),
+  }, claimScreen);
+  // 被裁掉的条目要撤主进程监听，否则 watcher 只增不减
+  for (const goneId of dropped) previewRelease(goneId);
+  resp({ confirmed: true, id: r.id, url: r.url });
+}
 
 export function initEventRouter(): void {
   if (subscribed) return;

@@ -36,6 +36,7 @@ WF_ERNIE = os.path.join(SKILL_DIR, "workflow_ernie_turbo_api.json")
 WF_ZIMAGE = os.path.join(SKILL_DIR, "workflow_zimage_api.json")
 WF_KLEIN = os.path.join(SKILL_DIR, "workflow_klein_api.json")
 WF_SEEDVR2 = os.path.join(SKILL_DIR, "workflow_seedvr2_api.json")
+WF_KREA2 = os.path.join(SKILL_DIR, "workflow_krea2_api.json")
 
 def _post(path, payload, raw=False, headers=None):
     data = payload if raw else json.dumps(payload).encode("utf-8")
@@ -158,6 +159,18 @@ def _download_image(filename, subfolder, img_type):
         return None
 
 def load_wf(path):
+    # 工作流 json 属机器本地配置（绑本机 checkpoint 名、megapixels/尺寸策略可调），不入库；
+    # 新装/误删时从同名 .example 模板自愈恢复，避免各子命令直接 FileNotFoundError。
+    if not os.path.exists(path) and os.path.exists(path + ".example"):
+        try:
+            # 二进制复制：文本模式在 Windows 会做 \n→\r\n 换行翻译，静默改动用户文件字节
+            with open(path + ".example", "rb") as src:
+                data = src.read()
+            with open(path, "wb") as dst:
+                dst.write(data)
+            sys.stderr.write("[comfy] workflow missing, restored from %s.example\n" % os.path.basename(path))
+        except Exception as e:
+            sys.stderr.write("[comfy] restore workflow from example failed: %s\n" % e)
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 

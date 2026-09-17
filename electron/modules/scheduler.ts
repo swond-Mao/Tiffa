@@ -54,6 +54,10 @@ export interface ScheduledTask {
 	session?: string;
 	/** 审批模式：normal=每次确认 / auto=写操作免确认 / yolo=全自动 */
 	approval?: TaskApproval;
+	/** 指定模型 id（缺省沿用会话/全局默认模型）。与 provider 搭配最稳。 */
+	model?: string;
+	/** 模型所属供应商标识；缺省时按任务模型在实例可用列表里反查 */
+	provider?: string;
 	/** 应用关闭期间漏跑是否补跑，默认 false */
 	catchUp?: boolean;
 	/** 要执行的提示词 */
@@ -81,6 +85,28 @@ function log(category: string, detail: string): void {
 		ensureDir(path.dirname(LOG_FILE));
 		fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] [${category}] ${detail}\n`, 'utf8');
 	} catch {}
+}
+
+/** 给内核命令加超时护栏：冷启动实例上 set_model / get_available_models 可能长时间不返回 */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${label} 超时(${Math.round(ms / 1000)}s)`)), ms);
+		p.then(
+			(v) => {
+				clearTimeout(timer);
+				resolve(v);
+			},
+			(e) => {
+				clearTimeout(timer);
+				reject(e);
+			},
+		);
+	});
+}
+
+/** 模型名归一化：去空白/点/下划线/连字符并小写，用于模糊匹配（各内核标签风格不一） */
+function normalizeModelKey(s: unknown): string {
+	return String(s ?? '').toLowerCase().replace(/[\s._\-]/g, '');
 }
 
 // ── cron 解析 / 匹配 ──
@@ -376,6 +402,143 @@ export class TaskScheduler {
 		if (dirty) writeState(state);
 	}
 
+	/**
+	 * 给任务会话切换模型（任务自带 model 时才动作）。
+	 * - provider 已填 -> 直接下发 set_model
+	 * - provider 缺失 -> 用实例可用模型列表按 id/名称反查（精确 → 归一化 → 包含）
+	 * 任何失败都只记日志、不阻断任务：跑起来（哪怕用默认模型）比整轮不跑有价值。
+	 */
+	private async _applyTaskModel(inst: { sendCommand: (...args: any[]) => Promise<any> }, task: ScheduledTask): Promise<void> {
+		const wantId = String(task.model || '').trim();
+		if (!wantId) return;
+		let provider = String(task.provider || '').trim();
+		let modelId = wantId;
+
+		if (!provider) {
+			try {
+				const list: any = await withTimeout(inst.sendCommand({ type: 'get_available_models' }), 20_000, 'get_available_models');
+				const models: any[] = Array.isArray(list?.models) ? list.models : Array.isArray(list) ? list : [];
+				const want = normalizeModelKey(wantId);
+				const hit =
+					models.find((m) => String(m?.id) === wantId) ||
+					models.find((m) => normalizeModelKey(m?.id) === want || normalizeModelKey(m?.name) === want) ||
+					models.find((m) => {
+						const n = normalizeModelKey(m?.name);
+						const i = normalizeModelKey(m?.id);
+						return (!!n && (n.includes(want) || want.includes(n))) || (!!i && (i.includes(want) || want.includes(i)));
+					});
+				if (hit && hit.provider) {
+					provider = String(hit.provider);
+					modelId = String(hit.id || wantId);
+				}
+			} catch (e) {
+				log('model.warn', `任务 ${task.id} 反查模型供应商失败：${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
+
+		if (!provider) {
+			log('model.warn', `任务 ${task.id} 无法确定模型「${wantId}」的供应商，沿用默认模型`);
+			return;
+		}
+		try {
+			await withTimeout(inst.sendCommand({ type: 'set_model', provider, modelId }), 30_000, 'set_model');
+			log('model', `任务 ${task.id} 模型已切换为 ${provider}/${modelId}`);
+		} catch (e) {
+			log('model.warn', `任务 ${task.id} 切换模型 ${provider}/${modelId} 失败（沿用默认模型）：${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	/**
+	 * 投递后异步守候任务真实结束，只写日志（不阻塞 _run 的返回）。
+	 *
+	 * 背景：原先只有 `[done] 已投递` —— 那只代表 prompt 送进内核，看不出任务跑了多久、
+	 * 有没有真的结束。排查「任务起来后对话卡住」时无从下手，故补齐 finish/timeout 两条记录。
+	 *
+	 * 判定：先等 agentRunning 变 true（避免刚投递时的瞬时 false 被误判成"已结束"），
+	 * 之后再等它变 false 记 finish；超过 MAX_RUN_MS 记 timeout 并解除运行占位。
+	 */
+	private _watchTaskFinish(task: ScheduledTask, sessionId: string): void {
+		const startedAt = Date.now();
+		let sawRunning = false;
+		const timer = setInterval(() => {
+			let running = false;
+			try {
+				const cur = this._manager.getBySessionIdAnywhere(sessionId);
+				running = !!(cur && cur.agentRunning);
+			} catch {
+				running = false;
+			}
+			const elapsed = Date.now() - startedAt;
+
+			if (running) {
+				if (!sawRunning) {
+					sawRunning = true;
+					log('running', `任务 ${task.id} 内核已开始执行（投递后 ${Math.round(elapsed / 1000)}s）`);
+				}
+			} else if (sawRunning || elapsed > 30_000) {
+				clearInterval(timer);
+				this._running.delete(task.id);
+				log(
+					'finish',
+					sawRunning
+						? `任务 ${task.id} 结束，执行耗时 ${Math.round(elapsed / 1000)}s`
+						: `任务 ${task.id} 投递后 30s 内未见内核启动执行（可能被拒/模型无响应）`,
+				);
+				return;
+			}
+
+			if (elapsed > MAX_RUN_MS) {
+				clearInterval(timer);
+				this._running.delete(task.id);
+				this._forceReleaseTask(task, sessionId, elapsed);
+			}
+		}, 3_000);
+		if (timer.unref) timer.unref();
+	}
+
+	/**
+	 * 任务超时后的强制释放：取消挂起审批 → abort → 强复位前端 → 仍不空闲则终止实例。
+	 *
+	 * 只「解除运行占位」不够 —— 卡住的实例仍占着实例池（MAX_INSTANCES=8），
+	 * 且它所在会话一直是「运行中」，用户进去再发消息会被排队、停止按钮也无效
+	 * （内核 ask 阻塞 + RPC 命令串行）。终止实例等价于手动关闭对话，是唯一可靠出路；
+	 * 实例被移除后，下次任务触发或用户发言都会重新 spawn 并按会话文件恢复上下文。
+	 */
+	private _forceReleaseTask(task: ScheduledTask, sessionId: string, elapsed: number): void {
+		const inst = this._manager.getBySessionIdAnywhere(sessionId);
+		const mins = Math.round(elapsed / 60_000);
+		if (!inst) {
+			log('timeout', `任务 ${task.id} 超过 ${mins} 分钟仍未结束，已解除运行占位（实例已不在池中）`);
+			return;
+		}
+		const releaseAt = Date.now();
+		const cancelled = inst.cancelPendingAsks('task-timeout');
+		try {
+			inst.sendRaw({ type: 'abort' });
+		} catch {
+			/* 进程可能已退出 */
+		}
+		inst.forceReset('task-timeout');
+		log(
+			'timeout',
+			`任务 ${task.id} 超过 ${mins} 分钟未结束（疑似卡在审批或模型无响应），已取消 ${cancelled} 个挂起审批并强制复位运行态`,
+		);
+		const killTimer = setTimeout(() => {
+			try {
+				// 用真实 agent_end 判定内核是否真的空闲：forceReset 已把 agentRunning
+				// 置 false，拿它判断会永远不兜底（实例仍卡着但看起来"已恢复"）
+				if (inst.lastRealAgentEndAt >= releaseAt) return;
+				const key = this._manager.keyOf(inst);
+				if (key) this._manager.closeByKey(key);
+				else inst.kill(true);
+				log('timeout', `任务 ${task.id} abort 无效，已终止实例以释放实例池（会话可重开恢复）`);
+			} catch (e) {
+				log('timeout', `任务 ${task.id} 终止实例失败: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}, 10_000);
+		if (killTimer.unref) killTimer.unref();
+	}
+
 	private async _run(task: ScheduledTask, trigger: string): Promise<{ success: boolean; error?: string }> {
 		const sessionId = task.session || `sched-${task.id}`;
 		const cwd = task.cwd || this._defaultCwd();
@@ -398,8 +561,12 @@ export class TaskScheduler {
 				return { success: false, error: '会话正忙，本轮跳过' };
 			}
 			this._running.set(task.id, Date.now());
-			log('run', `任务 ${task.id} 开始 trigger=${trigger} cwd=${cwd} session=${sessionId} approval=${approval}`);
+			// 先切模型再投递提示词：内核按会话当前模型处理本次 prompt
+			await this._applyTaskModel(inst, task);
+			log('run', `任务 ${task.id} 开始 trigger=${trigger} cwd=${cwd} session=${sessionId} approval=${approval}${task.model ? ` model=${task.provider ? task.provider + '/' : ''}${task.model}` : ''}`);
 			await inst.sendCommand({ type: 'prompt', message: task.prompt });
+			// 投递成功只说明 prompt 进了内核；真正的结束时刻由 watchdog 记 finish/timeout
+			this._watchTaskFinish(task, sessionId);
 
 			const state = readState();
 			const st = state.tasks[task.id] || {};
@@ -410,7 +577,7 @@ export class TaskScheduler {
 				lastResult: 'ok',
 			};
 			writeState(state);
-			log('done', `任务 ${task.id} 已投递`);
+			log('done', `任务 ${task.id} prompt 已投递`);
 			return { success: true };
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);

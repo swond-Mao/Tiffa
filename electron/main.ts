@@ -18,6 +18,13 @@ import { TiffaInstance } from './modules/tiffa-instance';
 import { TiffaInstanceManager } from './modules/tiffa-manager';
 import { setMainWindow } from './modules/tiffa-instance';
 import { startWebSearchProxy } from './modules/web-search-proxy';
+import {
+  startPreviewServer,
+  stopPreviewServer,
+  registerPreview,
+  unregisterPreview,
+  setPreviewMainWindowGetter,
+} from './modules/preview-server';
 import { TaskScheduler, readTasksFile, writeTasksFile } from './modules/scheduler';
 import { createWindow, syncCustomStartupImage } from './modules/window-setup';
 import {
@@ -440,7 +447,39 @@ function setupIpc() {
     const inst = sessionId
       ? (tiffaManager.getBySessionIdAnywhere(sessionId) || tiffaManager.resolve(tiffaManager.activeCwd, sessionId))
       : tiffaManager.getActive();
-    if (inst) inst.sendRaw({ type: 'abort' });
+    if (!inst) return { error: 'no active instance' };
+    // ① 先取消挂起中的人工确认（审批/提问）。
+    //    内核的 ask 是阻塞式 await，且 RPC 命令是**串行**处理的 —— 不先应答它，
+    //    abort 会永远排在阻塞命令后面不执行，用户看到的就是「停止无效、引导也无效」。
+    const cancelledAsks = inst.cancelPendingAsks('abort');
+    // ② 再发停止信号
+    inst.sendRaw({ type: 'abort' });
+    // ③ 实例本就空闲：没有东西可 abort，但前端可能还停在「运行中」（状态脱同步）。
+    //    直接复位把前端解放出来，**不装看门狗** —— 看门狗等的是「真实 agent_end」，
+    //    而空闲实例根本不会再发，25s 后会把一个好好的实例杀掉。
+    if (!inst.agentRunning && !inst.userPromptInFlight) {
+      inst.forceReset('abort-idle');
+      mainLog(`[tiffa:abort] 实例已空闲，只复位前端运行态 key=${tiffaManager.keyOf(inst)}`);
+      return { cancelledAsks, alreadyIdle: true };
+    }
+    // ④ 看门狗：abort 若始终不生效，先强复位前端运行态，再终止实例。
+    //    「终止实例」等价于用户手动关闭该对话（实测是唯一能恢复的手段）；
+    //    实例从池中移除后，下次发消息会重新 spawn 并按会话文件恢复上下文。
+    const key = tiffaManager.keyOf(inst);
+    inst.armAbortWatchdog((dead) => {
+      dead.forceReset('abort-kill');
+      if (key && tiffaManager.keyOf(dead) === key) {
+        mainLog(`[tiffa:abort] abort 未生效，强制关闭实例 key=${key}（会话可重开恢复）`);
+        tiffaManager.closeByKey(key);
+      } else {
+        try {
+          dead.kill(true);
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+    return { cancelledAsks };
   });
 
   ipcMain.handle('tiffa:setModel', async (event, provider, modelId, sessionId) => {
@@ -685,6 +724,27 @@ function setupIpc() {
     } catch (err) {
       return { error: err.message };
     }
+  });
+
+  // ── 预览 IPC ──
+  // title / sessionPath 不进服务端登记（preview-server 只认文件路径），
+  // 由前端自己持有并写进 usePreviewStore，故这里原样透传登记结果。
+  ipcMain.handle('preview:register', async (_e, filePath) => {
+    if (typeof filePath !== 'string' || !filePath.trim()) return { ok: false, error: 'filePath required' };
+    try {
+      return registerPreview(filePath);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('preview:info', async () => {
+    const origin = process.env.TIFFA_PREVIEW_ORIGIN;
+    return origin ? { origin } : null;
+  });
+  ipcMain.handle('preview:release', async (_e, id) => {
+    if (typeof id !== 'string' || !id) return false;
+    unregisterPreview(id);
+    return true;
   });
 
   ipcMain.handle('fs:readImage', async (event, filePath) => {
@@ -1115,6 +1175,8 @@ function setupIpc() {
         cwd: task.cwd ? String(task.cwd) : undefined,
         session: task.session ? String(task.session) : undefined,
         approval: task.approval || 'auto',
+        model: task.model ? String(task.model).trim() : undefined,
+        provider: task.provider ? String(task.provider).trim() : undefined,
         catchUp: !!task.catchUp,
         prompt: String(task.prompt),
       };
@@ -1918,6 +1980,13 @@ function setupIpc() {
   // （TiffaInstance 类定义在模块顶层，无法直接访问 setupIpc 闭包内的函数）
   TiffaInstance._titleGenerateCallback = _tryGenerateSessionTitle;
 
+  // 真实会话文件命名契约：<ISO时间戳>_<uuid>.jsonl（内核与前端 prepareNewSessionFile 一致）。
+  // 子任务（subagent/task）会话以 <任务名>.jsonl 落盘（如 DFlashSearch.jsonl，无时间戳前缀），
+  // 无论位于父会话目录内、孤儿目录还是旧内核直接写到顶层，一律不视为独立对话，
+  // 否则任务指令文本（"Complete assignment thoroughly:..."）会作为标题污染左侧对话树。
+  const SESSION_FILE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
+  const isRealSessionFile = (name) => SESSION_FILE_RE.test(name);
+
   ipcMain.handle('sessions:listProjects', async () => {
     try {
       // 每次列出项目时也自动发现 workspace 子目录
@@ -1964,7 +2033,7 @@ function setupIpc() {
               // 内部 jsonl 不是独立会话（否则一个对话的归档会分裂成多个列表项）
               if (isTop && isAttachmentDir(entry.name)) continue;
               countJsonl(full, false);
-            } else if (entry.isFile() && entry.name.endsWith('.jsonl')) sessionCount++;
+            } else if (entry.isFile() && isRealSessionFile(entry.name)) sessionCount++;
           }
         };
         if (fs.existsSync(projectPath)) countJsonl(projectPath, true);
@@ -2052,7 +2121,7 @@ function setupIpc() {
           if (entry.isDirectory()) {
             if (isTop && isAttachmentDir(entry.name)) continue;
             walk(full, false);
-          } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+          } else if (entry.isFile() && isRealSessionFile(entry.name)) {
             files.push(full);
           }
         }
@@ -3089,6 +3158,20 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('[web-search-proxy] 启动失败，web_search 将不可用:', e);
   }
+  // ── 侧边栏实时预览：回环服务 ──
+  // 渲染层以 file:// 加载，AI 产出的 HTML 需要真实 http origin 才能被 iframe 正常渲染，
+  // 且不能靠给 iframe 开 allow-same-origin 解决（那等于关掉 sandbox）。
+  try {
+    const previewPort = await startPreviewServer();
+    setPreviewMainWindowGetter(() => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null));
+    // 内核 Bun 子进程继承 process.env（tiffa-instance 里 ...process.env），
+    // 扩展据此判断服务是否就绪：拿不到就如实报错，不推一帧让面板渲染空白框
+    process.env.TIFFA_PREVIEW_ORIGIN = `http://127.0.0.1:${previewPort}`;
+    console.log(`[preview] 预览回环服务已启动: http://127.0.0.1:${previewPort}`);
+  } catch (e) {
+    console.error('[preview] 启动失败，实时预览不可用:', e);
+    delete process.env.TIFFA_PREVIEW_ORIGIN;
+  }
   healKernelExtensionHandlerTimeout();
   healKernelAskDialog();
   setupIpc();
@@ -3119,7 +3202,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (e) => {
   globalShortcut.unregisterAll(); // 窗口快照热键清理
-  taskScheduler.stop();           // 停止定时任务 tick，避免退出期触发新任务
+  taskScheduler.stop();
+  // 关预览回环服务：漏关会占住端口，下次启动端口自增，长期把 18890 那段吃光
+  try { stopPreviewServer(); } catch { /* 退出期忽略 */ }           // 停止定时任务 tick，避免退出期触发新任务
   if (gracefulShutdownStarted) return;        // 第二次（app.quit 再次触发）直接放行退出
   gracefulShutdownStarted = true;
   e.preventDefault();                          // 先拦住，等内核 drain+dispose 自退后再 quit

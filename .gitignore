@@ -192,6 +192,10 @@ data/agent/managed-skills/*/.cache/
 data/agent/managed-skills/dashiai-ppt/project/node_modules/
 # computer-use 视觉模型配置（含真实 API Key 不入库；仓库提供 grounding.json.example 模板，启动缺失时自动恢复）
 data/agent/managed-skills/computer-use/grounding.json
+# comfyui 各套工作流 json（绑定本机 checkpoint 文件名 + 可自调的 megapixels/尺寸策略，
+# 属机器本地配置不入库；仓库只留同名 *.json.example 模板，comfy.py load_wf 缺失时自动恢复，
+# 本地调参不再污染 git 状态，换机器/重装也不会拿别人的模型名去跑）
+data/agent/managed-skills/comfyui-image-gen/workflow_*.json
 # PPT 商业插件包（专有许可，作为独立技能包分发；不随开源仓库，本地安装保留文件）
 data/agent/managed-skills/ppt/
 data/agent/managed-skills/pptx-designer/
@@ -200,3 +204,9 @@ data/agent/managed-skills/pptx-from-layouts/
 
 # Qoder 运行时缓存（不入库）
 .cache/
+
+# 临时调试目录（不入库）
+tmp/
+
+# 用户自定义启动图：运行时从 data/ 复制到 dist/assets/，属个人素材且体积大（数 MB）
+electron/renderer/dist/assets/startup-custom.*

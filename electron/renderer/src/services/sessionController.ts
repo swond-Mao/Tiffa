@@ -478,6 +478,22 @@ function lsSetSafe(key: string, value: string): void {
 
 // ── 项目 ──
 
+/**
+ * 项目摘要归一化。
+ * 主进程对活跃项目返回 title/path，对归档项目返回 displayName/cwd，前端统一成 title/path ——
+ * 否则归档列表读 p.title 恒为 undefined，一律显示成「未知项目」。
+ */
+function normalizeProjectSummary(p: Record<string, unknown>): TiffaProjectSummary {
+  return {
+    dirName: String(p.dirName || ''),
+    path: p.path ? String(p.path) : p.cwd ? String(p.cwd) : undefined,
+    title: p.title ? String(p.title) : p.displayName ? String(p.displayName) : undefined,
+    lastActiveAt: typeof p.lastActiveAt === 'number' ? p.lastActiveAt : undefined,
+    sessionCount: typeof p.sessionCount === 'number' ? p.sessionCount : undefined,
+    cwd: p.cwd ? String(p.cwd) : undefined,
+  };
+}
+
 export async function loadProjects(): Promise<void> {
   const projectsStore = useProjectsStore.getState();
   const result = (await window.tiffaDesktop.listProjects()) as (TiffaProjectSummary[] & { error?: string }) | undefined;
@@ -485,20 +501,15 @@ export async function loadProjects(): Promise<void> {
     useUiStore.getState().addToast('error', result.error);
     return;
   }
-  const projects: TiffaProjectSummary[] = (Array.isArray(result) ? result : []).map((p) => ({
-    dirName: String(p.dirName || ''),
-    path: p.path ? String(p.path) : undefined,
-    title: p.title ? String(p.title) : p.displayName ? String(p.displayName) : undefined,
-    lastActiveAt: typeof p.lastActiveAt === 'number' ? p.lastActiveAt : undefined,
-    sessionCount: typeof p.sessionCount === 'number' ? p.sessionCount : undefined,
-    cwd: p.cwd ? String(p.cwd) : undefined,
-  }));
+  const projects: TiffaProjectSummary[] = (Array.isArray(result) ? result : []).map((p) =>
+    normalizeProjectSummary(p as unknown as Record<string, unknown>),
+  );
   projectsStore.setProjects(projects);
   try {
     const archivedResult = (await window.tiffaDesktop.listArchivedProjects()) as Array<Record<string, unknown>> & { error?: string };
     projectsStore.setArchivedProjects(
       archivedResult && !archivedResult.error && Array.isArray(archivedResult)
-        ? (archivedResult as unknown as TiffaProjectSummary[])
+        ? archivedResult.map(normalizeProjectSummary)
         : [],
     );
   } catch {

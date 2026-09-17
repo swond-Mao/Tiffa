@@ -17,10 +17,28 @@ import {
   TIFFA_CLI,
   EXTENSION_PATH,
   COMPUTER_USE_EXTENSION_PATH,
+  PREVIEW_EXTENSION_PATH,
   SESSIONS_DIR,
 } from './constants';
 import { stableSessionDirName, extractSessionIdFromPath, parseSessionHeader, mainLog } from './session-utils';
 import { killTree, utf8Env } from './process-utils';
+
+/**
+ * 无人值守实例（调度器起的定时任务会话）的审批等待上限。
+ * 到点自动按「拒绝」应答，避免半夜任务卡在审批上直到天亮（内核的 ask 是
+ * 阻塞式 await，没人应答就永远不返回，实例会永久停留在 agentRunning）。
+ * 交互式会话不受此限：用户可能正慢慢看审批内容，擅自替他拒绝更糟。
+ * 设为 0 可关闭该行为。
+ */
+const UNATTENDED_ASK_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.TIFFA_TASK_ASK_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 10 * 60 * 1000;
+})();
+
+/** abort 后多久仍未恢复到空闲，就先强制复位前端运行态 */
+const ABORT_GRACE_MS = 8000;
+/** abort 后多久仍未恢复到空闲，判定 abort 已失效，终止实例（等价手动「关闭对话」） */
+const ABORT_KILL_MS = 25000;
 
 // ── 依赖注入 ──
 let _mainWindow: BrowserWindow | null = null;
@@ -84,6 +102,22 @@ export class TiffaInstance {
   _titleGenerated = false;
   _restoringContext = false;
   _pendingAskIds = new Set<string>();
+  /** 挂起审批的自动「放弃」定时器（仅无人值守的定时任务实例启用，见 _armAskTimeout） */
+  _askTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  /** abort 看门狗：abort 无效时的分级处置计时器（见 armAbortWatchdog） */
+  _abortWatchdog: ReturnType<typeof setInterval> | null = null;
+  _abortWatchdogReset = false;
+  /**
+   * 最后一次收到内核**真实** agent_end 的时间戳。
+   * 看门狗不能用 agentRunning 判断「abort 是否生效」—— forceReset 会把它置 false，
+   * 于是看门狗会误以为已恢复而放弃兜底。只有真实 agent_end 才代表内核空闲了。
+   * （forceReset 的合成事件直接推给渲染层、不经 _handleEvent，不会污染此值。）
+   */
+  _lastRealAgentEndAt = 0;
+
+  get lastRealAgentEndAt(): number {
+    return this._lastRealAgentEndAt;
+  }
   _rpcChunkBuffer: Map<string, { count: number; chunks: Buffer[]; received: number; byteLength: number }> | null = null;
   stderrDecoder: StringDecoder | null = null;
   /** 最近 stderr 尾部（环形，≤4000 字符）：exit 时识别「配置致命错误」用 */
@@ -146,6 +180,10 @@ export class TiffaInstance {
     delete env.ELECTRON_RUN_AS_NODE;
 
     const args = [TIFFA_CLI, '--mode', 'rpc-ui', '-e', EXTENSION_PATH, '-e', COMPUTER_USE_EXTENSION_PATH];
+    // 预览扩展可选装：用户删掉该文件时不应导致内核起不来，故先探测再追加
+    try {
+      if (fs.existsSync(PREVIEW_EXTENSION_PATH)) args.push('-e', PREVIEW_EXTENSION_PATH);
+    } catch { /* 探测失败按未安装处理 */ }
 
     const stableSessionDir = path.join(SESSIONS_DIR, stableSessionDirName(this.cwd));
     args.push('--session-dir', stableSessionDir);
@@ -258,15 +296,167 @@ export class TiffaInstance {
   }
 
   kill(sync = false): void {
+    this.userKilled = true;
+    // 定时器清理放在 process 判空之前：看门狗/审批超时可能先于进程建立就装上
+    this._clearAbortWatchdog();
+    for (const t of this._askTimeouts.values()) clearTimeout(t);
+    this._askTimeouts.clear();
     if (!this.process) return;
     const proc = this.process;
-    this.userKilled = true;
     if (this._restartTimer) {
       clearTimeout(this._restartTimer);
       this._restartTimer = null;
     }
     killTree(proc.pid, sync);
     this._cleanup();
+  }
+
+  /** 无人值守实例：调度器起的任务会话（sessionId 形如 sched-<id>） */
+  get isUnattended(): boolean {
+    return !!this.sessionId && this.sessionId.startsWith('sched-');
+  }
+
+  /**
+   * 取消全部挂起中的人工确认（审批 / 提问）。
+   *
+   * 为什么必须做：内核的交互式 ask 是**阻塞式 await**（等 extension_ui_response
+   * 才返回），而 RPC 命令处理是**串行**的 —— 只要有一条命令卡在这个 await 上，
+   * 排在它后面的 abort / steer / prompt 全都永远不会被执行。表现就是
+   * 「停止按钮无效、引导无效、只能关闭对话」。先把 ask 应答掉，内核才会
+   * 回到命令循环，后续 abort 才有机会生效。
+   *
+   * 内核不会为「客户端主动取消」回发 cancel 事件，所以这里补发一个合成
+   * cancel 给渲染层，让审批弹窗同步出队。
+   */
+  cancelPendingAsks(reason: string): number {
+    const ids = Array.from(this._pendingAskIds);
+    if (ids.length === 0) return 0;
+    for (const id of ids) {
+      this._clearAskTimeout(id);
+      try {
+        this.sendRaw({ type: 'extension_ui_response', id, cancelled: true });
+      } catch {
+        /* 进程可能已退出 */
+      }
+      if (_mainWindow && !_mainWindow.isDestroyed()) {
+        _mainWindow.webContents.send('tiffa:event', {
+          type: 'extension_ui_request',
+          method: 'cancel',
+          id,
+          targetId: id,
+          _cwd: this.cwd,
+          _sessionId: this.sessionId,
+          _sessionPath: this.sessionFilePath || null,
+        });
+      }
+    }
+    this._pendingAskIds.clear();
+    mainLog(`[${this._shortCwd()}#${this.sessionId}] 已取消挂起审批 ${ids.length} 个（${reason}）`);
+    return ids.length;
+  }
+
+  /**
+   * 强制把实例复位到「可发送」状态，不等内核回 agent_end。
+   *
+   * 用于 abort 无效的场景：本地运行标志复位 + 补发合成 agent_end，
+   * 让渲染层解排队、收尾流式消息、自动发出已排队的消息。
+   * 注意先清 isPrewarming / _restoringContext —— 两者的过滤器会把合成事件吞掉。
+   */
+  forceReset(reason: string): void {
+    const wasRunning = this.agentRunning;
+    this.agentRunning = false;
+    this.userPromptInFlight = false;
+    this.isPrewarming = false;
+    this._restoringContext = false;
+    this.cancelPendingAsks(reason);
+    mainLog(`[${this._shortCwd()}#${this.sessionId}] 强制复位运行态 wasRunning=${wasRunning}（${reason}）`);
+    if (_mainWindow && !_mainWindow.isDestroyed()) {
+      _mainWindow.webContents.send('tiffa:event', {
+        type: 'agent_end',
+        messages: [],
+        _synthetic: true,
+        _resetReason: reason,
+        _cwd: this.cwd,
+        _sessionId: this.sessionId,
+        _sessionPath: this.sessionFilePath || null,
+      });
+    }
+  }
+
+  /**
+   * abort 看门狗：abort 发出后若实例仍未回到空闲，说明 abort 没能生效
+   * （内核串行链被卡住，或停在等模型响应上）。分级处置：
+   * - ABORT_GRACE_MS：先 forceReset（把前端从「运行中/排队」里解放出来）
+   * - ABORT_KILL_MS：回调 onGiveUp（调用方终止实例 = 等价用户手动关闭对话）
+   *
+   * onGiveUp 由调用方提供（main.ts），因为「终止并移除实例」需要 manager 参与。
+   */
+  armAbortWatchdog(onGiveUp: (inst: TiffaInstance) => void): void {
+    if (this._abortWatchdog) return;
+    this._abortWatchdogReset = false;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      // 判定依据是「abort 之后有没有收到真实的 agent_end」——
+      // agentRunning 会被 forceReset 置 false，用它判断会导致看门狗提前放弃
+      if (this._lastRealAgentEndAt >= startedAt) {
+        this._clearAbortWatchdog();
+        mainLog(`[${this._shortCwd()}#${this.sessionId}] abort 已生效（${Math.round((Date.now() - startedAt) / 1000)}s）`);
+        return;
+      }
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= ABORT_KILL_MS) {
+        this._clearAbortWatchdog();
+        mainLog(
+          `[${this._shortCwd()}#${this.sessionId}] abort 在 ${Math.round(ABORT_KILL_MS / 1000)}s 内未生效，终止实例以解除卡死`,
+        );
+        try {
+          onGiveUp(this);
+        } catch (e) {
+          console.warn(`[TiffaInstance:${this._shortCwd()}] abort 兜底终止异常:`, e);
+        }
+        return;
+      }
+      if (elapsed >= ABORT_GRACE_MS && !this._abortWatchdogReset) {
+        this._abortWatchdogReset = true;
+        this.forceReset('abort-grace');
+      }
+    }, 1500);
+    if (timer.unref) timer.unref();
+    this._abortWatchdog = timer;
+  }
+
+  private _clearAbortWatchdog(): void {
+    if (this._abortWatchdog) {
+      clearInterval(this._abortWatchdog);
+      this._abortWatchdog = null;
+    }
+  }
+
+  /**
+   * 无人值守实例的审批挂起定时器：超时自动按「拒绝」应答。
+   * 拒绝会让该工具失败并回到模型，任务能自己收尾或重试 —— 好过永久挂起。
+   */
+  private _armAskTimeout(id: string): void {
+    if (!this.isUnattended || UNATTENDED_ASK_TIMEOUT_MS <= 0) return;
+    this._clearAskTimeout(id);
+    const timer = setTimeout(() => {
+      this._askTimeouts.delete(id);
+      if (!this._pendingAskIds.has(id)) return;
+      mainLog(
+        `[${this._shortCwd()}#${this.sessionId}] 无人值守实例审批挂起超时（${Math.round(UNATTENDED_ASK_TIMEOUT_MS / 60000)} 分钟），自动按「拒绝」应答 id=${id}`,
+      );
+      this.cancelPendingAsks('ask-timeout');
+    }, UNATTENDED_ASK_TIMEOUT_MS);
+    if (timer.unref) timer.unref();
+    this._askTimeouts.set(id, timer);
+  }
+
+  private _clearAskTimeout(id: string): void {
+    const t = this._askTimeouts.get(id);
+    if (t) {
+      clearTimeout(t);
+      this._askTimeouts.delete(id);
+    }
   }
 
   sendCommand(frame: TiffaEvent): Promise<unknown> {
@@ -411,6 +601,8 @@ export class TiffaInstance {
       event._wasPrewarming = this.isPrewarming;
       this.agentRunning = false;
       this.userPromptInFlight = false;
+      // 真实结束时间戳：abort 看门狗 / 调度器超时处置靠它判断内核是否真的空闲了
+      this._lastRealAgentEndAt = Date.now();
       // agent_end 兜底探测：agent_start 时 firstMessage 可能尚未写盘（竞态）导致
       // 探测未命中——结束时文件必已完整，补探测并模拟补发 session_switch。
       if (!this.sessionFilePath) this._probeSessionFile();
@@ -490,11 +682,16 @@ export class TiffaInstance {
     if (event.type === 'extension_ui_request') {
       const m = event.method as string;
       if (m === 'cancel') {
-        this._pendingAskIds.delete((event.targetId as string) || (event.id as string));
+        const cancelledId = (event.targetId as string) || (event.id as string);
+        this._pendingAskIds.delete(cancelledId);
+        this._clearAskTimeout(cancelledId);
         this._pendingAskIds.delete(event.id as string);
-        mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req cancel target=${event.targetId || event.id}`);
+        this._clearAskTimeout(event.id as string);
+        mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req cancel target=${cancelledId}`);
       } else if (['editor', 'select', 'confirm', 'input', 'askDialog'].includes(m)) {
         this._pendingAskIds.add(event.id as string);
+        // 无人值守实例：超时自动拒绝，避免任务永久卡在等人确认
+        this._armAskTimeout(event.id as string);
         mainLog(`[${this._shortCwd()}#${this.sessionId}] ui-req ${m} id=${event.id} pending=${this._pendingAskIds.size}`);
       }
     }

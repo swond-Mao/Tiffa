@@ -1,6 +1,6 @@
 ---
 name: pptgen
-description: 生成交互式 HTML 网页（不是 PPTX），内置多套视觉模板，自动调本地模型生成内容 + ComfyUI 生图。独立 CLI 工具，零 API 费用。要做传统 PPT 请用 dashiai-ppt。
+description: 生成交互式 HTML 网页（不是 PPTX），内置多套视觉模板，自动调本地模型生成内容 + ComfyUI 生图。独立 CLI 工具，零 API 费用。要做传统 PPT 请走 `skill://ppt` 入口（pptx-designer / 模板驱动管线）。
 triggers:
   - 交互式网页
   - HTML演示

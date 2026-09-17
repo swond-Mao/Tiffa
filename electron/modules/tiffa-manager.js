@@ -226,6 +226,18 @@ class TiffaInstanceManager {
         }
         return null;
     }
+    /**
+     * 反查实例当前所在的 key。
+     * 实例的 sessionId 迁移过（temp UUID → 真实 id）时，key 也可能已迁移，
+     * 按 inst.cwd + inst.sessionId 重算未必命中 —— 直接遍历确认才可靠。
+     */
+    keyOf(target) {
+        for (const [k, inst] of this.instances) {
+            if (inst === target)
+                return k;
+        }
+        return null;
+    }
     /** 迁移实例的 sessionId：CLI 分配真实 sessionId 后迁移 key */
     migrateSessionId(cwd, oldSessionId, newSessionId) {
         if (!cwd || !oldSessionId || !newSessionId || oldSessionId === newSessionId)
