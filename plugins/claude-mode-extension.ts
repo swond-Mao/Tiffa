@@ -116,6 +116,44 @@ export function intentTargetsOtherTool(input: Record<string, unknown>, actual: s
   return null
 }
 
+// todo 返回值增强 —— 治「任务已完成却又莫名多输出一段」。
+//
+// 根因（2026-09-19 读内核源码定位）：内核 agent-session.ts 的 agent_end 判定链里，
+// `#todo.checkCompletion` 包在 `if (msg.stopReason !== "error")` 内 —— 所以**每次正常 stop 都会检查**，
+// 只要还有 pending/in_progress 的待办，就注入 "You stopped with N incomplete todo item(s)" 让它继续。
+// 内核读的是会话里真实的 todo 状态、提醒数字一字不差，**错在模型**：它不读 todo 的返回值、
+// 在正文里谎报「已全部标记完成」（实测 9-16 会话：正文说 11 项全标了 blocked，实际只调了 3 次 block），
+// 于是状态永远清不空 → 每轮都被续跑 → 表现就是"明明做完了又莫名多输出一段"。
+// 解药内核早备好（专门加了 blocked 状态豁免"等外部输入"的活），只是模型不吃。
+//
+// 这里直击根因：把 "N open" 顶到它眼前，并明确「只用文字说明不会改变状态」。
+// 判据口径与内核完全一致：Overall 里的 open 就是 pending + in_progress，即触发提醒的那个数。
+// （实测样本：`Overall: 9/10 done, 0 open, 1 blocked.` / `Overall: 4/18 done, 11 open, 3 blocked.`）
+const TODO_OVERALL_RE = /Overall:\s*(\d+)\s*\/\s*(\d+)\s*done\s*,\s*(\d+)\s*open/i
+export function buildTodoOpenReminder(content: unknown): { open: number; note: string } | null {
+  const text = Array.isArray(content)
+    ? content
+        .filter((c: any) => c?.type === "text" && typeof c?.text === "string")
+        .map((c: any) => c.text)
+        .join("\n")
+    : typeof content === "string"
+      ? content
+      : ""
+  if (!text || !text.includes("Overall:")) return null
+  const m = TODO_OVERALL_RE.exec(text)
+  if (!m) return null
+  const open = Number(m[3])
+  if (!Number.isFinite(open) || open <= 0) return null
+  return {
+    open,
+    note:
+      `⚠️ [claude-mode] 待办里还有 ${open} 项是 pending/in_progress —— ` +
+      `内核据此判定"任务未结束"，会在你停止后自动注入提醒并要求继续（这就是"明明做完了却又多输出一段"的来源）。\n` +
+      `若这些事确实已做完、或需要等外部结果：**必须再调用一次 todo 工具**把它们标成 completed 或 blocked。\n` +
+      `只在正文里写"已完成"不会改变状态。blocked 是内核专门给"等外部输入"准备的豁免状态，标了就不再计入未完成。`,
+  }
+}
+
 // ── snapcompact 帧预算字节预判（纯函数，导出供单测）──
 // 背景：内核硬预算 = 新帧组 b64 总长 > 3,000,000 B → 抛 "standing image payload exceeds the per-request budget"
 // （手动路径无 LLM 兜底）。旧 130K 字符预判（1 字符 ≈ 17.7 B，内核静态估算）把中文密集内容低估 ~1.9 倍
@@ -1063,6 +1101,8 @@ export default async function (pi: any) {
   let bashHiddenByBrake = false     // bash 是否已被刹车临时移出工具集
   let pendingBrakeNote: string | undefined  // 待随 tool_result 追加给模型的软提醒
   let pendingResultNote = ""        // tool_call → tool_result 的提醒传递通道
+  let lastTodoOpen = -1             // 上一次 todo 返回值里的 open 数（-1 = 尚未出现）
+  let lastTodoOpenRepeats = 0       // 同一个 open 值已提醒次数（上限 2，避免重复刷 context）
   const NO_PROGRESS_SOFT = 2        // 第 2 次：结果里追加软提醒
   const NO_PROGRESS_BLOCK = 3       // 第 3 次起：硬拦截后续空转 bash
   const NO_PROGRESS_HIDE = 5        // 第 5 次起：把 bash 移出活跃工具集
@@ -2355,13 +2395,34 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       // 内核不支持从 tool_call 钩子 steer 注入（steer 字段被内核丢弃），改用追加结果文本这条通道。
       // 放在堆栈清洗之后：安全过滤优先，绝不能因为要加提醒而绕过错漏清洗。
       // 若本分支被上面的早退跳过，提醒不会被消费，会自动搭在下一条结果上（自愈，不丢）。
+      const extraNotes: string[] = []
       if (pendingResultNote) {
-        const note = pendingResultNote
+        extraNotes.push(pendingResultNote)
         pendingResultNote = ""
+      }
+
+      // todo 返回值增强：open>0 就逼它改状态（详见 buildTodoOpenReminder 上方的根因注释）。
+      // 同一个 open 值最多提醒 2 次 —— 重复说没有意义还占 context；状态一变（模型真去标了）立刻重新激活。
+      if (tool === "todo") {
+        const r = buildTodoOpenReminder(event.content)
+        if (!r) {
+          lastTodoOpen = -1
+          lastTodoOpenRepeats = 0
+        } else if (r.open !== lastTodoOpen) {
+          lastTodoOpen = r.open
+          lastTodoOpenRepeats = 1
+          extraNotes.push(r.note)
+        } else if (lastTodoOpenRepeats < 2) {
+          lastTodoOpenRepeats++
+          extraNotes.push(r.note)
+        }
+      }
+
+      if (extraNotes.length > 0) {
         const existing = Array.isArray(event.content) ? event.content : []
-        log("tool_result.brake_note", `tool=${tool} len=${note.length}`)
+        log("tool_result.note", `tool=${tool} notes=${extraNotes.length}`)
         return {
-          content: [...existing, { type: "text", text: note }],
+          content: [...existing, ...extraNotes.map((t) => ({ type: "text", text: t }))],
         }
       }
     } catch (err: any) {
