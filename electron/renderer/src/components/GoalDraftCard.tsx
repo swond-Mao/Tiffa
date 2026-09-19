@@ -25,6 +25,8 @@ export default function GoalDraftCard() {
   const [budget, setBudget] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  // 自动续跑：长任务勾选后，模型每轮结束会被自动拉起下一回合（护栏在设置里配，这里给默认 30 轮 / 240 分钟）
+  const [autoResume, setAutoResume] = useState(false);
   const pollRef = useRef<number | null>(null);
   const pollsRef = useRef(0);
 
@@ -99,13 +101,14 @@ export default function GoalDraftCard() {
       { objective: text, criteria: criteria.filter((s) => s.trim()), todos: todos.filter((s) => s.trim()) },
       Number.isFinite(b) && b > 0 ? b : null,
       activeSessionId ?? null,
+      autoResume ? { enabled: true, maxTurns: 30, maxMinutes: 240, minIntervalMs: 800 } : null,
     );
     setBusy(false);
     if (!r?.ok) {
       setNote(r?.error || '开始执行失败');
       return;
     }
-    useUiStore.getState().addToast('success', '目标已开始执行');
+    useUiStore.getState().addToast('success', autoResume ? '目标已开始执行（自动续跑已开启）' : '目标已开始执行');
     setGoalDraft(null);
     loadedKey.current = '';
   };
@@ -191,6 +194,11 @@ export default function GoalDraftCard() {
               onChange={(e) => setBudget(e.target.value)}
             />
           </div>
+
+          <label className="goal-draft-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+            <input type="checkbox" checked={autoResume} onChange={(e) => setAutoResume(e.target.checked)} />
+            自动续跑到目标完成（默认上限 30 轮 / 240 分钟）
+          </label>
 
           <div className="goal-draft-actions">
             <button type="button" className="goal-draft-primary" disabled={busy} onClick={() => void start()}>

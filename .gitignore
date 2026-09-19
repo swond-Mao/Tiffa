@@ -151,6 +151,8 @@ data/agent/goal-state.json
 data/agent/goal-state.*.json
 data/agent/goal-draft.json
 data/agent/goal-draft.*.json
+data/agent/goal-resume.json
+data/agent/goal-resume.*.json
 
 # Skill 娓叉煋缂撳啿锛堜复鏃朵骇鐗╋級
 skills/*/project/*_buffer.png

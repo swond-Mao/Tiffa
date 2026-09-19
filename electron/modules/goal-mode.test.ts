@@ -36,6 +36,10 @@ import {
   readGoalState,
   clearGoalState,
   goalDraftPath,
+  goalResumePath,
+  readGoalResume,
+  clearGoalResume,
+  DEFAULT_AUTO_RESUME,
   readGoalDraft,
   writeGoalDraft,
   clearGoalDraft,
@@ -244,5 +248,50 @@ describe('目标草稿：转写 + 人审闸门', () => {
     expect(cmd).toContain('```tiffa-goal');
     expect(cmd).toContain('"objective"');
     expect(cmd).toContain('禁止');
+  });
+});
+
+describe('自动续跑配置与计数', () => {
+  beforeEach(() => {
+    for (const f of fs.readdirSync(TMP)) {
+      if (f.startsWith('goal-resume')) fs.unlinkSync(path.join(TMP, f));
+    }
+    fs.rmSync(GOAL_ARM_PATH, { force: true });
+  });
+
+  it('autoResume 缺省/未开启时一律读到 null（没开就不续，绝不能默认续跑）', () => {
+    writeGoalArm({ enabled: true, objective: 'x', tokenBudget: null, sessionId: SID_A });
+    expect(readGoalArm().autoResume).toBeNull();
+    writeGoalArm({ enabled: true, objective: 'x', tokenBudget: null, sessionId: SID_A, autoResume: { enabled: false, maxTurns: 9, maxMinutes: 9 } });
+    expect(readGoalArm().autoResume).toBeNull();
+  });
+
+  it('autoResume 开启时读到护栏值，且缺省字段有兜底（不设上限的续跑=放任烧 token）', () => {
+    writeGoalArm({
+      enabled: true,
+      objective: 'x',
+      tokenBudget: null,
+      sessionId: SID_A,
+      autoResume: { enabled: true, maxTurns: 5, maxMinutes: 0 },
+    });
+    const ar = readGoalArm().autoResume;
+    expect(ar?.enabled).toBe(true);
+    expect(ar?.maxTurns).toBe(5);
+    expect(ar?.minIntervalMs).toBe(DEFAULT_AUTO_RESUME.minIntervalMs);
+  });
+
+  it('坏 json / 缺文件按不续跑处理（fail-closed）', () => {
+    fs.writeFileSync(GOAL_ARM_PATH, '{ not json', 'utf8');
+    expect(readGoalArm().autoResume).toBeNull();
+  });
+
+  it('续跑计数按会话分文件，clearGoalResume 不误删别的会话', () => {
+    fs.writeFileSync(goalResumePath(SID_A), JSON.stringify({ sessionId: SID_A, turns: 3 }), 'utf8');
+    fs.writeFileSync(goalResumePath(SID_B), JSON.stringify({ sessionId: SID_B, turns: 1 }), 'utf8');
+    expect(readGoalResume(SID_A)?.turns).toBe(3);
+    expect(readGoalResume(SID_B)?.turns).toBe(1);
+    clearGoalResume(SID_A);
+    expect(readGoalResume(SID_A)).toBeNull();
+    expect(readGoalResume(SID_B)?.turns).toBe(1);
   });
 });

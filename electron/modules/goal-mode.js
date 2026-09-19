@@ -33,8 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GOAL_STATE_PATH = exports.GOAL_ARM_PATH = void 0;
+exports.DEFAULT_AUTO_RESUME = exports.GOAL_STATE_PATH = exports.GOAL_ARM_PATH = void 0;
 exports.goalStatePath = goalStatePath;
+exports.goalResumePath = goalResumePath;
+exports.readGoalResume = readGoalResume;
+exports.clearGoalResume = clearGoalResume;
 exports.goalDraftPath = goalDraftPath;
 exports.readGoalArm = readGoalArm;
 exports.writeGoalArm = writeGoalArm;
@@ -86,12 +89,67 @@ exports.GOAL_STATE_PATH = path.join(constants_1.AGENT_DIR, 'goal-state.json');
 function goalStatePath(sessionId) {
     return sessionId ? path.join(constants_1.AGENT_DIR, `goal-state.${sessionId}.json`) : exports.GOAL_STATE_PATH;
 }
+exports.DEFAULT_AUTO_RESUME = { enabled: false, maxTurns: 30, maxMinutes: 240, minIntervalMs: 800 };
+/** 续跑计数文件（外挂写，主进程/前端只读展示）：`goal-resume.<sessionId>.json` */
+function goalResumePath(sessionId) {
+    return sessionId ? path.join(constants_1.AGENT_DIR, `goal-resume.${sessionId}.json`) : path.join(constants_1.AGENT_DIR, 'goal-resume.json');
+}
+function readGoalResume(sessionId) {
+    for (const p of sessionId ? [goalResumePath(sessionId), goalResumePath(null)] : [goalResumePath(null)]) {
+        try {
+            if (!fs.existsSync(p))
+                continue;
+            const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (!raw || typeof raw !== 'object')
+                continue;
+            if (raw.sessionId && sessionId && raw.sessionId !== sessionId)
+                continue;
+            return raw;
+        }
+        catch {
+            continue;
+        }
+    }
+    return null;
+}
+/** 开新目标 / 收尾目标时清掉计数：否则上一轮的轮数会算进新目标，护栏提前触发 */
+function clearGoalResume(sessionId) {
+    for (const p of [goalResumePath(sessionId), goalResumePath(null)]) {
+        try {
+            if (!fs.existsSync(p))
+                continue;
+            if (!sessionId) {
+                fs.unlinkSync(p);
+                continue;
+            }
+            const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (raw?.sessionId && raw.sessionId !== sessionId)
+                continue;
+            fs.unlinkSync(p);
+        }
+        catch {
+            /* 删不掉不影响主流程 */
+        }
+    }
+}
 /** 草稿（转写 + 人审闸门）文件路径：`goal-draft.<sessionId>.json`。
  *  同样按会话分文件 —— 理由同运行态（子代理会在同进程内重载外挂）。 */
 function goalDraftPath(sessionId) {
     return sessionId ? path.join(constants_1.AGENT_DIR, `goal-draft.${sessionId}.json`) : path.join(constants_1.AGENT_DIR, 'goal-draft.json');
 }
 const EMPTY_ARM = { enabled: false, objective: '', tokenBudget: null, sessionId: '' };
+function parseAutoResume(raw) {
+    const r = raw?.autoResume;
+    if (!r || typeof r !== 'object' || r.enabled !== true)
+        return null;
+    const n = (v, def) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : def);
+    return {
+        enabled: true,
+        maxTurns: n(r.maxTurns, exports.DEFAULT_AUTO_RESUME.maxTurns),
+        maxMinutes: n(r.maxMinutes, exports.DEFAULT_AUTO_RESUME.maxMinutes),
+        minIntervalMs: n(r.minIntervalMs, exports.DEFAULT_AUTO_RESUME.minIntervalMs ?? 800),
+    };
+}
 function readGoalArm() {
     try {
         if (!fs.existsSync(exports.GOAL_ARM_PATH))
@@ -102,6 +160,7 @@ function readGoalArm() {
             objective: typeof raw?.objective === 'string' ? raw.objective : '',
             tokenBudget: typeof raw?.tokenBudget === 'number' ? raw.tokenBudget : null,
             sessionId: typeof raw?.sessionId === 'string' ? raw.sessionId : '',
+            autoResume: parseAutoResume(raw),
         };
     }
     catch {

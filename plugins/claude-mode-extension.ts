@@ -680,6 +680,58 @@ export default async function (pi: any) {
   /** 每会话最多建议 2 次：建议是提示不是纪律，反复说会变成噪音 */
   let goalSuggestLeft = 2
 
+  /** 续跑计数文件（本扩展写，主进程/前端只读展示）：`goal-resume.<sessionId>.json` */
+  function goalResumePathFor(sid?: string): string {
+    return sid ? join(AGENT_DIR, `goal-resume.${sid}.json`) : join(AGENT_DIR, "goal-resume.json")
+  }
+  function readGoalResume(ctx?: any): { turns: number; startedAt: number; lastAt: number } | null {
+    const mine = hookSessionId(ctx)
+    for (const p of [goalResumePathFor(mine), goalResumePathFor("")]) {
+      try {
+        if (!existsSync(p)) continue
+        const raw = JSON.parse(readFileSync(p, "utf8"))
+        if (!raw || typeof raw !== "object") continue
+        if (raw.sessionId && mine && raw.sessionId !== mine) continue
+        return raw
+      } catch {
+        continue
+      }
+    }
+    return null
+  }
+  function writeGoalResume(ctx: any, patch: Record<string, unknown>): void {
+    try {
+      ensureDir(AGENT_DIR)
+      const cur = readGoalResume(ctx) || { turns: 0, startedAt: Date.now(), lastAt: 0 }
+      writeFileSync(goalResumePathFor(hookSessionId(ctx)), JSON.stringify({ ...cur, ...patch, sessionId: hookSessionId(ctx) }, null, 2) + "\n", "utf8")
+    } catch (e: any) {
+      log("goal.resume.write.error", e?.message || String(e))
+    }
+  }
+
+  /** 继跑提示：给模型看的「继续推进目标」指令（内核 TUI 的 buildContinuationPrompt 的对位实现） */
+  function buildGoalContinuation(state: any): string {
+    const lines = [
+      "# 目标模式：继续推进",
+      "",
+      "上一轮已结束，但**目标尚未完成**（状态仍为 active）。请继续按目标推进，不要停在这里。",
+      "",
+      `> ${state.objective}`,
+    ]
+    if (typeof state.tokenBudget === "number") {
+      lines.push("", `预算：已用 ${state.tokensUsed ?? 0} / ${state.tokenBudget} tokens`)
+    }
+    lines.push(
+      "",
+      "本轮要求：",
+      "1. 先确认上一轮的产出是否真的落地（读文件 / 跑检查），不要凭记忆往下走；",
+      "2. 再做**下一步**实质性工作 —— 只做计划、只汇报进度、或输出与上一轮重复的内容都算空转；",
+      "3. 全部交付物都核对通过后，才调用 `goal({op:\"complete\"})`（那之后就不会再有续跑）；",
+      "4. 遇到无法自行解决的阻塞（缺信息 / 缺权限 / 需要用户决策），**如实说明并停止**，不要假装完成。",
+    )
+    return lines.join("\n")
+  }
+
   /** 草稿阶段禁止的写类工具：转写轮只允许读，避免模型"顺手就把活干了"，人审闸门就失去意义 */
   const DRAFT_BLOCKED_TOOLS = new Set([
     "write", "edit", "multi_edit", "str_replace", "apply_patch", "patch",
@@ -691,7 +743,7 @@ export default async function (pi: any) {
     "read", "grep", "glob", "find", "ls", "list", "search", "semantic_search",
     "web_search", "web_fetch", "recall", "reflect",
   ])
-  let goalArmCache: { mtimeMs: number; enabled: boolean; objective: string; sessionId: string } | null = null
+  let goalArmCache: { mtimeMs: number; enabled: boolean; objective: string; sessionId: string; autoResume: any } | null = null
 
   /** 本 hook 所属会话 id。Tiffa 是多对话并发（最多 8 个实例共用同一个 data/agent），
    *  goal 是**每会话**的，所以 arm/state 两个文件都带 sessionId 做隔离，不能全局生效。
@@ -704,22 +756,25 @@ export default async function (pi: any) {
     }
   }
 
-  function readGoalArm(ctx?: any): { enabled: boolean; objective: string } {
+  function readGoalArm(ctx?: any): { enabled: boolean; objective: string; autoResume: any } {
     try {
       if (!existsSync(GOAL_ARM_PATH)) {
         goalArmCache = null
-        return { enabled: false, objective: "" }
+        return { enabled: false, objective: "", autoResume: null }
       }
       const st = statSync(GOAL_ARM_PATH)
       if (goalArmCache && goalArmCache.mtimeMs === st.mtimeMs) {
         return goalArmCache
       }
-      const raw = JSON.parse(readFileSync(GOAL_ARM_PATH, "utf8")) as { enabled?: boolean; objective?: string; sessionId?: string }
+      const raw = JSON.parse(readFileSync(GOAL_ARM_PATH, "utf8")) as { enabled?: boolean; objective?: string; sessionId?: string; autoResume?: any }
+      const cfg = raw?.autoResume
       goalArmCache = {
         mtimeMs: st.mtimeMs,
         enabled: raw?.enabled === true,
         objective: typeof raw?.objective === "string" ? raw.objective : "",
         sessionId: typeof raw?.sessionId === "string" ? raw.sessionId : "",
+        // 自动续跑配置（内核 continuationModes 在 rpc-ui 不生效，桌面端自己实现，见 agent_end 钩子）
+        autoResume: cfg && typeof cfg === "object" && cfg.enabled === true ? cfg : null,
       }
       const mine = hookSessionId(ctx)
       if (goalArmCache.sessionId && mine && goalArmCache.sessionId !== mine) {
@@ -727,12 +782,12 @@ export default async function (pi: any) {
         // 这条日志只在文件 mtime 变化时打一次 —— 若「刚点了开始目标却看到这里」，
         // 说明武装文件里的会话 id 没跟上实例迁移（temp UUID → 真实 id）。
         log("goal.arm.foreign", `武装属于别的会话 arm=${goalArmCache.sessionId} mine=${mine}`)
-        return { enabled: false, objective: "" }
+        return { enabled: false, objective: "", autoResume: null }
       }
       return goalArmCache
     } catch (e: any) {
       log("goal.arm.read.error", e?.message || String(e))
-      return { enabled: false, objective: "" }
+      return { enabled: false, objective: "", autoResume: null }
     }
   }
 
@@ -2869,6 +2924,81 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       })
     } catch (e: any) {
       log("goal.draft.error", e?.message || String(e))
+    }
+  })
+
+  // ── 目标自动续跑：补齐 rpc-ui 缺的那一环 ──
+  // 内核的续跑写在 TUI 输入循环里（`goal.continuationModes` 全仓只被那里读），rpc-ui 下永远不会触发
+  // （实证：全部会话里 `Continue active goal` 出现 0 次）。内核自带的 autoresearch 扩展给了现成范式：
+  // `agent_end` 里判 `!ctx.hasPendingMessages()` → `sendMessage({display:false},{deliverAs:"nextTurn",triggerTurn:true})`。
+  // ⚠️ `triggerTurn:true` 才会真的起下一回合（内核走 startAgentInitiatedTurn）；只传 deliverAs 不会起。
+  // ⚠️ 无上限的续跑 = 放任烧 token，而且是弱模型空转的最佳温床 → 护栏全部在下面，任一命中即停。
+  pi.on("agent_end", async (event: any, ctx?: any) => {
+    try {
+      const arm = readGoalArm(ctx)
+      const cfg = arm.autoResume
+      if (!cfg || cfg.enabled !== true) return
+
+      const state = readGoalState(ctx)
+      const status = String(state?.status || "")
+      // 只续 active：complete/dropped/paused/budget-limited 一律不续（预算到顶时内核自己会要求收尾）
+      if (!(state?.enabled === true && state.objective) || status !== "active") {
+        log("goal.resume.skip", `目标状态 ${status || "none"}，不续跑`)
+        return
+      }
+      // 被用户中止 / 出错就停：再续就是跟用户抢方向盘
+      const last = Array.isArray(event?.messages) ? event.messages[0] : null
+      const stopReason = String(last?.stopReason || "")
+      if (stopReason === "aborted" || stopReason === "error") {
+        log("goal.resume.stop", `本轮 stopReason=${stopReason}，停止续跑`)
+        writeGoalResume(ctx, { stoppedReason: `上一轮被中止（${stopReason}）` })
+        return
+      }
+      // 用户有排队消息就不抢（内核 autoresearch 同款判据）
+      try {
+        if (ctx?.hasPendingMessages?.()) {
+          log("goal.resume.skip", "用户有排队消息，让位")
+          return
+        }
+      } catch {
+        /* ctx 没这个方法就按没有排队消息处理 */
+      }
+      // 预算到了就不续：内核会把状态置 budget-limited（上面 status 判断已覆盖），这里双保险
+      if (typeof state.tokenBudget === "number" && state.tokenBudget > 0 && (state.tokensUsed ?? 0) >= state.tokenBudget) {
+        log("goal.resume.stop", `预算已耗尽 ${state.tokensUsed}/${state.tokenBudget}`)
+        writeGoalResume(ctx, { stoppedReason: "token 预算已耗尽" })
+        return
+      }
+
+      const prev = readGoalResume(ctx)
+      const turns = (prev?.turns ?? 0) + 1
+      const startedAt = prev?.startedAt ?? Date.now()
+      const maxTurns = typeof cfg.maxTurns === "number" ? cfg.maxTurns : 0
+      const maxMinutes = typeof cfg.maxMinutes === "number" ? cfg.maxMinutes : 0
+      if (maxTurns > 0 && turns > maxTurns) {
+        log("goal.resume.stop", `已达轮数上限 ${maxTurns}`)
+        writeGoalResume(ctx, { turns: turns - 1, startedAt, lastAt: Date.now(), stoppedReason: `已达续跑轮数上限（${maxTurns} 轮），目标仍在进行中` })
+        return
+      }
+      if (maxMinutes > 0 && Date.now() - startedAt > maxMinutes * 60_000) {
+        log("goal.resume.stop", `已达时长上限 ${maxMinutes} 分钟`)
+        writeGoalResume(ctx, { turns: turns - 1, startedAt, lastAt: Date.now(), stoppedReason: `已达续跑时长上限（${maxMinutes} 分钟），目标仍在进行中` })
+        return
+      }
+      // 防抖：给内核收尾/落盘留时间（内核 TUI 用 800ms）
+      const minGap = typeof cfg.minIntervalMs === "number" ? cfg.minIntervalMs : 800
+      if (prev?.lastAt && Date.now() - prev.lastAt < minGap) {
+        await new Promise((r) => setTimeout(r, minGap))
+      }
+
+      writeGoalResume(ctx, { turns, startedAt, lastAt: Date.now(), stoppedReason: "" })
+      log("goal.resume", `第 ${turns} 轮续跑（上限 ${maxTurns || "不限"} 轮 / ${maxMinutes || "不限"} 分钟）`)
+      await (pi as any).sendMessage(
+        { customType: "goal-continuation", content: buildGoalContinuation(state), display: false, attribution: "agent" },
+        { deliverAs: "nextTurn", triggerTurn: true },
+      )
+    } catch (e: any) {
+      log("goal.resume.error", e?.message || String(e))
     }
   })
 

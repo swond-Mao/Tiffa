@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useUiStore } from '../stores/useUiStore';
 import type { GoalLiveState } from '../stores/useUiStore';
+import type { GoalAutoResume, GoalResumeState } from '../types/tiffaDesktop';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useProcStore } from '../stores/useProcStore';
 import { switchModel, invalidateModelListCache, getModelListCached } from '../services/sessionController';
@@ -1517,6 +1518,16 @@ function GoalModeSection() {
   // 磁盘上已有的目标状态（goal-state.<sessionId>.json）。实时事件只在会话活着时才有，
   // 重启 Tiffa / 切到别的对话再切回来时只能靠它 —— 否则已有目标显示成「无目标」且收尾按钮全灰。
   const [fileState, setFileState] = useState<GoalLiveState | null>(null);
+  // 自动续跑：内核 continuationModes 在 rpc-ui 不生效，桌面端由外挂在 agent_end 里自己起下一回合
+  const [autoResume, setAutoResume] = useState(false);
+  const [maxTurns, setMaxTurns] = useState('30');
+  const [maxMinutes, setMaxMinutes] = useState('240');
+  const [resumeInfo, setResumeInfo] = useState<{ turns?: number; stoppedReason?: string } | null>(null);
+
+  const buildAutoResume = () =>
+    autoResume
+      ? { enabled: true, maxTurns: Number(maxTurns) || 30, maxMinutes: Number(maxMinutes) || 240, minIntervalMs: 800 }
+      : null;
 
   // 打开面板时回读主进程的开关状态与已有目标（goal-mode.json / goal-state.<sessionId>.json 可能来自上次会话）
   useEffect(() => {
@@ -1524,7 +1535,7 @@ function GoalModeSection() {
       try {
         const r = (await window.tiffaDesktop.goalStatus(activeSessionId ?? null)) as
           | {
-              arm?: { enabled?: boolean; objective?: string; tokenBudget?: number | null };
+              arm?: { enabled?: boolean; objective?: string; tokenBudget?: number | null; autoResume?: GoalAutoResume | null };
               state?: {
                 enabled?: boolean;
                 status?: string;
@@ -1532,12 +1543,20 @@ function GoalModeSection() {
                 tokensUsed?: number;
                 tokenBudget?: number | null;
               } | null;
+              resume?: GoalResumeState | null;
             }
           | undefined;
         if (r?.arm?.enabled && r.arm.objective) {
           setObjective((prev) => (prev ? prev : String(r.arm!.objective)));
           if (r.arm.tokenBudget) setBudget(String(r.arm.tokenBudget));
+          const ar = r.arm.autoResume;
+          if (ar?.enabled) {
+            setAutoResume(true);
+            if (ar.maxTurns) setMaxTurns(String(ar.maxTurns));
+            if (ar.maxMinutes) setMaxMinutes(String(ar.maxMinutes));
+          }
         }
+        setResumeInfo(r?.resume ? { turns: r.resume.turns, stoppedReason: r.resume.stoppedReason } : null);
         const st = r?.state;
         setFileState(
           st && st.objective
@@ -1595,7 +1614,7 @@ function GoalModeSection() {
     setBusy(true);
     setNote('');
     try {
-      const r = (await window.tiffaDesktop.goalStart(text, b, activeSessionId ?? null)) as
+      const r = (await window.tiffaDesktop.goalStart(text, b, activeSessionId ?? null, buildAutoResume())) as
         | { ok?: boolean; error?: string; forced?: boolean }
         | undefined;
       if (!r?.ok) {
@@ -1700,6 +1719,40 @@ function GoalModeSection() {
           placeholder="例：200000"
           style={{ width: 180 }}
         />
+      </div>
+
+      <label className="form-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 }}>
+        <input type="checkbox" checked={autoResume} onChange={(e) => setAutoResume(e.target.checked)} />
+        自动续跑到目标完成（长任务）
+      </label>
+      {autoResume && (
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>最多</span>
+          <input
+            className="form-input"
+            type="number"
+            min={1}
+            value={maxTurns}
+            onChange={(e) => setMaxTurns(e.target.value)}
+            style={{ width: 80 }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>轮 /</span>
+          <input
+            className="form-input"
+            type="number"
+            min={1}
+            value={maxMinutes}
+            onChange={(e) => setMaxMinutes(e.target.value)}
+            style={{ width: 80 }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>分钟，到顶停下等你处理</span>
+        </div>
+      )}
+      <div className="settings-section-desc" style={{ marginTop: 2 }}>
+        内核的续跑只在终端交互模式生效，桌面端由本扩展在每轮结束后自己起下一回合。
+        {resumeInfo?.turns ? ` 已续跑 ${resumeInfo.turns} 轮。` : ''}
+        {resumeInfo?.stoppedReason ? ` ${resumeInfo.stoppedReason}` : ''}
+        随时可点「结束目标」或按停止 —— 中止后不会再自动续跑。
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>

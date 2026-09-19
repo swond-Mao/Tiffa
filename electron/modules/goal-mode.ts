@@ -43,6 +43,74 @@ export interface GoalArm {
   objective: string;
   tokenBudget: number | null;
   sessionId: string;
+  /** 自动续跑配置。内核的 `goal.continuationModes` 只在 TUI 被读（rpc-ui 无续跑），
+   *  所以桌面端要「跑到目标完成」只能由外挂在 agent_end 里自己发下一回合。
+   *  null/undefined = 不续跑。 */
+  autoResume?: GoalAutoResume | null;
+}
+
+/**
+ * 自动续跑护栏。§必填的理由：没有上限的续跑就是放任模型烧 token，
+ * 而且是弱模型空转放大器的最佳温床（每轮都"再想想"、永不 complete）。
+ */
+export interface GoalAutoResume {
+  enabled: boolean;
+  /** 最多续跑多少轮（0 = 不限）。到达后停止续跑，目标保持 active 等用户处理 */
+  maxTurns: number;
+  /** 最长续跑多久（分钟，0 = 不限） */
+  maxMinutes: number;
+  /** 两轮之间的最小间隔（毫秒），给内核收尾/落盘留时间，默认 800（与内核 TUI 防抖一致） */
+  minIntervalMs?: number;
+}
+
+export const DEFAULT_AUTO_RESUME: GoalAutoResume = { enabled: false, maxTurns: 30, maxMinutes: 240, minIntervalMs: 800 };
+
+/** 续跑计数文件（外挂写，主进程/前端只读展示）：`goal-resume.<sessionId>.json` */
+export function goalResumePath(sessionId?: string | null): string {
+  return sessionId ? path.join(AGENT_DIR, `goal-resume.${sessionId}.json`) : path.join(AGENT_DIR, 'goal-resume.json');
+}
+
+export interface GoalResumeState {
+  sessionId?: string;
+  /** 已续跑轮数 */
+  turns?: number;
+  startedAt?: number;
+  lastAt?: number;
+  /** 最后一次停止续跑的原因（给用户看） */
+  stoppedReason?: string;
+}
+
+export function readGoalResume(sessionId?: string | null): GoalResumeState | null {
+  for (const p of sessionId ? [goalResumePath(sessionId), goalResumePath(null)] : [goalResumePath(null)]) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (!raw || typeof raw !== 'object') continue;
+      if (raw.sessionId && sessionId && raw.sessionId !== sessionId) continue;
+      return raw;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** 开新目标 / 收尾目标时清掉计数：否则上一轮的轮数会算进新目标，护栏提前触发 */
+export function clearGoalResume(sessionId?: string | null): void {
+  for (const p of [goalResumePath(sessionId), goalResumePath(null)]) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      if (!sessionId) {
+        fs.unlinkSync(p);
+        continue;
+      }
+      const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (raw?.sessionId && raw.sessionId !== sessionId) continue;
+      fs.unlinkSync(p);
+    } catch {
+      /* 删不掉不影响主流程 */
+    }
+  }
 }
 
 /** 草稿（转写 + 人审闸门）文件路径：`goal-draft.<sessionId>.json`。
@@ -80,7 +148,19 @@ export interface GoalDraft {
   error?: string;
 }
 
-const EMPTY_ARM: GoalArm = { enabled: false, objective: '', tokenBudget: null, sessionId: '' };
+const EMPTY_ARM: GoalArm = { enabled: false, objective: '', tokenBudget: null, sessionId: '', autoResume: null };
+
+function parseAutoResume(raw: any): GoalAutoResume | null {
+  const r = raw?.autoResume;
+  if (!r || typeof r !== 'object' || r.enabled !== true) return null;
+  const n = (v: unknown, def: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : def);
+  return {
+    enabled: true,
+    maxTurns: n(r.maxTurns, DEFAULT_AUTO_RESUME.maxTurns),
+    maxMinutes: n(r.maxMinutes, DEFAULT_AUTO_RESUME.maxMinutes),
+    minIntervalMs: n(r.minIntervalMs, DEFAULT_AUTO_RESUME.minIntervalMs ?? 800),
+  };
+}
 
 export function readGoalArm(): GoalArm {
   try {
@@ -91,6 +171,7 @@ export function readGoalArm(): GoalArm {
       objective: typeof raw?.objective === 'string' ? raw.objective : '',
       tokenBudget: typeof raw?.tokenBudget === 'number' ? raw.tokenBudget : null,
       sessionId: typeof raw?.sessionId === 'string' ? raw.sessionId : '',
+      autoResume: parseAutoResume(raw),
     };
   } catch {
     return { ...EMPTY_ARM };

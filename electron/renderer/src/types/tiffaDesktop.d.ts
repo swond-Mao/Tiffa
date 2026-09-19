@@ -137,6 +137,7 @@ export interface GoalArmState {
   objective: string;
   tokenBudget: number | null;
   sessionId: string;
+  autoResume?: GoalAutoResume | null;
 }
 
 /** 目标模式运行态（外挂从内核 goal_updated 事件落盘的 data/agent/goal-state.json） */
@@ -151,9 +152,28 @@ export interface GoalRuntimeState {
   tokenBudget?: number | null;
 }
 
+/** 自动续跑护栏：内核 continuationModes 在 rpc-ui 不生效，桌面端由外挂自己在 agent_end 里起下一回合 */
+export interface GoalAutoResume {
+  enabled: boolean;
+  /** 最多续跑轮数（0/缺省 = 30） */
+  maxTurns: number;
+  /** 最长续跑分钟数（0/缺省 = 240） */
+  maxMinutes: number;
+  minIntervalMs?: number;
+}
+
+export interface GoalResumeState {
+  turns?: number;
+  startedAt?: number;
+  lastAt?: number;
+  /** 停下来的原因（到上限 / 被中止 / 预算耗尽） */
+  stoppedReason?: string;
+}
+
 export interface GoalStatusResult {
   arm: GoalArmState;
   state: GoalRuntimeState | null;
+  resume?: GoalResumeState | null;
 }
 
 export interface GoalActionResult {
@@ -204,7 +224,7 @@ export interface TiffaDesktopApi {
 
   // ── 目标模式（内核 goal mode）──
   goalStatus: (sessionId: string | null) => Promise<GoalStatusResult>;
-  goalStart: (objective: string, tokenBudget: number | null, sessionId: string | null) => Promise<GoalActionResult>;
+  goalStart: (objective: string, tokenBudget: number | null, sessionId: string | null, autoResume?: GoalAutoResume | null) => Promise<GoalActionResult>;
   goalStop: (op: 'complete' | 'drop', sessionId: string | null) => Promise<GoalActionResult>;
   // 草稿：转写 + 人审闸门（模型先出方案，用户点「开始执行」才动手）
   goalDraft: (request: string, sessionId: string | null) => Promise<GoalActionResult>;
@@ -213,6 +233,7 @@ export interface TiffaDesktopApi {
     draft: Pick<GoalDraftState, 'objective' | 'criteria' | 'todos'>,
     tokenBudget: number | null,
     sessionId: string | null,
+    autoResume?: GoalAutoResume | null,
   ) => Promise<GoalActionResult>;
   goalDraftCancel: (sessionId: string | null) => Promise<GoalActionResult>;
 

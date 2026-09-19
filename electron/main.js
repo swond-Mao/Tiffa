@@ -1297,15 +1297,32 @@ function setupIpc() {
         const state = (0, goal_mode_1.readGoalState)(sessionId);
         const armMine = !sessionId || !arm.sessionId || arm.sessionId === sessionId;
         return {
-            arm: armMine ? arm : { enabled: false, objective: '', tokenBudget: null, sessionId: arm.sessionId },
+            arm: armMine ? arm : { enabled: false, objective: '', tokenBudget: null, sessionId: arm.sessionId, autoResume: null },
             state: state || null,
+            // 续跑进度（外挂写 goal-resume.<sid>.json，前端展示「已续跑 N 轮」）
+            resume: (0, goal_mode_1.readGoalResume)(sessionId),
         };
     });
+    /** 前端传来的续跑配置做归一化 + 兜底上限：不设上限的续跑=放任烧 token */
+    function normalizeAutoResume(raw) {
+        if (!raw || typeof raw !== 'object' || raw.enabled !== true)
+            return null;
+        const n = (v, def, cap) => {
+            const x = typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : def;
+            return Math.min(x, cap);
+        };
+        return {
+            enabled: true,
+            maxTurns: n(raw.maxTurns, 30, 500),
+            maxMinutes: n(raw.maxMinutes, 240, 2880), // 上限 48h
+            minIntervalMs: Math.min(Math.max(Math.floor(raw.minIntervalMs ?? 800) || 800, 300), 60000),
+        };
+    }
     /**
      * 开启目标：清旧运行态 → 写武装 → 发指令 → 跟随实例 sessionId 迁移。
      * `goal:start` 与 `goal:draftApply`（草稿人审通过后）共用这一条路径。
      */
-    async function _armAndStart(text, budget, sessionId) {
+    async function _armAndStart(text, budget, sessionId, autoResume) {
         const inst = await _resolveGoalInstance(sessionId);
         if (!inst)
             return { ok: false, error: '没有可用会话实例，请先打开一个对话' };
@@ -1318,7 +1335,9 @@ function setupIpc() {
         // 开新目标前先清掉本会话的旧运行态：否则外挂见旧 objective 会以为「已建过」而不注入
         // 「待创建」指令（软路径失效），前端也会继续显示上一个已完成/已放弃的目标
         (0, goal_mode_1.clearGoalState)(armedWith || sessionId);
-        (0, goal_mode_1.writeGoalArm)({ enabled: true, objective: text, tokenBudget: budget, sessionId: armedWith });
+        // 续跑计数按目标重置：否则上一轮目标的轮数会算进新目标，护栏提前触发
+        (0, goal_mode_1.clearGoalResume)(armedWith || sessionId);
+        (0, goal_mode_1.writeGoalArm)({ enabled: true, objective: text, tokenBudget: budget, sessionId: armedWith, autoResume: normalizeAutoResume(autoResume) });
         const api = await _goalModelApi(inst);
         const forced = (0, goal_mode_1.isForceCapable)(api);
         try {
@@ -1330,15 +1349,15 @@ function setupIpc() {
         // 新对话的首条消息会触发实例 sessionId 迁移（临时 UUID → 真实 id），武装文件必须跟随，
         // 否则本轮 goal 守卫按旧 id 判归属 → 把 create 拦掉（详见 _syncGoalArmSessionId 注释）
         _syncGoalArmSessionId(inst, armedWith);
-        console.log(`[主进程] 目标模式开启 session=${inst.sessionId} force=${forced} api=${api || 'unknown'} budget=${budget ?? '-'}`);
+        console.log(`[主进程] 目标模式开启 session=${inst.sessionId} force=${forced} api=${api || 'unknown'} budget=${budget ?? '-'} autoResume=${autoResume?.enabled ? `${autoResume.maxTurns}轮/${autoResume.maxMinutes}分` : 'off'}`);
         return { ok: true, forced, objective: text };
     }
-    electron_1.ipcMain.handle('goal:start', async (event, objective, tokenBudget, sessionId) => {
+    electron_1.ipcMain.handle('goal:start', async (event, objective, tokenBudget, sessionId, autoResume) => {
         const text = String(objective ?? '').trim();
         if (!text)
             return { ok: false, error: '目标描述不能为空' };
         const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
-        return _armAndStart(text, budget, sessionId);
+        return _armAndStart(text, budget, sessionId, autoResume);
     });
     // ── 目标草稿：转写 + 人审闸门（模型先出方案，用户点「开始执行」才动手）──
     // 草稿文件由外挂在 agent_end 里解析模型输出后写 status=ready；前端轮询 goal:draftStatus 拿结果。
@@ -1385,12 +1404,12 @@ function setupIpc() {
         const draft = (0, goal_mode_1.readGoalDraft)(sessionId);
         return { draft: draft || null };
     });
-    electron_1.ipcMain.handle('goal:draftApply', async (event, draft, tokenBudget, sessionId) => {
+    electron_1.ipcMain.handle('goal:draftApply', async (event, draft, tokenBudget, sessionId, autoResume) => {
         const objective = (0, goal_mode_1.composeObjective)(draft || {});
         if (!objective)
             return { ok: false, error: '草稿里没有目标描述，无法开始' };
         const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
-        const r = await _armAndStart(objective, budget, sessionId);
+        const r = await _armAndStart(objective, budget, sessionId, autoResume);
         // 无论成败都清掉草稿：留着会让下一轮继续被判成草稿阶段（写类工具全被拦）
         (0, goal_mode_1.clearGoalDraft)(sessionId);
         return r;
@@ -1405,7 +1424,9 @@ function setupIpc() {
         if (!inst)
             return { ok: false, error: '没有可用会话实例' };
         // 先撤掉武装：即使模型没执行收尾，也不会再有新的目标被创建
-        (0, goal_mode_1.writeGoalArm)({ ...(0, goal_mode_1.readGoalArm)(), enabled: false });
+        // autoResume 一并撤掉 —— 否则「结束目标」后外挂还在 agent_end 里接着起下一回合
+        (0, goal_mode_1.writeGoalArm)({ ...(0, goal_mode_1.readGoalArm)(), enabled: false, autoResume: null });
+        (0, goal_mode_1.clearGoalResume)(sessionId);
         const api = await _goalModelApi(inst);
         if (!(0, goal_mode_1.isForceCapable)(api)) {
             return {
