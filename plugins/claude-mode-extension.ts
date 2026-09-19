@@ -837,6 +837,12 @@ export default async function (pi: any) {
       lastCallKey = ""
       pendingBrakeNote = undefined
       pendingResultNote = ""
+      // todo 提醒去重状态随新用户提示复位：同一 open 值最多提醒 2 次（防刷 context），
+      // 但新任务应重新给一次机会 —— 否则外挂沉默 + 内核每轮仍注入它的 reminder，
+      // 模型就彻底收不到"去标 todo"的信号了。
+      // 只在用户新提示时清：内核续跑不走 prompt，续跑期间状态保留（那正是需要的）。
+      lastTodoOpen = -1
+      lastTodoOpenRepeats = 0
       // skill/ask 状态已改为会话级持久+超时重置，不在此处清零。
       // 仅清理过期的 skill 状态（超过 TTL 的条目）
       const now = Date.now()
@@ -1172,6 +1178,13 @@ export default async function (pi: any) {
         lastCallKey = badKey
 
         // 硬拦截（仅对 bash —— 避免误伤 read/write 等正常重复）
+        // 阈值固定为 3。曾试过「todo open=0 时降为 2」，被实证否掉：
+        //   ① 严格判据扫 21 个真实会话：「open=0 且 assistant 已 stop 过」之后的工具调用有 132 次，
+        //      但**其中空转命令 = 0 次** —— 这种状态下模型调的是 todo / read / edit 等真实工作，
+        //      空转与"是否 open=0"无关，降阈拦不到任何东西（无效改动）；
+        //   ② open=0 之后模型大量在正常干活 —— open=0 只说明"待办清单没记未完成项"，不等于任务完成；
+        //   ③ 降阈反而有误伤面：open=0 后连续两条被判为 NOOP 的正常命令（cd + pwd）会被拦。
+        // 教训：降阈必须有"该场景真实存在且确有收益"的实证，不能凭"某状态看起来像完成"。
         if (tool === "bash" && noProgressStreak >= NO_PROGRESS_BLOCK) {
           log("brake.block", `streak=${noProgressStreak} reason=${noProgressReason}`)
           if (noProgressStreak >= NO_PROGRESS_HIDE) await hideBashForBrake()
