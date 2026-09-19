@@ -7,7 +7,7 @@
  * recallMode / xmlTranslationEnabled / computerUseEnabled / fileViewMode。
  */
 import { create } from 'zustand';
-import type { TiffaEventFrame } from '../types/tiffaDesktop';
+import type { GoalDraftState, TiffaEventFrame } from '../types/tiffaDesktop';
 import { cwdKey, lsGet, lsSet } from '../services/utils';
 
 export type ApprovalMode = 'auto' | 'yolo' | 'normal';
@@ -71,6 +71,10 @@ export interface PendingActivation {
 export interface UiState {
   /** 全局 ask 队列（按 id 去重，插入序=展示序，队列头常显） */
   uiQueue: AskItem[];
+  /** 输入框旁的「目标」开关：打开后下一条消息走「转写 → 人审 → 执行」而不是直接执行 */
+  goalDraftOn: boolean;
+  /** 待审的目标草稿（模型转写产物）。同样带 sessionId：切对话时消费方要按它过滤 */
+  goalDraft: (GoalDraftState & { sessionId: string }) | null;
   currentModel: string;
   currentProvider: string;
   /** 生成中排队消息：agent 结束后自动发送 */
@@ -129,6 +133,10 @@ export interface UiState {
   setTodoPhases: (v: unknown[]) => void;
   /** 目标模式运行态（内核 goal_updated 事件驱动）；null = 当前会话无目标 */
   setGoalState: (v: GoalLiveState | null) => void;
+  /** 输入框旁「目标」开关：打开后下一条消息走转写 → 人审 → 执行 */
+  setGoalDraftOn: (v: boolean) => void;
+  /** 待审的目标草稿；null = 没有待审方案 */
+  setGoalDraft: (v: (GoalDraftState & { sessionId: string }) | null) => void;
   setSessionSwitching: (v: boolean) => void;
   setPendingActivation: (v: PendingActivation | null) => void;
   setModelSwitching: (v: boolean) => void;
@@ -164,6 +172,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   persona: '',
   todoPhases: [],
   goalState: null,
+  goalDraftOn: false,
+  goalDraft: null,
   sessionSwitching: false,
   pendingActivation: null,
   modelSwitching: false,
@@ -221,6 +231,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setPersona: (v) => set({ persona: v }),
   setTodoPhases: (v) => set({ todoPhases: v }),
   setGoalState: (v) => set({ goalState: v }),
+  setGoalDraftOn: (v) => set({ goalDraftOn: v }),
+  setGoalDraft: (v) => set({ goalDraft: v }),
   setSessionSwitching: (v) => set({ sessionSwitching: v }),
   setPendingActivation: (v) => set({ pendingActivation: v }),
   setModelSwitching: (v) => set({ modelSwitching: v }),

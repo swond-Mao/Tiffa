@@ -13,6 +13,7 @@ import { loadModelMap, loadThinkingLevelMap } from './services/historyService';
 import { initIdentity } from './services/identity';
 import ChatView from './components/ChatView';
 import InputBox from './components/InputBox';
+import GoalDraftCard from './components/GoalDraftCard';
 import StatusBar from './components/StatusBar';
 import SessionTabs from './components/SessionTabs';
 import ProjectSidebar from './components/ProjectSidebar';
@@ -69,6 +70,8 @@ export default function App() {
           </div>
           <div id="chatPanel">
             <ChatView />
+            {/* 目标方案的「人审闸门」卡片：贴在输入区上方，方案出来就在手边确认 */}
+            <GoalDraftCard />
             <InputBox />
           </div>
         </div>

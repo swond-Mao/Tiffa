@@ -162,6 +162,21 @@ export interface GoalActionResult {
   /** true = 走了内核 `/force goal` 强制工具调用；false/undefined = 退化为软路径 */
   forced?: boolean;
   objective?: string;
+  sessionId?: string;
+}
+
+/** 目标草稿：模型把用户需求转写成可验收方案，等人审（status 由外挂在 agent_end 里推进） */
+export interface GoalDraftState {
+  sessionId?: string;
+  ts?: number;
+  /** pending=等模型转写 | ready=等人审 | error=模型没按格式输出 */
+  status: 'pending' | 'ready' | 'error';
+  /** 用户原话 */
+  request?: string;
+  objective?: string;
+  criteria?: string[];
+  todos?: string[];
+  error?: string;
 }
 
 export interface TiffaDesktopApi {
@@ -191,6 +206,15 @@ export interface TiffaDesktopApi {
   goalStatus: (sessionId: string | null) => Promise<GoalStatusResult>;
   goalStart: (objective: string, tokenBudget: number | null, sessionId: string | null) => Promise<GoalActionResult>;
   goalStop: (op: 'complete' | 'drop', sessionId: string | null) => Promise<GoalActionResult>;
+  // 草稿：转写 + 人审闸门（模型先出方案，用户点「开始执行」才动手）
+  goalDraft: (request: string, sessionId: string | null) => Promise<GoalActionResult>;
+  goalDraftStatus: (sessionId: string | null) => Promise<{ draft?: GoalDraftState | null }>;
+  goalDraftApply: (
+    draft: Pick<GoalDraftState, 'objective' | 'criteria' | 'todos'>,
+    tokenBudget: number | null,
+    sessionId: string | null,
+  ) => Promise<GoalActionResult>;
+  goalDraftCancel: (sessionId: string | null) => Promise<GoalActionResult>;
 
   // ── 事件监听 ──
   onEvent: (callback: (data: TiffaEventFrame) => void) => void;

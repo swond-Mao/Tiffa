@@ -29,6 +29,7 @@ exports.writeTasksFile = writeTasksFile;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const constants_1 = require("./constants");
+const goal_mode_1 = require("./goal-mode");
 const TASKS_FILE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'scheduled-tasks.json');
 const STATE_FILE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'agent', 'scheduler-state.json');
 const LOG_FILE = path_1.default.join(constants_1.PORTABLE_ROOT, 'data', 'log', 'scheduler.log');
@@ -190,6 +191,11 @@ function readTasksFile() {
             }
             if (t.every && everyToMs(t.every) === null) {
                 errors.push(`任务 ${t.id} 的 every 写法非法（示例 "30m"/"2h"/"1d"）`);
+                continue;
+            }
+            // 目标模式任务：objective 不能为空（空目标会把「待创建」指令发出去却无从建目标）
+            if (t.goal !== undefined && !String(t.goal?.objective || '').trim()) {
+                errors.push(`任务 ${t.id} 的 goal.objective 为空（要么删掉 goal，要么填目标）`);
                 continue;
             }
             tasks.push(t);
@@ -374,6 +380,16 @@ class TaskScheduler {
      * - provider 缺失 -> 用实例可用模型列表按 id/名称反查（精确 → 归一化 → 包含）
      * 任何失败都只记日志、不阻断任务：跑起来（哪怕用默认模型）比整轮不跑有价值。
      */
+    /** 读实例当前模型 api（决定目标模式能否用 `/force` 强制调用）；读不到时按「不支持」处理（有软路径兜底） */
+    async _modelApi(inst) {
+        try {
+            const st = await inst.sendCommand({ type: 'get_state' });
+            return st?.data?.model?.api;
+        }
+        catch {
+            return undefined;
+        }
+    }
     async _applyTaskModel(inst, task) {
         const wantId = String(task.model || '').trim();
         if (!wantId)
@@ -527,7 +543,21 @@ class TaskScheduler {
             // 先切模型再投递提示词：内核按会话当前模型处理本次 prompt
             await this._applyTaskModel(inst, task);
             log('run', `任务 ${task.id} 开始 trigger=${trigger} cwd=${cwd} session=${sessionId} approval=${approval}${task.model ? ` model=${task.provider ? task.provider + '/' : ''}${task.model}` : ''}`);
-            await inst.sendCommand({ type: 'prompt', message: task.prompt });
+            // 目标模式：先武装目标（外挂在 before_agent_start / tool_call 里读 goal-mode.json），
+            // 再把创建指令与任务 prompt 一起投递 —— 无人值守场景下它就是「不跑偏 + 预算上限」的保障。
+            // ⚠️ sessionId 用本任务的固定 id（不是临时 id），不存在前端那种迁移问题。
+            let message = task.prompt;
+            if (task.goal?.objective) {
+                const objective = String(task.goal.objective).trim();
+                const budget = typeof task.goal.tokenBudget === 'number' && task.goal.tokenBudget > 0 ? Math.floor(task.goal.tokenBudget) : null;
+                (0, goal_mode_1.clearGoalState)(sessionId);
+                (0, goal_mode_1.writeGoalArm)({ enabled: true, objective, tokenBudget: budget, sessionId });
+                const api = await this._modelApi(inst);
+                const goalCmd = (0, goal_mode_1.isForceCapable)(api) ? (0, goal_mode_1.buildCreateCommand)(objective, budget) : (0, goal_mode_1.buildSoftCreateMessage)(objective);
+                message = `${goalCmd}\n\n补充要求：\n${task.prompt}`;
+                log('run', `任务 ${task.id} 目标模式已武装 budget=${budget ?? '-'} force=${(0, goal_mode_1.isForceCapable)(api)}`);
+            }
+            await inst.sendCommand({ type: 'prompt', message });
             // 投递成功只说明 prompt 进了内核；真正的结束时刻由 watchdog 记 finish/timeout
             this._watchTaskFinish(task, sessionId);
             const state = readState();

@@ -5416,3 +5416,167 @@ html[data-mode="light"] .muse-tint {
   color: hsl(var(--text-100));
 }
 
+
+/* ── 目标模式：输入区开关 + 人审闸门卡片 ───────────────────────────── */
+.input-btn.goal-mode-toggle {
+  background: transparent;
+  border: 1px solid hsl(var(--border-200, var(--bg-300)));
+  color: hsl(var(--text-300, var(--text-200)));
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.input-btn.goal-mode-toggle.on {
+  background: hsl(var(--accent-main-000) / 0.16);
+  border-color: hsl(var(--accent-main-000) / 0.6);
+  color: hsl(var(--accent-main-000));
+}
+
+.goal-draft-card {
+  flex-shrink: 0;
+  margin: 8px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid hsl(var(--accent-main-000) / 0.35);
+  border-radius: 10px;
+  background: hsl(var(--accent-main-000) / 0.06);
+  font-size: 13px;
+  color: hsl(var(--text-100));
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.goal-draft-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.goal-draft-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.goal-draft-badge.pending {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: hsl(var(--accent-main-000) / 0.18);
+  color: hsl(var(--accent-main-000));
+}
+
+.goal-draft-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: hsl(var(--text-300, var(--text-200)));
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+
+.goal-draft-request,
+.goal-draft-hint,
+.goal-draft-note {
+  font-size: 12px;
+  color: hsl(var(--text-300, var(--text-200)));
+  line-height: 1.6;
+  margin: 4px 0;
+}
+
+.goal-draft-error {
+  font-size: 12px;
+  color: hsl(var(--danger-100, 0 70% 55%));
+  line-height: 1.6;
+  margin: 4px 0;
+}
+
+.goal-draft-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--text-200));
+  margin: 10px 0 4px;
+}
+
+.goal-draft-label.inline {
+  display: inline;
+  margin: 0 6px 0 0;
+}
+
+.goal-draft-objective,
+.goal-draft-list input,
+.goal-draft-budget {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--bg-300));
+  border-radius: 6px;
+  background: hsl(var(--bg-200, var(--bg-100)));
+  color: hsl(var(--text-100));
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.goal-draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.goal-draft-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.goal-draft-list li button {
+  border: none;
+  background: transparent;
+  color: hsl(var(--text-300, var(--text-200)));
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.goal-draft-row {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.goal-draft-budget {
+  width: 140px;
+}
+
+.goal-draft-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.goal-draft-actions button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid hsl(var(--bg-300));
+  background: transparent;
+  color: hsl(var(--text-100));
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.goal-draft-actions .goal-draft-primary {
+  background: hsl(var(--accent-main-000));
+  border-color: hsl(var(--accent-main-000));
+  color: #fff;
+  font-weight: 600;
+}
+
+.goal-draft-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

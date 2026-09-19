@@ -603,6 +603,94 @@ export default async function (pi: any) {
   function goalStatePathFor(sid?: string): string {
     return sid ? join(AGENT_DIR, `goal-state.${sid}.json`) : GOAL_STATE_PATH
   }
+  /** 草稿（转写 + 人审闸门）文件：`goal-draft.<sessionId>.json`（主进程写 request，本扩展写结果）。
+   *  同样按会话分文件 —— 子代理重载外挂时会共用同一份全局文件。 */
+  function goalDraftPathFor(sid?: string): string {
+    return sid ? join(AGENT_DIR, `goal-draft.${sid}.json`) : join(AGENT_DIR, "goal-draft.json")
+  }
+
+  /** 读本会话草稿。status=pending 表示「用户已发需求、等模型转写」，此时本扩展进入草稿闸门模式。 */
+  function readGoalDraft(ctx?: any): { status: string; request: string; objective: string; criteria: string[]; todos: string[]; error?: string } | null {
+    const mine = hookSessionId(ctx)
+    for (const p of [goalDraftPathFor(mine), goalDraftPathFor("")]) {
+      try {
+        if (!existsSync(p)) continue
+        const raw = JSON.parse(readFileSync(p, "utf8"))
+        if (!raw || typeof raw !== "object") continue
+        if (raw.sessionId && mine && raw.sessionId !== mine) continue
+        return raw
+      } catch {
+        continue
+      }
+    }
+    return null
+  }
+
+  function writeGoalDraft(ctx: any, patch: Record<string, unknown>): void {
+    try {
+      ensureDir(AGENT_DIR)
+      const sid = hookSessionId(ctx)
+      const cur = readGoalDraft(ctx) || { status: "pending", request: "", objective: "", criteria: [], todos: [] }
+      writeFileSync(goalDraftPathFor(sid), JSON.stringify({ ...cur, ...patch, sessionId: sid, ts: Date.now() }, null, 2) + "\n", "utf8")
+    } catch (e: any) {
+      log("goal.draft.write.error", e?.message || String(e))
+    }
+  }
+
+  /** 从模型本轮输出里抽 ```tiffa-goal 代码块并解析成草稿 */
+  function parseGoalDraft(text: string): { objective: string; criteria: string[]; todos: string[] } | null {
+    const m = /```tiffa-goal\s*([\s\S]*?)```/.exec(text || "")
+    if (!m) return null
+    try {
+      const raw = JSON.parse(m[1].trim())
+      if (!raw || typeof raw !== "object") return null
+      const objective = String(raw.objective ?? "").trim()
+      if (!objective) return null
+      const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean) : [])
+      return { objective, criteria: arr(raw.criteria), todos: arr(raw.todos) }
+    } catch {
+      return null
+    }
+  }
+
+  /** 取本轮最后一条 assistant 的纯文本（agent_end 的 messages[0] 是 assistant，其余是工具结果） */
+  function lastAssistantText(messages: any): string {
+    const list = Array.isArray(messages) ? messages : []
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]
+      if (!m || m.role !== "assistant") continue
+      const c = m.content
+      if (typeof c === "string") return c
+      if (Array.isArray(c)) {
+        return c.filter((b: any) => b?.type === "text" && typeof b?.text === "string").map((b: any) => b.text).join("\n")
+      }
+    }
+    return ""
+  }
+
+  /** 「这个需求像大活儿吗」启发式：用于在动手前建议用户开启目标模式。
+   *  判据刻意宽松（长文本 或 含多步骤关键词），误报代价只是多一句提醒。 */
+  function looksLikeBigJob(promptText: string): boolean {
+    const t = String(promptText || "")
+    if (t.length >= 150) return true
+    const hits = ["逐个", "一个个", "每一个", "所有", "全部", "遍历", "批量", "重构", "迁移", "全量", "统一", "一起改", "全部改", "每个文件"]
+    for (const k of hits) if (t.includes(k)) return true
+    return false
+  }
+  /** 每会话最多建议 2 次：建议是提示不是纪律，反复说会变成噪音 */
+  let goalSuggestLeft = 2
+
+  /** 草稿阶段禁止的写类工具：转写轮只允许读，避免模型"顺手就把活干了"，人审闸门就失去意义 */
+  const DRAFT_BLOCKED_TOOLS = new Set([
+    "write", "edit", "multi_edit", "str_replace", "apply_patch", "patch",
+    "bash", "powershell", "shell", "notebook_edit",
+    "delete", "move", "rename", "copy",
+  ])
+  /** 草稿阶段放行的只读工具（其余工具一律拦，保守起见） */
+  const DRAFT_READONLY_TOOLS = new Set([
+    "read", "grep", "glob", "find", "ls", "list", "search", "semantic_search",
+    "web_search", "web_fetch", "recall", "reflect",
+  ])
   let goalArmCache: { mtimeMs: number; enabled: boolean; objective: string; sessionId: string } | null = null
 
   /** 本 hook 所属会话 id。Tiffa 是多对话并发（最多 8 个实例共用同一个 data/agent），
@@ -682,6 +770,30 @@ export default async function (pi: any) {
    * 顺带把「待创建」的兜底指令也放这里（`/force goal` 没生效时的唯一补救）。
    */
   function buildGoalContext(ctx?: any): string | null {
+    // ① 草稿阶段优先：用户已开启目标模式并发了需求，本轮只做「转写」，**不动手**。
+    //    Qoder 式「转写 + 人审闸门」：先出可验收方案，用户点「开始执行」才真正干活。
+    const draft = readGoalDraft(ctx)
+    if (draft?.status === "pending") {
+      return [
+        "# 目标模式（草稿阶段：只转写，不动手）",
+        "",
+        "用户开启了目标模式。**这一轮绝对不要执行任务**，只把需求转写成可验收的目标方案：",
+        "",
+        `> ${draft.request}`,
+        "",
+        "- objective 写「做完了是什么样子」（验收态），不要写「帮我…」这种动作描述；",
+        "- criteria 3-8 条，每条必须能用读文件/跑命令客观判定；",
+        "- todos 按执行顺序拆 5-15 步；",
+        "- 用户原话里的硬约束（不许跳过测试 / 不许删用例等）原样保留。",
+        "",
+        "本轮**禁止修改文件、禁止执行命令、禁止调用 goal 工具**（只读调研可以）。",
+        "产出用下面代码块，之后不要再继续做别的：",
+        "",
+        "```tiffa-goal",
+        '{"objective":"...","criteria":["..."],"todos":["..."]}',
+        "```",
+      ].join("\n")
+    }
     const state = readGoalState(ctx)
     // 只在目标**仍在进行**时注入；已完成/已放弃的文件不再注入（内核那边 enabled 也会置 false，这里双保险）
     const goalStatus = String(state?.status || "")
@@ -1241,6 +1353,35 @@ export default async function (pi: any) {
         log("before_agent_start.goal.error", e?.message || String(e))
       }
 
+      // (d2) 目标模式「自动建议」：需求像大活儿时提醒用户开启，但**绝不**由模型自己开。
+      //      只做一次判断（每会话最多 2 次），避免每轮都注入噪音。
+      try {
+        const st = readGoalState(ctx)
+        const draftNow = readGoalDraft(ctx)
+        const armNow = readGoalArm(ctx)
+        // 有目标、或已有草稿（pending=正在转写 / ready=等人审）都不再建议，避免连着说两遍
+        const hasGoal = Boolean(st?.objective) || armNow.enabled || Boolean(draftNow)
+        if (!hasGoal && goalSuggestLeft > 0) {
+          const promptText = String((event as any)?.prompt ?? "")
+          if (looksLikeBigJob(promptText)) {
+            goalSuggestLeft--
+            log("goal.suggest", `建议开启目标模式（len=${promptText.length}，剩余建议次数 ${goalSuggestLeft}）`)
+            injected.push(
+              [
+                "# 提示：这个需求可能需要目标模式",
+                "",
+                "用户这条需求看起来要跨多步、长时间推进。若确实如此，**在动手前先一句话提醒用户**：",
+                "可以打开输入框旁的「目标」开关（或设置 → 目标模式），先把需求转写成带验收标准和步骤的目标方案，确认后再执行。",
+                "",
+                "注意：只是提醒，**不要**自行创建目标、**不要**替用户开启；用户没回应就按正常方式继续干活。",
+              ].join("\n"),
+            )
+          }
+        }
+      } catch (e: any) {
+        log("before_agent_start.goal.suggest.error", e?.message || String(e))
+      }
+
       // ── 进度追踪：每次会话启动先聚合（跨天/周/月 -> 日报/周报/月报 -> PROJECT.md）──
       // 聚合只做一次（写 state.json 水位），不依赖模型；目标推演提示在聚合后生成。
       try {
@@ -1327,6 +1468,26 @@ export default async function (pi: any) {
     try {
       const tool = event.toolName || ""
       const input = event.input || {}
+
+      // ── 草稿闸门（转写阶段：只准读，不准动手 / 不准建目标）──
+      // 放在 goal 守卫之前：草稿阶段模型若先去建目标或改文件，「人审」就没意义了。
+      {
+        const draft = readGoalDraft(ctx)
+        if (draft?.status === "pending") {
+          const inReadonly = DRAFT_READONLY_TOOLS.has(tool)
+          if (tool === "goal" || DRAFT_BLOCKED_TOOLS.has(tool) || !inReadonly) {
+            log("goal.draft.block", `草稿阶段拦截 ${tool}`)
+            return {
+              block: true,
+              reason:
+                "[claude-mode 目标模式·草稿阶段] 现在只做方案转写，**不允许执行任何改动**。\n" +
+                "允许的操作：读文件 / grep / glob 等只读调研。\n" +
+                "禁止：写文件、执行命令、创建目标。\n" +
+                "请直接输出 ```tiffa-goal 代码块（objective / criteria / todos），等用户点「开始执行」再干活。",
+            }
+          }
+        }
+      }
 
       // ── 目标模式守卫 ──
       // goal 工具为了 `/force goal` 而常驻活跃（见「目标模式桥接」块），但创建目标必须由用户发起：
@@ -2679,6 +2840,35 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       )
     } catch (e: any) {
       log("goal.updated.error", e?.message || String(e))
+    }
+  })
+
+  // ── 目标草稿落盘：草稿阶段（status=pending）结束后解析模型的 ```tiffa-goal 块 ──
+  // agent_end 的 event.messages[0] 是本轮 assistant 消息，其余是工具结果（内核自带 autoresearch
+  // 扩展就是这么读的）。解析成功 → status=ready（前端弹出人审卡片）；失败 → status=error 带提示。
+  pi.on("agent_end", async (event: any, ctx?: any) => {
+    try {
+      const draft = readGoalDraft(ctx)
+      if (!draft || draft.status !== "pending") return
+      const parsed = parseGoalDraft(lastAssistantText(event?.messages))
+      if (!parsed) {
+        log("goal.draft.parse.fail", "模型没按 tiffa-goal 代码块输出")
+        writeGoalDraft(ctx, {
+          status: "error",
+          error: "模型没有按规定格式输出目标方案。可在输入框里重发一次，或直接到「设置 → 目标模式」手动填写目标。",
+        })
+        return
+      }
+      log("goal.draft.ready", `objective=${parsed.objective.slice(0, 80)} criteria=${parsed.criteria.length} todos=${parsed.todos.length}`)
+      writeGoalDraft(ctx, {
+        status: "ready",
+        objective: parsed.objective,
+        criteria: parsed.criteria,
+        todos: parsed.todos,
+        error: "",
+      })
+    } catch (e: any) {
+      log("goal.draft.error", e?.message || String(e))
     }
   })
 

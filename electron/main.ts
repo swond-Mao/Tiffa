@@ -55,10 +55,15 @@ import {
   writeGoalArm,
   readGoalState,
   clearGoalState,
+  readGoalDraft,
+  writeGoalDraft,
+  clearGoalDraft,
+  composeObjective,
   isForceCapable,
   buildCreateCommand,
   buildSoftCreateMessage,
   buildCloseCommand,
+  buildDraftCommand,
 } from './modules/goal-mode';
 import { PLAYWRIGHT_ENABLED_FILE } from './modules/constants';
 import { tryGenerateSessionTitle } from './modules/session-utils';
@@ -1290,16 +1295,17 @@ function setupIpc() {
     };
   });
 
-  ipcMain.handle('goal:start', async (event, objective, tokenBudget, sessionId) => {
-    const text = String(objective ?? '').trim();
-    if (!text) return { ok: false, error: '目标描述不能为空' };
+  /**
+   * 开启目标：清旧运行态 → 写武装 → 发指令 → 跟随实例 sessionId 迁移。
+   * `goal:start` 与 `goal:draftApply`（草稿人审通过后）共用这一条路径。
+   */
+  async function _armAndStart(text: string, budget: number | null, sessionId?: string | null) {
     const inst = await _resolveGoalInstance(sessionId);
     if (!inst) return { ok: false, error: '没有可用会话实例，请先打开一个对话' };
-    const state = readGoalState(inst.sessionId || sessionId);
-    if (state?.enabled === true && state?.objective) {
-      return { ok: false, error: `当前已有一个进行中的目标（「${String(state.objective).slice(0, 40)}」），请先结束或放弃它` };
+    const existing = readGoalState(inst.sessionId || sessionId);
+    if (existing?.enabled === true && existing?.objective) {
+      return { ok: false, error: `当前已有一个进行中的目标（「${String(existing.objective).slice(0, 40)}」），请先结束或放弃它` };
     }
-    const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
     // 先武装再发指令：外挂在 before_agent_start / tool_call 里读 goal-mode.json，本轮就能读到
     const armedWith = inst.sessionId || sessionId || '';
     // 开新目标前先清掉本会话的旧运行态：否则外挂见旧 objective 会以为「已建过」而不注入
@@ -1318,6 +1324,71 @@ function setupIpc() {
     _syncGoalArmSessionId(inst, armedWith);
     console.log(`[主进程] 目标模式开启 session=${inst.sessionId} force=${forced} api=${api || 'unknown'} budget=${budget ?? '-'}`);
     return { ok: true, forced, objective: text };
+  }
+
+  ipcMain.handle('goal:start', async (event, objective, tokenBudget, sessionId) => {
+    const text = String(objective ?? '').trim();
+    if (!text) return { ok: false, error: '目标描述不能为空' };
+    const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
+    return _armAndStart(text, budget, sessionId);
+  });
+
+  // ── 目标草稿：转写 + 人审闸门（模型先出方案，用户点「开始执行」才动手）──
+  // 草稿文件由外挂在 agent_end 里解析模型输出后写 status=ready；前端轮询 goal:draftStatus 拿结果。
+  ipcMain.handle('goal:draft', async (event, request, sessionId) => {
+    const text = String(request ?? '').trim();
+    if (!text) return { ok: false, error: '请先描述你要完成的任务' };
+    const inst = await _resolveGoalInstance(sessionId);
+    if (!inst) return { ok: false, error: '没有可用会话实例，请先打开一个对话' };
+    const sid = inst.sessionId || sessionId || '';
+    writeGoalDraft({ sessionId: sid, ts: Date.now(), status: 'pending', request: text, objective: '', criteria: [], todos: [] });
+    try {
+      await inst.sendCommand({ type: 'prompt', message: buildDraftCommand(text) });
+    } catch (err) {
+      return { ok: false, error: `发送失败：${err.message}` };
+    }
+    // 与武装同理：新对话首条消息会触发 sessionId 迁移，草稿文件必须跟着改名，
+    // 否则外挂按新 id 读不到 pending 草稿 → 既不注入草稿指令、也不拦写类工具（闸门失效）。
+    if (sid) {
+      let checks = 0;
+      const timer = setInterval(() => {
+        checks++;
+        const now = inst.sessionId;
+        if (now && now !== sid) {
+          const d = readGoalDraft(sid) || readGoalDraft(null);
+          if (d && d.status === 'pending') {
+            clearGoalDraft(sid);
+            writeGoalDraft({ ...d, sessionId: now });
+            console.log(`[主进程] 目标草稿会话 id 跟随迁移 ${sid} → ${now}`);
+          }
+          clearInterval(timer);
+          return;
+        }
+        if (checks > 40 || !inst.process) clearInterval(timer);
+      }, 100);
+    }
+    console.log(`[主进程] 目标草稿已下发 session=${sid}`);
+    return { ok: true, sessionId: sid };
+  });
+
+  ipcMain.handle('goal:draftStatus', async (event, sessionId) => {
+    const draft = readGoalDraft(sessionId);
+    return { draft: draft || null };
+  });
+
+  ipcMain.handle('goal:draftApply', async (event, draft, tokenBudget, sessionId) => {
+    const objective = composeObjective(draft || {});
+    if (!objective) return { ok: false, error: '草稿里没有目标描述，无法开始' };
+    const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
+    const r = await _armAndStart(objective, budget, sessionId);
+    // 无论成败都清掉草稿：留着会让下一轮继续被判成草稿阶段（写类工具全被拦）
+    clearGoalDraft(sessionId);
+    return r;
+  });
+
+  ipcMain.handle('goal:draftCancel', async (event, sessionId) => {
+    clearGoalDraft(sessionId);
+    return { ok: true };
   });
 
   ipcMain.handle('goal:stop', async (event, op, sessionId) => {

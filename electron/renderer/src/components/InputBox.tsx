@@ -45,6 +45,8 @@ export default function InputBox() {
   // 指针模式：实例未就绪时不锁输入/模型（可打字、可选模型），点发送才拉实例，
   // 连接期间由 pendingActivation 锁住发送按钮防止重复触发。
   const pendingActivation = useUiStore((s) => s.pendingActivation);
+  const goalDraftOn = useUiStore((s) => s.goalDraftOn);
+  const setGoalDraftOn = useUiStore((s) => s.setGoalDraftOn);
   const draftInput = useChatStore((s) => s.draftInput);
   const isEditingQueue = useUiStore((s) => s.isEditingQueue);
   const setIsEditingQueue = useUiStore((s) => s.setIsEditingQueue);
@@ -78,7 +80,9 @@ export default function InputBox() {
     useUiStore.getState().addToast('warning', '请先新建对话');
   };
 
-  const placeholder = noSession
+  const placeholder = goalDraftOn
+    ? '描述你要完成的大任务 — 会先转成带验收标准和步骤的目标方案，等你确认后才动手'
+    : noSession
     ? '请先新建对话'
     : switchingLock
       ? sessionSwitching
@@ -222,9 +226,34 @@ export default function InputBox() {
     if (agentRunning) {
       setPendingQueueMessage(t);
       setText('');
+    } else if (goalDraftOn) {
+      // 目标模式：不直接执行，先把需求交给模型转写成可验收方案，等人审（见 GoalDraftCard）
+      void submitGoalDraft(t);
     } else {
       void sendMessage(messageWithImageRefs(t), images);
       if (activeSessionPath) setInputDraft(activeSessionPath, '', []);
+    }
+  };
+
+  /** 目标模式发送：下发转写请求 → 置一份 pending 草稿 → 卡片轮询等方案 */
+  const submitGoalDraft = async (t: string) => {
+    const sid = useSessionsStore.getState().activeSessionId ?? null;
+    const ui = useUiStore.getState();
+    ui.setGoalDraft({
+      sessionId: sid ?? '',
+      ts: Date.now(),
+      status: 'pending',
+      request: t,
+      objective: '',
+      criteria: [],
+      todos: [],
+    });
+    setText('');
+    setGoalDraftOn(false); // 一次性的：发完就关，避免后续每条消息都走转写
+    const r = await window.tiffaDesktop.goalDraft(t, sid);
+    if (!r?.ok) {
+      useUiStore.getState().setGoalDraft(null);
+      useUiStore.getState().addToast('error', r?.error || '目标模式下发失败');
     }
   };
 
@@ -426,6 +455,21 @@ export default function InputBox() {
         />
         <div className="input-actions">
           <ThinkingPicker />
+          {/* 目标模式开关：打开后下一条消息走「转写 → 人审 → 执行」，不直接干活 */}
+          <button
+            type="button"
+            id="btnGoalMode"
+            className={`input-btn goal-mode-toggle${goalDraftOn ? ' on' : ''}`}
+            title={goalDraftOn ? '目标模式已开启：下一条消息会先转成目标方案等你确认' : '目标模式：先出可验收方案，确认后再执行'}
+            disabled={noSession}
+            onClick={() => setGoalDraftOn(!goalDraftOn)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <circle cx="12" cy="12" r="6" />
+              <circle cx="12" cy="12" r="2" />
+            </svg>
+          </button>
           <ModelPicker className="input-btn model-picker-btn" />
           <button
             type="button"

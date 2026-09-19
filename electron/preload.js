@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   goalStatus: (sessionId) => ipcRenderer.invoke('goal:status', sessionId),
   goalStart: (objective, tokenBudget, sessionId) => ipcRenderer.invoke('goal:start', objective, tokenBudget, sessionId),
   goalStop: (op, sessionId) => ipcRenderer.invoke('goal:stop', op, sessionId),
+  // 草稿（转写 + 人审闸门）
+  goalDraft: (request, sessionId) => ipcRenderer.invoke('goal:draft', request, sessionId),
+  goalDraftStatus: (sessionId) => ipcRenderer.invoke('goal:draftStatus', sessionId),
+  goalDraftApply: (draft, tokenBudget, sessionId) => ipcRenderer.invoke('goal:draftApply', draft, tokenBudget, sessionId),
+  goalDraftCancel: (sessionId) => ipcRenderer.invoke('goal:draftCancel', sessionId),
 
   // ── 事件监听 ──
   onEvent: (callback) => {

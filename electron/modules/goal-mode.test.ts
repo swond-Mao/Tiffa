@@ -35,6 +35,12 @@ import {
   writeGoalArm,
   readGoalState,
   clearGoalState,
+  goalDraftPath,
+  readGoalDraft,
+  writeGoalDraft,
+  clearGoalDraft,
+  composeObjective,
+  buildDraftCommand,
   isForceCapable,
   buildCreateCommand,
   buildSoftCreateMessage,
@@ -179,5 +185,64 @@ describe('指令构造', () => {
     const d = buildCloseCommand('drop');
     expect(d).toContain('"drop"');
     expect(d).not.toContain('"complete"');
+  });
+});
+
+describe('目标草稿：转写 + 人审闸门', () => {
+  beforeEach(() => {
+    for (const f of fs.readdirSync(TMP)) {
+      if (f.startsWith('goal-draft')) fs.unlinkSync(path.join(TMP, f));
+    }
+  });
+
+  it('草稿按会话分文件，A 的草稿不被 B 读到', () => {
+    writeGoalDraft({ sessionId: SID_A, ts: 1, status: 'ready', request: 'A 的需求', objective: 'A 的目标', criteria: [], todos: [] });
+    expect(goalDraftPath(SID_A)).not.toBe(goalDraftPath(SID_B));
+    expect(readGoalDraft(SID_A)?.objective).toBe('A 的目标');
+    expect(readGoalDraft(SID_B)).toBeNull();
+  });
+
+  it('pending 草稿只属于本会话：外挂据此进入草稿闸门（拦写类工具）', () => {
+    writeGoalDraft({ sessionId: SID_A, ts: 1, status: 'pending', request: 'q', objective: '', criteria: [], todos: [] });
+    expect(readGoalDraft(SID_A)?.status).toBe('pending');
+    // 别的会话读到 pending 会误以为自己也处于草稿阶段 → 必须读不到
+    expect(readGoalDraft(SID_B)?.status).toBeUndefined();
+    expect(readGoalDraft(SID_B)).toBeNull();
+  });
+
+  it('clearGoalDraft 只清本会话，不动别的会话的草稿', () => {
+    writeGoalDraft({ sessionId: SID_A, ts: 1, status: 'ready', request: 'a', objective: 'A', criteria: [], todos: [] });
+    writeGoalDraft({ sessionId: SID_B, ts: 1, status: 'pending', request: 'b', objective: '', criteria: [], todos: [] });
+    clearGoalDraft(SID_A);
+    expect(readGoalDraft(SID_A)).toBeNull();
+    expect(readGoalDraft(SID_B)?.status).toBe('pending');
+  });
+
+  it('composeObjective 把验收标准与步骤一起钉进目标（只留摘要会让「完成」退化成主观判断）', () => {
+    const obj = composeObjective({
+      objective: 'npm test 从 47 个失败降到 0',
+      criteria: ['跑 npm test 全绿', '没有新增 skip'],
+      todos: ['跑一遍收集失败清单', '按模块逐个修'],
+    });
+    expect(obj).toContain('npm test 从 47 个失败降到 0');
+    expect(obj).toContain('验收标准');
+    expect(obj).toContain('1. 跑 npm test 全绿');
+    expect(obj).toContain('执行步骤');
+    expect(obj).toContain('1. 跑一遍收集失败清单');
+  });
+
+  it('composeObjective 过滤空项，objective 为空串时结果为空（调用方据此报错）', () => {
+    // 空 objective + 只留一条非空标准 → 只剩标准段（调用方靠空串判断是否可开始）
+    expect(composeObjective({ objective: '   ', criteria: ['', 'x'], todos: [] })).toBe('验收标准：\n1. x');
+    expect(composeObjective({ objective: '', criteria: [], todos: [] })).toBe('');
+  });
+
+  it('草稿指令要求「只转写不动手」并给出 tiffa-goal 代码块格式', () => {
+    const cmd = buildDraftCommand('把所有 TODO 处理掉');
+    expect(cmd).toContain('不要动手执行');
+    expect(cmd).toContain('把所有 TODO 处理掉');
+    expect(cmd).toContain('```tiffa-goal');
+    expect(cmd).toContain('"objective"');
+    expect(cmd).toContain('禁止');
   });
 });

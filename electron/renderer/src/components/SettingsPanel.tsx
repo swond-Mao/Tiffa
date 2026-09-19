@@ -1643,6 +1643,10 @@ function GoalModeSection() {
         给当前会话设一个**持久目标**：内核会把它作为目标模式（goal mode）跟踪，目标上下文每轮注入，
         并要求模型在逐项核对真实状态后才允许标记完成。目标按会话隔离，不跨对话生效。
       </div>
+      <div className="settings-section-desc" style={{ marginTop: 4 }}>
+        更省事的用法：点输入框旁的<b>靶心按钮</b>打开目标模式再发需求 —— 模型会<b>先只转写</b>成带验收标准和步骤的方案
+        （这一轮它只读代码、不动手），你在输入区上方的卡片里改完点「开始执行」才真正开工。
+      </div>
 
       <div
         style={{
@@ -1743,6 +1747,10 @@ function SchedulerSection() {
     // 模型选择：空串 = 跟随默认模型；否则为 `${provider}::${modelId}` 编码
     modelKey: '',
     catchUp: false,
+    // 目标模式：定时以目标模式开跑（objective 写「做完了是什么样子」）
+    goalOn: false,
+    goalObjective: '',
+    goalBudget: '',
   });
 
   useEffect(() => {
@@ -1780,23 +1788,35 @@ function SchedulerSection() {
       const picked = form.modelKey ? models.find((m) => `${m.provider || ''}::${m.id}` === form.modelKey) : null;
       // 模型已从列表消失（被删/引擎未启动）时按编码拆分保留原值，避免保存时把模型静默清空
       const [encProvider, encModel] = form.modelKey ? form.modelKey.split('::') : ['', ''];
-      const payload: any = {
-        id: form.id.trim(),
-        name: form.name.trim() || undefined,
-        [kind]: form.schedule.trim(),
-        prompt: form.prompt,
-        approval: form.approval,
-        cwd: form.cwd.trim() || undefined,
-        model: picked ? picked.id : encModel || undefined,
-        provider: picked ? (picked.provider || undefined) : encProvider || undefined,
-        catchUp: form.catchUp,
-        enabled: true,
-      };
+    if (form.goalOn && !form.goalObjective.trim()) {
+      addToast?.('error', '勾选了目标模式就必须填目标（写清「做完了是什么样子」）');
+      return;
+    }
+    const goalBudgetNum = Number(form.goalBudget);
+    const payload: any = {
+      id: form.id.trim(),
+      name: form.name.trim() || undefined,
+      [kind]: form.schedule.trim(),
+      prompt: form.prompt,
+      approval: form.approval,
+      cwd: form.cwd.trim() || undefined,
+      model: picked ? picked.id : encModel || undefined,
+      provider: picked ? (picked.provider || undefined) : encProvider || undefined,
+      catchUp: form.catchUp,
+      enabled: true,
+      // 目标模式：到点先武装目标再投递 prompt（无人值守时的「不跑偏 + 预算上限」保障）
+      goal: form.goalOn
+        ? {
+            objective: form.goalObjective.trim(),
+            tokenBudget: Number.isFinite(goalBudgetNum) && goalBudgetNum > 0 ? Math.floor(goalBudgetNum) : null,
+          }
+        : undefined,
+    };
       const r: any = await (window.tiffaDesktop as any).schedulerSave(payload);
       if (r?.error) addToast?.('error', r.error);
       else {
         addToast?.('success', `已保存任务 ${form.id}`);
-        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', modelKey: '', catchUp: false });
+        setForm({ id: '', name: '', schedule: kind === 'cron' ? '0 9 * * *' : '2h', prompt: '', approval: 'auto', cwd: '', modelKey: '', catchUp: false, goalOn: false, goalObjective: '', goalBudget: '' });
       }
       await refresh();
     } finally {
@@ -1839,6 +1859,9 @@ function SchedulerSection() {
       cwd: t.cwd || '',
       modelKey: t.model ? `${t.provider || ''}::${t.model}` : '',
       catchUp: !!t.catchUp,
+      goalOn: !!t.goal,
+      goalObjective: String(t.goal?.objective || ''),
+      goalBudget: t.goal?.tokenBudget ? String(t.goal.tokenBudget) : '',
     });
     addToast?.('info', `已载入任务 ${t.id}，改完点「保存任务」覆盖`);
   };
@@ -1953,6 +1976,32 @@ function SchedulerSection() {
           <input type="checkbox" checked={form.catchUp} onChange={(e) => setForm({ ...form, catchUp: e.target.checked })} />
           应用关闭期间漏跑则下次启动补跑一次（最多回溯 12 小时）
         </label>
+        <label className="form-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+          <input type="checkbox" checked={form.goalOn} onChange={(e) => setForm({ ...form, goalOn: e.target.checked })} />
+          以目标模式运行（长任务推荐）
+        </label>
+        {form.goalOn && (
+          <>
+            <textarea
+              className="form-input"
+              placeholder="目标：写清「做完了是什么样子」，例如「npm test 从 47 个失败降到 0，不许用 skip 绕过」"
+              rows={2}
+              value={form.goalObjective}
+              onChange={(e) => setForm({ ...form, goalObjective: e.target.value })}
+            />
+            <input
+              className="form-input"
+              type="number"
+              min={0}
+              placeholder="token 预算（可选，到顶会让模型收尾交接而不是硬停）"
+              value={form.goalBudget}
+              onChange={(e) => setForm({ ...form, goalBudget: e.target.value })}
+            />
+            <div className="settings-section-desc">
+              目标会被逐字钉进整个执行过程；预算到顶内核会把目标置为 budget-limited 并要求模型收尾交接。
+            </div>
+          </>
+        )}
         <button type="button" className="settings-btn" disabled={busy} onClick={() => void save()}>
           {busy ? '保存中…' : '保存任务'}
         </button>

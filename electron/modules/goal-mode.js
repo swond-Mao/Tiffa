@@ -35,10 +35,16 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GOAL_STATE_PATH = exports.GOAL_ARM_PATH = void 0;
 exports.goalStatePath = goalStatePath;
+exports.goalDraftPath = goalDraftPath;
 exports.readGoalArm = readGoalArm;
 exports.writeGoalArm = writeGoalArm;
 exports.readGoalState = readGoalState;
 exports.clearGoalState = clearGoalState;
+exports.readGoalDraft = readGoalDraft;
+exports.writeGoalDraft = writeGoalDraft;
+exports.clearGoalDraft = clearGoalDraft;
+exports.composeObjective = composeObjective;
+exports.buildDraftCommand = buildDraftCommand;
 exports.isForceCapable = isForceCapable;
 exports.buildCreateCommand = buildCreateCommand;
 exports.buildSoftCreateMessage = buildSoftCreateMessage;
@@ -79,6 +85,11 @@ exports.GOAL_STATE_PATH = path.join(constants_1.AGENT_DIR, 'goal-state.json');
 /** 本会话专属运行态文件路径；sessionId 缺失时退回全局文件（手工调试场景） */
 function goalStatePath(sessionId) {
     return sessionId ? path.join(constants_1.AGENT_DIR, `goal-state.${sessionId}.json`) : exports.GOAL_STATE_PATH;
+}
+/** 草稿（转写 + 人审闸门）文件路径：`goal-draft.<sessionId>.json`。
+ *  同样按会话分文件 —— 理由同运行态（子代理会在同进程内重载外挂）。 */
+function goalDraftPath(sessionId) {
+    return sessionId ? path.join(constants_1.AGENT_DIR, `goal-draft.${sessionId}.json`) : path.join(constants_1.AGENT_DIR, 'goal-draft.json');
 }
 const EMPTY_ARM = { enabled: false, objective: '', tokenBudget: null, sessionId: '' };
 function readGoalArm() {
@@ -143,6 +154,91 @@ function clearGoalState(sessionId) {
             /* 删不掉也不影响主流程 */
         }
     }
+}
+/** 草稿读写（都在本会话专属文件里；sessionId 缺失时退回全局文件，手工调试用） */
+function readGoalDraft(sessionId) {
+    for (const p of sessionId ? [goalDraftPath(sessionId), goalDraftPath(null)] : [goalDraftPath(null)]) {
+        try {
+            if (!fs.existsSync(p))
+                continue;
+            const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (!raw || typeof raw !== 'object')
+                continue;
+            if (raw.sessionId && sessionId && raw.sessionId !== sessionId)
+                continue;
+            return raw;
+        }
+        catch {
+            continue;
+        }
+    }
+    return null;
+}
+function writeGoalDraft(draft) {
+    const dir = path.dirname(exports.GOAL_ARM_PATH);
+    if (!fs.existsSync(dir))
+        fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(goalDraftPath(draft.sessionId), JSON.stringify(draft, null, 2) + '\n', 'utf8');
+}
+/** 清掉草稿（用户点「开始执行」或「放弃」之后）：留着会让下一轮继续被判成草稿阶段 */
+function clearGoalDraft(sessionId) {
+    for (const p of [goalDraftPath(sessionId), goalDraftPath(null)]) {
+        try {
+            if (!fs.existsSync(p))
+                continue;
+            if (!sessionId) {
+                fs.unlinkSync(p);
+                continue;
+            }
+            const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+            if (raw?.sessionId && raw.sessionId !== sessionId)
+                continue;
+            fs.unlinkSync(p);
+        }
+        catch {
+            /* 删不掉不影响主流程 */
+        }
+    }
+}
+/** 从草稿合成最终 objective：目标原文 + 验收标准 + 执行步骤一起钉进上下文，
+ *  否则目标只留一句摘要，长跑中「完成」很容易退化成主观判断。 */
+function composeObjective(draft) {
+    const lines = [String(draft.objective || '').trim()];
+    const criteria = Array.isArray(draft.criteria) ? draft.criteria.filter((s) => String(s || '').trim()) : [];
+    const todos = Array.isArray(draft.todos) ? draft.todos.filter((s) => String(s || '').trim()) : [];
+    if (criteria.length) {
+        lines.push('', '验收标准：');
+        criteria.forEach((c, i) => lines.push(`${i + 1}. ${String(c).trim()}`));
+    }
+    if (todos.length) {
+        lines.push('', '执行步骤：');
+        todos.forEach((t, i) => lines.push(`${i + 1}. ${String(t).trim()}`));
+    }
+    return lines.join('\n').trim();
+}
+/** 草稿指令：让模型**只转写不动手**，把需求写成可验收的目标方案（Qoder 式「转写 + 人审闸门」） */
+function buildDraftCommand(request) {
+    return [
+        '用户开启了目标模式。这一轮**不要动手执行**，你唯一的任务是把下面这段需求转写成一份可验收的目标方案，',
+        '等用户点「开始执行」之后才真正干活。',
+        '',
+        '<用户需求>',
+        request,
+        '</用户需求>',
+        '',
+        '转写要求：',
+        '1. objective：一句话写清「做完了是什么样子」（验收态），不要写成「帮我…」这种动作描述，必须含可判定的完成条件；',
+        '2. criteria：3-8 条验收标准，每条都要能用「读文件 / 跑命令」客观判定，禁止「代码更清晰」「性能更好」这类主观描述；',
+        '3. todos：按执行顺序拆成 5-15 步，每步是一个能独立完成并验证的动作；',
+        '4. 用户需求里的硬约束（例如不许跳过测试、不许删用例、不许改接口）必须原样保留，不得弱化。',
+        '',
+        '本轮**禁止**创建目标、修改任何文件、执行任何命令 —— 只允许读代码做调研。',
+        '调研完把方案用下面这个代码块输出（代码块之外可以写简短说明）：',
+        '',
+        '```tiffa-goal',
+        '{"objective":"...","criteria":["...","..."],"todos":["...","..."]}',
+        '```',
+    ].join('\n');
 }
 /** 外挂实际激活路径写出的 `api`（`tool-choice.ts` 的命名 tool_choice 支持表） */
 const FORCE_CAPABLE_APIS = new Set([
