@@ -1337,6 +1337,11 @@ function setupIpc() {
         (0, goal_mode_1.clearGoalState)(armedWith || sessionId);
         // 续跑计数按目标重置：否则上一轮目标的轮数会算进新目标，护栏提前触发
         (0, goal_mode_1.clearGoalResume)(armedWith || sessionId);
+        // ⚠️ 草稿必须在这里清，**不能**等 prompt 发完再清：`sendCommand` 在指令投递成功时就返回，
+        // 而外挂的 `before_agent_start` 是内核异步触发的 —— 两者谁先谁后是竞态。
+        // 若草稿文件还在，外挂会先读到 status=pending → 注入「只转写不动手」而不是「待创建目标」，
+        // 结果目标永远建不起来（人审通过后点开始却毫无反应），且时好时坏最难排查。
+        (0, goal_mode_1.clearGoalDraft)(armedWith || sessionId);
         (0, goal_mode_1.writeGoalArm)({ enabled: true, objective: text, tokenBudget: budget, sessionId: armedWith, autoResume: normalizeAutoResume(autoResume) });
         const api = await _goalModelApi(inst);
         const forced = (0, goal_mode_1.isForceCapable)(api);
@@ -1368,6 +1373,12 @@ function setupIpc() {
         const inst = await _resolveGoalInstance(sessionId);
         if (!inst)
             return { ok: false, error: '没有可用会话实例，请先打开一个对话' };
+        // 已有进行中目标就别让用户白走一遍转写流程：草稿阶段会拦住所有写类工具，
+        // 而 draftApply 最终又会因「已有进行中目标」失败 —— 走完流程才报错是最差的体验。
+        const running = (0, goal_mode_1.readGoalState)(inst.sessionId || sessionId);
+        if (running?.enabled === true && running?.objective) {
+            return { ok: false, error: `当前已有一个进行中的目标（「${String(running.objective).slice(0, 40)}」），请先结束或放弃它再开新目标` };
+        }
         const sid = inst.sessionId || sessionId || '';
         (0, goal_mode_1.writeGoalDraft)({ sessionId: sid, ts: Date.now(), status: 'pending', request: text, objective: '', criteria: [], todos: [] });
         try {
@@ -1410,7 +1421,7 @@ function setupIpc() {
             return { ok: false, error: '草稿里没有目标描述，无法开始' };
         const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
         const r = await _armAndStart(objective, budget, sessionId, autoResume);
-        // 无论成败都清掉草稿：留着会让下一轮继续被判成草稿阶段（写类工具全被拦）
+        // 兜底再清一次：_armAndStart 里已清过（那是防竞态的关键位置），这里只是确保不残留
         (0, goal_mode_1.clearGoalDraft)(sessionId);
         return r;
     });
