@@ -57,6 +57,8 @@ import {
   clearGoalState,
   readGoalResume,
   clearGoalResume,
+  setAutoResumeEnabled,
+  setAutoResumeLimits,
   readGoalDraft,
   writeGoalDraft,
   clearGoalDraft,
@@ -1405,6 +1407,24 @@ function setupIpc() {
     // 无论成败都清掉草稿：留着会让下一轮继续被判成草稿阶段（写类工具全被拦）
     clearGoalDraft(sessionId);
     return r;
+  });
+
+  /**
+   * 暂停 / 继续自动续跑（不惊动模型、不清计数、保留护栏配置）。
+   * 内核没有 pause op（goal 工具只有 create|get|resume|complete|drop），
+   * 所以「暂停」在桌面端的语义就是停掉续跑 —— 用户想歇一下看进度时正是这个需求。
+   */
+  ipcMain.handle('goal:autoResume', async (event, enabled, sessionId, limits) => {
+    const on = enabled === true;
+    if (!readGoalArm().autoResume) {
+      return { ok: false, error: '当前目标没有开启自动续跑，无需暂停/继续' };
+    }
+    if (limits && (typeof limits.maxTurns === 'number' || typeof limits.maxMinutes === 'number')) {
+      setAutoResumeLimits(sessionId ?? null, limits.maxTurns, limits.maxMinutes);
+    }
+    const next = setAutoResumeEnabled(sessionId ?? null, on);
+    console.log(`[主进程] 目标续跑 ${on ? '继续' : '暂停'} session=${sessionId}`);
+    return { ok: true, autoResume: next };
   });
 
   ipcMain.handle('goal:draftCancel', async (event, sessionId) => {

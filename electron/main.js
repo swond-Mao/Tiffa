@@ -1414,6 +1414,23 @@ function setupIpc() {
         (0, goal_mode_1.clearGoalDraft)(sessionId);
         return r;
     });
+    /**
+     * 暂停 / 继续自动续跑（不惊动模型、不清计数、保留护栏配置）。
+     * 内核没有 pause op（goal 工具只有 create|get|resume|complete|drop），
+     * 所以「暂停」在桌面端的语义就是停掉续跑 —— 用户想歇一下看进度时正是这个需求。
+     */
+    electron_1.ipcMain.handle('goal:autoResume', async (event, enabled, sessionId, limits) => {
+        const on = enabled === true;
+        if (!(0, goal_mode_1.readGoalArm)().autoResume) {
+            return { ok: false, error: '当前目标没有开启自动续跑，无需暂停/继续' };
+        }
+        if (limits && (typeof limits.maxTurns === 'number' || typeof limits.maxMinutes === 'number')) {
+            (0, goal_mode_1.setAutoResumeLimits)(sessionId ?? null, limits.maxTurns, limits.maxMinutes);
+        }
+        const next = (0, goal_mode_1.setAutoResumeEnabled)(sessionId ?? null, on);
+        console.log(`[主进程] 目标续跑 ${on ? '继续' : '暂停'} session=${sessionId}`);
+        return { ok: true, autoResume: next };
+    });
     electron_1.ipcMain.handle('goal:draftCancel', async (event, sessionId) => {
         (0, goal_mode_1.clearGoalDraft)(sessionId);
         return { ok: true };

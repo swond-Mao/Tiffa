@@ -1523,11 +1523,33 @@ function GoalModeSection() {
   const [maxTurns, setMaxTurns] = useState('30');
   const [maxMinutes, setMaxMinutes] = useState('240');
   const [resumeInfo, setResumeInfo] = useState<{ turns?: number; stoppedReason?: string } | null>(null);
+  /** 续跑是否被暂停（arm.autoResume 存在但 enabled=false = 用户中途按了暂停） */
+  const [resumePaused, setResumePaused] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
+
+  const toggleRun = async (on: boolean) => {
+    setPauseBusy(true);
+    try {
+      const r = await window.tiffaDesktop.goalAutoResume(on, activeSessionId ?? null);
+      if (!r?.ok) {
+        addToast('error', r?.error || '操作失败');
+        return;
+      }
+      setResumePaused(!on);
+      addToast('info', on ? '已继续自动续跑' : '已暂停自动续跑（目标与进度都保留）');
+    } catch (err) {
+      addToast('error', String((err as Error)?.message || err));
+    } finally {
+      setPauseBusy(false);
+    }
+  };
 
   const buildAutoResume = () =>
     autoResume
       ? { enabled: true, maxTurns: Number(maxTurns) || 30, maxMinutes: Number(maxMinutes) || 240, minIntervalMs: 800 }
       : null;
+  /** 当前目标是否配了自动续跑（用于决定要不要显示暂停/继续按钮） */
+  const armHasAutoResume = autoResume || resumePaused;
 
   // 打开面板时回读主进程的开关状态与已有目标（goal-mode.json / goal-state.<sessionId>.json 可能来自上次会话）
   useEffect(() => {
@@ -1550,10 +1572,13 @@ function GoalModeSection() {
           setObjective((prev) => (prev ? prev : String(r.arm!.objective)));
           if (r.arm.tokenBudget) setBudget(String(r.arm.tokenBudget));
           const ar = r.arm.autoResume;
-          if (ar?.enabled) {
-            setAutoResume(true);
-            if (ar.maxTurns) setMaxTurns(String(ar.maxTurns));
-            if (ar.maxMinutes) setMaxMinutes(String(ar.maxMinutes));
+          if (ar) {
+            setResumePaused(!ar.enabled);
+            if (ar.enabled) {
+              setAutoResume(true);
+              if (ar.maxTurns) setMaxTurns(String(ar.maxTurns));
+              if (ar.maxMinutes) setMaxMinutes(String(ar.maxMinutes));
+            }
           }
         }
         setResumeInfo(r?.resume ? { turns: r.resume.turns, stoppedReason: r.resume.stoppedReason } : null);
@@ -1749,10 +1774,33 @@ function GoalModeSection() {
         </div>
       )}
       <div className="settings-section-desc" style={{ marginTop: 2 }}>
-        内核的续跑只在终端交互模式生效，桌面端由本扩展在每轮结束后自己起下一回合。
-        {resumeInfo?.turns ? ` 已续跑 ${resumeInfo.turns} 轮。` : ''}
-        {resumeInfo?.stoppedReason ? ` ${resumeInfo.stoppedReason}` : ''}
-        随时可点「结束目标」或按停止 —— 中止后不会再自动续跑。
+        内核的续跑只在终端交互模式生效，桌面端由本扩展在每轮结束后自己起下一回合。目标与进度都保留，
+        随时可按停止或点「结束目标」接管。
+      </div>
+
+      {live?.enabled && armHasAutoResume && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="settings-btn" disabled={pauseBusy} onClick={() => toggleRun(resumePaused)}>
+            {pauseBusy ? '处理中…' : resumePaused ? '继续自动续跑' : '暂停自动续跑'}
+          </button>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            {resumePaused
+              ? '已暂停：当前这轮跑完就停，不发起下一轮'
+              : resumeInfo?.turns
+                ? `运行中，已续跑 ${resumeInfo.turns} 轮`
+                : '运行中'}
+          </span>
+        </div>
+      )}
+      {resumeInfo?.stoppedReason ? (
+        <div className="settings-section-desc" style={{ marginTop: 2 }}>
+          已停止：{resumeInfo.stoppedReason}
+        </div>
+      ) : null}
+      <div className="settings-section-desc" style={{ marginTop: 2 }}>
+        ⚠️ token 预算只能在开始目标时设定：内核的 goal 工具没有改预算的 op，
+        <code>onBudgetMutated()</code> 也只被终端的 <code>/goal budget</code> 调用，桌面端够不着。
+        想放宽长跑上限请调上面的轮数 / 时长。
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>

@@ -236,6 +236,12 @@ export interface TiffaDesktopApi {
     autoResume?: GoalAutoResume | null,
   ) => Promise<GoalActionResult>;
   goalDraftCancel: (sessionId: string | null) => Promise<GoalActionResult>;
+  /** 暂停 / 继续自动续跑（只改开关，不惊动模型、不清计数、保留护栏配置） */
+  goalAutoResume: (
+    enabled: boolean,
+    sessionId: string | null,
+    limits?: { maxTurns?: number; maxMinutes?: number },
+  ) => Promise<{ ok: boolean; error?: string; autoResume?: GoalAutoResume | null }>;
 
   // ── 事件监听 ──
   onEvent: (callback: (data: TiffaEventFrame) => void) => void;

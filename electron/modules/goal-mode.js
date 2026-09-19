@@ -35,6 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_AUTO_RESUME = exports.GOAL_STATE_PATH = exports.GOAL_ARM_PATH = void 0;
 exports.goalStatePath = goalStatePath;
+exports.setAutoResumeEnabled = setAutoResumeEnabled;
+exports.setAutoResumeLimits = setAutoResumeLimits;
 exports.goalResumePath = goalResumePath;
 exports.readGoalResume = readGoalResume;
 exports.clearGoalResume = clearGoalResume;
@@ -90,6 +92,36 @@ function goalStatePath(sessionId) {
     return sessionId ? path.join(constants_1.AGENT_DIR, `goal-state.${sessionId}.json`) : exports.GOAL_STATE_PATH;
 }
 exports.DEFAULT_AUTO_RESUME = { enabled: false, maxTurns: 30, maxMinutes: 240, minIntervalMs: 800 };
+/**
+ * 暂停 / 继续自动续跑：**只改开关，保留护栏配置**（maxTurns/maxMinutes 不动），
+ * 不发任何消息给模型、不清续跑计数。
+ *
+ * ⚠️ 这不是内核的 `paused` 状态：goal 工具只有 `create|get|resume|complete|drop` 五个 op，
+ * **没有 pause**；目标级暂停只在内核内部（`onThreadSuspended` → `pauseGoal()`）发生，
+ * RPC 下拿不到入口。桌面端真正需要的是「长跑中歇一下看看进度」，停掉续跑就是这个语义。
+ */
+function setAutoResumeEnabled(sessionId, enabled) {
+    const arm = readGoalArm();
+    if (!arm.autoResume)
+        return null;
+    const next = { ...arm.autoResume, enabled };
+    writeGoalArm({ ...arm, sessionId: arm.sessionId || sessionId || '', autoResume: next });
+    return next;
+}
+/** 调整续跑护栏（轮数 / 时长）。中途改预算做不到 —— goal 工具没有该 op，
+ *  `goalRuntime.onBudgetMutated()` 只被 TUI 的 `/goal budget` 调用，扩展 API 不暴露。 */
+function setAutoResumeLimits(sessionId, maxTurns, maxMinutes) {
+    const arm = readGoalArm();
+    if (!arm.autoResume)
+        return null;
+    const next = {
+        ...arm.autoResume,
+        maxTurns: typeof maxTurns === 'number' && maxTurns > 0 ? Math.floor(maxTurns) : arm.autoResume.maxTurns,
+        maxMinutes: typeof maxMinutes === 'number' && maxMinutes > 0 ? Math.floor(maxMinutes) : arm.autoResume.maxMinutes,
+    };
+    writeGoalArm({ ...arm, sessionId: arm.sessionId || sessionId || '', autoResume: next });
+    return next;
+}
 /** 续跑计数文件（外挂写，主进程/前端只读展示）：`goal-resume.<sessionId>.json` */
 function goalResumePath(sessionId) {
     return sessionId ? path.join(constants_1.AGENT_DIR, `goal-resume.${sessionId}.json`) : path.join(constants_1.AGENT_DIR, 'goal-resume.json');
@@ -137,7 +169,7 @@ function clearGoalResume(sessionId) {
 function goalDraftPath(sessionId) {
     return sessionId ? path.join(constants_1.AGENT_DIR, `goal-draft.${sessionId}.json`) : path.join(constants_1.AGENT_DIR, 'goal-draft.json');
 }
-const EMPTY_ARM = { enabled: false, objective: '', tokenBudget: null, sessionId: '' };
+const EMPTY_ARM = { enabled: false, objective: '', tokenBudget: null, sessionId: '', autoResume: null };
 function parseAutoResume(raw) {
     const r = raw?.autoResume;
     if (!r || typeof r !== 'object' || r.enabled !== true)

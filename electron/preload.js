@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   goalDraftStatus: (sessionId) => ipcRenderer.invoke('goal:draftStatus', sessionId),
   goalDraftApply: (draft, tokenBudget, sessionId, autoResume) => ipcRenderer.invoke('goal:draftApply', draft, tokenBudget, sessionId, autoResume),
   goalDraftCancel: (sessionId) => ipcRenderer.invoke('goal:draftCancel', sessionId),
+  // 暂停 / 继续自动续跑（不惊动模型）
+  goalAutoResume: (enabled, sessionId, limits) => ipcRenderer.invoke('goal:autoResume', enabled, sessionId, limits),
 
   // ── 事件监听 ──
   onEvent: (callback) => {
