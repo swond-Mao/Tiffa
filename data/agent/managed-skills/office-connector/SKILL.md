@@ -87,6 +87,36 @@ python $LO save-as <file> <out>
 
 坐标单位：**pt（磅）**，16:9 页面约 960x540pt。元素名称通过 `list-elements` 获取。**版式任务用 PNG 而非 PDF 供视觉模型读取**（多模态读 PNG 直接，PDF 需额外转图）。
 
+## Word 引擎工具（com/word_client.py）
+
+```bash
+WO=com/word_client.py   # 路径占位
+
+python $WO open <file>                                    # 段落数/字数/样式列表
+python $WO list-paragraphs <file> [--start N] [--count N] # 段落树（编号/样式/字号/字体/前60字）
+python $WO replace <file> <find> <repl> [--all]           # 替换文本（默认首处；--all 全部；不跨段匹配）
+python $WO replace-font <file> <from> <to> [--latin] [--ea]  # 全文替换字体（默认中文字体；--latin 含西文）
+python $WO set-paragraph <file> <para_no> [--style 标题1] [--align left|center|right|justify]
+                  [--line-spacing 28] [--line-rule 3] [--bold on|off] [--font-size 16]
+python $WO export-preview <file> <out.pdf|out.png>        # PNG 仅首页；PDF 全页
+python $WO save-as <file> <out>                           # .docx/.doc/.txt
+```
+
+段落编号从 1 开始（`list-paragraphs` 输出）；样式名中英文均可（"标题1"/"Heading 1"）。
+**公文排版常用组合**：正文 `--style 正文 --line-spacing 28 --line-rule 3`（28pt 固定行距）、一级标题 `--style 标题 1`。
+
+## Excel 引擎工具（com/excel_client.py）
+
+```bash
+XE=com/excel_client.py   # 路径占位
+
+python $XE open <file>                     # 工作表名/数据范围
+python $XE set-cell <file> <sheet> <ref> <value>            # 纯数字自动按数值写
+python $XE set-cell-font <file> <sheet> <ref> --font 宋体 [--size 12]   # ref 支持区域 A1:C1
+python $XE set-column-width <file> <sheet> <col> <width>
+python $XE save-as <file> <out>            # .xlsx/.xls/.csv
+```
+
 ## UNO 兜底引擎工具（uno/uno_client.py）
 
 命令集与 COM 一致（另含 add-shape），但注意：
