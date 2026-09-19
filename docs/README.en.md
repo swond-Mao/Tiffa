@@ -50,6 +50,7 @@ Have you ever felt this way — you've been talking to an AI for three months an
 - **Absolute privacy** — no login, no registration, no trace on any server; all data stays on a USB stick.
 - **Works with weak models** — local and cloud both welcome; seven-layer infrastructure backstops even a Q1_0.
 - **Constraint system** — three layers (TTSR 13 rules / behavioral constraints / tool_call circuit-breaker), model behavior governed by code.
+- **Goal mode** — a long task is first rewritten into a plan with acceptance criteria; it starts only after you approve. The goal is re-injected every turn so it can't drift, and it can auto-resume until done.
 - **Operates the computer** — Computer Use v3 with UIA atomic toolset and five-tier degradation, drives your Windows desktop directly.
 - **Desktop frontend** — Electron GUI (React + TypeScript): multi-workspace / multi-session / model selector / dual tabs / Diff / 7 themes.
 - **Fully portable** — one folder is everything; copy to a USB drive and run.
@@ -177,6 +178,22 @@ Electron GUI (React + TypeScript renderer), not lines of text in a terminal:
 - File drawer — HTML rendering / code highlighting / image centering / Markdown formatting
 - Diff view — code changes clear in red and green
 - 7 themes — day / night mode one-click switch
+
+### Goal Mode (long tasks)
+
+Give a conversation a **persistent goal**. It addresses the real risk of long runs: after dozens of turns the original acceptance criteria get compacted away, and the model starts redefining success on its own — reporting "half done" as "done".
+
+1. Click the target button next to the input box and describe the big job you want finished;
+2. The model **only rewrites** — it produces a goal (what "done" looks like), acceptance criteria, and execution steps. During that turn it may only read code: editing files, running commands, and creating a goal are all blocked;
+3. The plan appears in a card above the input box. **You can edit it**, and the model starts working only after you click "Start".
+
+Afterwards the objective, criteria, and steps are re-injected every turn and the model may not rewrite or replace them. To close out, it must verify each item against the current repository state before marking the goal complete.
+
+- **Token budget** (optional, set at start): when exhausted, the kernel marks the goal budget-limited and tells the model to stop starting new work and leave a handover. Budget exhausted ≠ complete.
+- **Auto-resume** (optional): after a turn ends, the next one starts automatically until the goal is complete or a limit is hit. The limits are hard guardrails — turn count, wall-clock time, budget, an abort, or a queued message of yours: any one of them stops the run and reports why. You can pause or take over at any time.
+- **Scheduled runs**: check "run in goal mode" on a scheduled task and the goal is set before the prompt is delivered.
+
+⚠️ Limits: the token budget **can only be set at start, not changed mid-run** — the kernel's goal tool has no budget-mutating operation, and that interface is only reachable from the terminal build. To give a long run more room, raise the turn count or duration. Likewise, the kernel exposes no "pause the goal" operation outside the interactive terminal, so "pause" here means stopping auto-resume (goal and progress are preserved).
 
 ### Startup
 
