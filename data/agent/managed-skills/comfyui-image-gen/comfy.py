@@ -11,10 +11,41 @@ import json
 import time
 import base64
 
-COMFY = os.environ.get("COMFY_URL", "http://47.108.197.247:8188").rstrip("/")
+SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _resolve_comfy_url():
+    """解析 ComfyUI 端点。**真实地址不入库**（仓库是公开的，写死等于泄露主机）。
+
+    优先级：
+      1. `COMFY_URL` 环境变量
+      2. 本地配置文件 `data/agent/comfy-endpoint.txt`（已 gitignore，内容为一行 URL）
+      3. 都没有 → 直接报错退出，而不是悄悄连一个假地址
+    """
+    env = os.environ.get("COMFY_URL", "").strip()
+    if env:
+        return env.rstrip("/")
+    # SKILL_DIR = <ROOT>/data/agent/managed-skills/comfyui-image-gen → 上溯 4 层得到便携包根目录
+    root = os.path.abspath(os.path.join(SKILL_DIR, "..", "..", "..", ".."))
+    cfg = os.path.join(root, "data", "agent", "comfy-endpoint.txt")
+    try:
+        with open(cfg, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line.rstrip("/")
+    except OSError:
+        pass
+    sys.stderr.write(
+        "错误：未配置 ComfyUI 地址。\n"
+        "  请设置环境变量 COMFY_URL，或在 %s 写入一行地址（该文件不入库）。\n" % cfg
+    )
+    raise SystemExit(2)
+
+
+COMFY = _resolve_comfy_url()
 COMFY_USER = os.environ.get("COMFY_USER", "")
 COMFY_PASS = os.environ.get("COMFY_PASS", "")
-SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 _OUT_DIR_DEFAULT = os.path.join(os.getcwd(), "comfyui_out")
 
 def resolve_out_dir(args_out_dir=None):

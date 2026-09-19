@@ -68,7 +68,7 @@ $env:PYTHONIOENCODING="utf-8"
 ```
 
 - 调用**必须**先走第一步的路由选择（选分支 + 画幅）：分支名 = `comfy.py` 的子命令，缺子命令等于跳过路由。
-- `comfy.py` 默认连 `http://47.108.197.247:8188`，**禁止改成 localhost**（弱模型易幻觉成 localhost:8188 出厂默认）。
+- `comfy.py` 连接**远程** ComfyUI（地址来自 `COMFY_URL` 或本机 `data/agent/comfy-endpoint.txt`，**禁止臆造或改成 localhost** —— 弱模型易把出厂默认 localhost:8188 当成真地址，连不上就是报错）。
 - 每个命令结束打印 `RESULT:<json array of png paths>`，把路径报告给用户。
 
 ### 子命令与参数速查

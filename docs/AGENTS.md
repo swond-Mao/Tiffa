@@ -53,7 +53,7 @@ Tiffa：基于 `@oh-my-pi/pi-coding-agent` v17.2.2 的便携 AI 工作台，Elec
 | opencode-zen | 7 个免费模型 | 含 mimo-v2.5-free（视觉） |
 | deepseek | — | 仅配 provider，未列模型 |
 | **llama.cpp** | localmodel | 家用模型**本地直连** `127.0.0.1:11434` |
-| **local-server** | localmodel | 家用模型**远程中继** `47.108.197.247:9876`（frp） |
+| **local-server** | localmodel | 家用模型**远程中继**（地址见本机 `models.yml`，不入库） |
 
 > **本地 provider 必须用内核约定名，不可自定义**（2026-08-01 改名，原为 `qwen` / `qwen-remote`）：
 > - 名字命中内核 `modelLacksWebpSupport()` 白名单（`ollama` / `ollama-cloud` / `llama.cpp` / `lm-studio` / `local-server`）→ `excludeWebP: true`，拖拽与 `read` 两条路径都不会被编码成 WebP，避免 llama.cpp（stb_image 无 libwebp）返回 HTTP 200 + 空 choices 的**静默崩**。
@@ -350,7 +350,7 @@ Skills 目录：`$ROOT/skills/`
 
 ### ComfyUI 生图速查（操作指令，非行为约束）
 
-**服务**：ComfyUI 运行在 `http://47.108.197.247:8188`（与 `skills/comfyui-image-gen/comfy.py` 默认地址及 SKILL.md 一致；可用 `COMFY_URL` 环境变量覆盖），输出目录 `$ROOT/workspace/comfyui_out`。未运行时生图会失败，应提醒用户先启动。
+**服务**：ComfyUI 运行在一台远程主机上（地址**不入库** —— 优先读 `COMFY_URL` 环境变量，其次读本机 `data/agent/comfy-endpoint.txt`，两者都没有时 `comfy.py` 会明确报错而不是连假地址），输出目录 `$ROOT/workspace/comfyui_out`。未运行时生图会失败，应提醒用户先启动。
 
 | 意图 | 管线 | 命令 |
 |------|------|------|

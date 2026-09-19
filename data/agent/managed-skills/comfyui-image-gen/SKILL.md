@@ -10,7 +10,7 @@ description_cn: "调用远程 ComfyUI（RTX5090）文生图与图编辑，免费
 Unified CLI `comfy.py` drives a remote ComfyUI server. Five subcommands, routed by intent.
 
 ## Server
-- Base URL: `http://47.108.197.247:8188` (override `COMFY_URL`)
+- Base URL: **不入库**。读取顺序：`COMFY_URL` 环境变量 → 本机 `data/agent/comfy-endpoint.txt`（已 gitignore）→ 都没有则 `comfy.py` 报错退出（不会静默连假地址）
 - 认证：若 ComfyUI 配置了 Basic Auth，设置 `COMFY_USER` 和 `COMFY_PASS` 环境变量
 - Output dir: **craftman 调用时自动设为项目目录**，独立调用时默认 `$PORTABLE_ROOT/workspace/comfyui_out`，可通过 `COMFY_OUT` 环境变量或 `--output` 参数覆盖
 
@@ -81,7 +81,7 @@ python "<comfy.py绝对路径>" edit "<本地图片路径>" "编辑指令" [--se
 - **超时**：默认 600 秒，可用 `--timeout` 覆盖
 - **多行批量**：krea2/ernie/klein/zimage 支持，提示词中每行 = 一张图
 - **种子**：`--seed N`，批量时每张图自动用不同种子（seed+i）
-- **服务依赖**：ComfyUI 服务必须在线（`http://47.108.197.247:8188`），离线时脚本会报连接错误
+- **服务依赖**：ComfyUI 服务必须在线（地址来自 `COMFY_URL` 或本机 `data/agent/comfy-endpoint.txt`），离线时脚本会报连接错误
 - **认证错误（HTTP 401）**：若脚本报 `HTTP 401` 或 `Unauthorized`，说明 ComfyUI 配置了基本认证，请设置 `COMFY_USER` 和 `COMFY_PASS` 环境变量后重试
 
 ## craftman 中调用
