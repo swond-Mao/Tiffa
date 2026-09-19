@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useUiStore } from '../stores/useUiStore';
+import type { GoalLiveState } from '../stores/useUiStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 import { useProcStore } from '../stores/useProcStore';
 import { switchModel, invalidateModelListCache, getModelListCached } from '../services/sessionController';
@@ -1488,6 +1489,233 @@ function ConstraintsSection() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════
+// 目标模式（内核 goal mode）
+// ═══════════════════════════════════════════════════════════
+// 内核 18.0.6 的 goal 模式入口只在 TUI（`/goal` 只挂 handleTui）；rpc-ui 下没有 goal 的 RPC 命令，
+// 外挂也拿不到 session/goalRuntime 句柄。唯一可用入口是内置斜杠命令 `/force goal <prompt>`：
+// 它强制下一轮调用 goal 工具（provider 需支持命名 tool_choice），模型不支持时退回「普通消息 + 外挂注入指令」。
+// 另注：`goal.continuationModes` 默认只含 interactive 且只在 TUI 被读 → rpc-ui 下**不会自动续跑**，
+// 目标模式在 Tiffa 里的价值是「目标不漂移 + 预算计量 + 完成前审计」，不是「自己一直跑」。
+const GOAL_STATUS_LABEL: Record<string, string> = {
+  active: '进行中',
+  paused: '已暂停',
+  'budget-limited': '预算已耗尽',
+  complete: '已完成',
+  dropped: '已放弃',
+};
+
+function GoalModeSection() {
+  const addToast = useUiStore((s) => s.addToast);
+  const goalState = useUiStore((s) => s.goalState);
+  const activeSessionId = useSessionsStore((s) => s.activeSessionId);
+  const [objective, setObjective] = useState('');
+  const [budget, setBudget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [note, setNote] = useState('');
+  // 磁盘上已有的目标状态（goal-state.<sessionId>.json）。实时事件只在会话活着时才有，
+  // 重启 Tiffa / 切到别的对话再切回来时只能靠它 —— 否则已有目标显示成「无目标」且收尾按钮全灰。
+  const [fileState, setFileState] = useState<GoalLiveState | null>(null);
+
+  // 打开面板时回读主进程的开关状态与已有目标（goal-mode.json / goal-state.<sessionId>.json 可能来自上次会话）
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const r = (await window.tiffaDesktop.goalStatus(activeSessionId ?? null)) as
+          | {
+              arm?: { enabled?: boolean; objective?: string; tokenBudget?: number | null };
+              state?: {
+                enabled?: boolean;
+                status?: string;
+                objective?: string;
+                tokensUsed?: number;
+                tokenBudget?: number | null;
+              } | null;
+            }
+          | undefined;
+        if (r?.arm?.enabled && r.arm.objective) {
+          setObjective((prev) => (prev ? prev : String(r.arm!.objective)));
+          if (r.arm.tokenBudget) setBudget(String(r.arm.tokenBudget));
+        }
+        const st = r?.state;
+        setFileState(
+          st && st.objective
+            ? {
+                enabled: st.enabled === true,
+                status: String(st.status || ''),
+                objective: String(st.objective),
+                tokensUsed: Number(st.tokensUsed || 0),
+                tokenBudget: typeof st.tokenBudget === 'number' ? st.tokenBudget : null,
+              }
+            : null,
+        );
+      } catch {
+        /* 读不到就按空处理 */
+      }
+    };
+    void load();
+  }, [activeSessionId]);
+
+  // 实时事件优先（最新），没有则退回磁盘快照
+  const live = (goalState && goalState.objective ? goalState : null) ?? fileState;
+
+  // 发出「开始目标」后等 goal_updated 回来；20s 没等到就提示可能没生效（软路径/模型不配合）
+  useEffect(() => {
+    if (!pending) return;
+    if (live?.enabled) {
+      setPending(false);
+      setNote('');
+      return;
+    }
+    const t = setTimeout(() => {
+      setPending(false);
+      setNote('已发送，但没等到内核返回目标状态：可能是模型没调用 goal 工具（弱模型/不支持强制工具调用）。可再点一次「开始目标」，或直接在对话里说「创建目标」。');
+    }, 20000);
+    return () => clearTimeout(t);
+  }, [pending, live?.enabled]);
+
+  const start = async () => {
+    const text = objective.trim();
+    if (!text) {
+      addToast('warning', '请先写目标描述');
+      return;
+    }
+    const b = budget.trim() ? Number(budget.trim()) : null;
+    if (b !== null && (!Number.isFinite(b) || b <= 0)) {
+      addToast('warning', 'token 预算必须是正整数（留空 = 不限）');
+      return;
+    }
+    setBusy(true);
+    setNote('');
+    try {
+      const r = (await window.tiffaDesktop.goalStart(text, b, activeSessionId ?? null)) as
+        | { ok?: boolean; error?: string; forced?: boolean }
+        | undefined;
+      if (!r?.ok) {
+        setNote(r?.error || '启动失败');
+        addToast('error', r?.error || '目标模式启动失败');
+        return;
+      }
+      setPending(true);
+      setNote(r.forced ? '已通过 /force 强制模型创建目标…' : '当前模型不支持强制工具调用，已改用提示方式，等模型自己创建目标…');
+    } catch (err) {
+      setNote(String((err as Error)?.message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stop = async (op: 'complete' | 'drop') => {
+    setBusy(true);
+    setNote('');
+    try {
+      const r = (await window.tiffaDesktop.goalStop(op, activeSessionId ?? null)) as
+        | { ok?: boolean; error?: string }
+        | undefined;
+      if (!r?.ok) {
+        setNote(r?.error || '操作失败');
+        addToast('error', r?.error || '目标收尾失败');
+        return;
+      }
+      addToast('info', op === 'drop' ? '已请求放弃目标' : '已请求结束目标');
+    } catch (err) {
+      setNote(String((err as Error)?.message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="settings-section">
+      <div className="settings-section-title">目标模式（Goal Mode）</div>
+      <div className="settings-section-desc">
+        给当前会话设一个**持久目标**：内核会把它作为目标模式（goal mode）跟踪，目标上下文每轮注入，
+        并要求模型在逐项核对真实状态后才允许标记完成。目标按会话隔离，不跨对话生效。
+      </div>
+
+      <div
+        style={{
+          margin: '10px 0',
+          padding: '8px 10px',
+          borderRadius: 6,
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          fontSize: 13,
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>
+          当前状态：
+          {live
+            ? GOAL_STATUS_LABEL[live.status] || live.status || '未知'
+            : pending
+              ? '等待模型创建…'
+              : '无目标'}
+        </div>
+        {live && (
+          <>
+            <div style={{ marginTop: 4, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>
+              {live.objective}
+            </div>
+            <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 12 }}>
+              已用 {live.tokensUsed} tokens
+              {typeof live.tokenBudget === 'number' ? ` / 预算 ${live.tokenBudget}` : '（未设预算）'}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="form-field">
+        <div className="form-label">目标描述（会作为目标原文，模型不得改写）</div>
+        <textarea
+          className="form-input"
+          rows={4}
+          value={objective}
+          onChange={(e) => setObjective(e.target.value)}
+          placeholder="例：把 README 的中英文版本改到与当前代码一致，并附架构图检查报告"
+          style={{ width: '100%', resize: 'vertical' }}
+        />
+      </div>
+
+      <div className="form-field">
+        <div className="form-label">token 预算（可选，留空 = 不限）</div>
+        <input
+          className="form-input"
+          value={budget}
+          onChange={(e) => setBudget(e.target.value)}
+          placeholder="例：200000"
+          style={{ width: 180 }}
+        />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button type="button" className="settings-btn" disabled={busy} onClick={start}>
+          {live?.enabled ? '更新目标' : '开始目标'}
+        </button>
+        <button type="button" className="settings-btn" disabled={busy || !live?.enabled} onClick={() => stop('complete')}>
+          结束目标
+        </button>
+        <button type="button" className="settings-btn" disabled={busy || !live?.enabled} onClick={() => stop('drop')}>
+          放弃目标
+        </button>
+      </div>
+
+      {note && (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap' }}>{note}</div>
+      )}
+
+      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+        说明：
+        <br />· 入口走内核内置命令 <code>/force goal</code>（强制下一轮调用 goal 工具）；provider 不支持命名
+        tool_choice 时自动退化为提示方式，成功率取决于模型。
+        <br />· 内核的 <code>goal.continuationModes</code> 默认只含 <code>interactive</code>，且该设置只在 TUI 被读取
+        —— 所以 Tiffa（rpc-ui）下**不会自动续跑**：目标模式的作用是「目标不漂移 + 预算计量 + 完成前审计」。
+        <br />· 运行态记在 <code>data/agent/goal-state.json</code>，开关记在 <code>data/agent/goal-mode.json</code>（均随会话隔离）。
+      </div>
+    </div>
+  );
+}
+
 function SchedulerSection() {
   const addToast = useUiStore((s) => s.addToast);
   const [tasks, setTasks] = useState<any[]>([]);
@@ -1948,6 +2176,7 @@ type SettingsTabId =
   | 'identity'
   | 'computer-use'
   | 'scheduler'
+  | 'goal'
   | 'theme'
   | 'about';
 
@@ -1970,6 +2199,7 @@ const SETTINGS_TABS: { group: string; items: { id: SettingsTabId; label: string 
     items: [
       { id: 'computer-use', label: '电脑控制 · 浏览器' },
       { id: 'scheduler', label: '定时任务' },
+      { id: 'goal', label: '目标模式' },
     ],
   },
   {
@@ -2062,6 +2292,7 @@ export default function SettingsPanel() {
                     </>
                   )}
                   {tab === 'scheduler' && <SchedulerSection />}
+                  {tab === 'goal' && <GoalModeSection />}
                   {tab === 'theme' && <ThemeSection />}
                   {tab === 'about' && (
                     <div className="settings-section">

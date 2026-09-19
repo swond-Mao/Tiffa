@@ -727,6 +727,31 @@ function handleEvent(event: TiffaEventFrame): void {
         ui.setTodoPhases(event.phases);
       }
       break;
+    case 'goal_updated': {
+      // 目标模式（内核 goal 模式）状态变化：外挂把状态落盘，这里实时镜像到 UI。
+      // 只处理当前活跃会话的帧 —— 后台对话也有自己的目标，串到当前视图会误导用户。
+      if (event._sessionId && sessions.activeSessionId && event._sessionId !== sessions.activeSessionId) break;
+      const goal = event.goal as
+        | { objective?: string; status?: string; tokensUsed?: number; tokenBudget?: number }
+        | null
+        | undefined;
+      if (!goal || !goal.objective) {
+        ui.setGoalState(null);
+        break;
+      }
+      const status = String(goal.status || '');
+      ui.setGoalState({
+        enabled: event.state?.enabled === true,
+        status,
+        objective: String(goal.objective),
+        tokensUsed: Number(goal.tokensUsed || 0),
+        tokenBudget: typeof goal.tokenBudget === 'number' ? goal.tokenBudget : null,
+      });
+      if (status === 'complete') ui.addToast('info', '目标已完成');
+      else if (status === 'dropped') ui.addToast('info', '目标已放弃');
+      else if (status === 'budget-limited') ui.addToast('warning', '目标模式：token 预算已耗尽');
+      break;
+    }
     case 'auto_retry_start':
       ui.setStatusText(`重试中 (${event.attempt}/${event.maxAttempts})...`);
       break;

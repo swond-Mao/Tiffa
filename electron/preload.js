@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   schedulerRemove: (id) => ipcRenderer.invoke('scheduler:remove', id),
   schedulerRunNow: (id) => ipcRenderer.invoke('scheduler:runNow', id),
 
+  // ── 目标模式（内核 goal mode）──
+  goalStatus: (sessionId) => ipcRenderer.invoke('goal:status', sessionId),
+  goalStart: (objective, tokenBudget, sessionId) => ipcRenderer.invoke('goal:start', objective, tokenBudget, sessionId),
+  goalStop: (op, sessionId) => ipcRenderer.invoke('goal:stop', op, sessionId),
+
   // ── 事件监听 ──
   onEvent: (callback) => {
     ipcRenderer.on('tiffa:event', (event, data) => callback(data));

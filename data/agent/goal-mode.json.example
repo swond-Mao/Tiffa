@@ -1,0 +1,13 @@
+{
+  "_comment": "目标模式开关（运行时文件，已被 .gitignore 忽略）。前端「设置 → 目标模式」点「开始」时由 electron/modules/goal-mode.ts 写入，外挂 plugins/claude-mode-extension.ts 读取后按会话武装。手工造这个文件只在调试时有用。",
+  "_schema": {
+    "enabled": "true = 本会话开启目标模式（外挂会拦住未经授权的新建目标，并每轮注入目标上下文）",
+    "objective": "目标原文，必须是用户原话，不得改写/翻译/概括",
+    "tokenBudget": "可选，正整数；0 或省略表示不限",
+    "sessionId": "会话 id（外挂从 ctx.sessionManager.getSessionId() 取）。留空表示不限定会话，任意会话都生效——只在手工调试时这么写"
+  },
+  "enabled": false,
+  "objective": "",
+  "tokenBudget": 0,
+  "sessionId": ""
+}

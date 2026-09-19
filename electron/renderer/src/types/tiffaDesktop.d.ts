@@ -131,6 +131,39 @@ export interface TiffaBypassModelConfig {
   [k: string]: any;
 }
 
+/** 目标模式开关状态（主进程 data/agent/goal-mode.json，按会话隔离） */
+export interface GoalArmState {
+  enabled: boolean;
+  objective: string;
+  tokenBudget: number | null;
+  sessionId: string;
+}
+
+/** 目标模式运行态（外挂从内核 goal_updated 事件落盘的 data/agent/goal-state.json） */
+export interface GoalRuntimeState {
+  sessionId?: string;
+  ts?: number;
+  enabled?: boolean;
+  /** active | paused | budget-limited | complete | dropped | none */
+  status?: string;
+  objective?: string;
+  tokensUsed?: number;
+  tokenBudget?: number | null;
+}
+
+export interface GoalStatusResult {
+  arm: GoalArmState;
+  state: GoalRuntimeState | null;
+}
+
+export interface GoalActionResult {
+  ok: boolean;
+  error?: string;
+  /** true = 走了内核 `/force goal` 强制工具调用；false/undefined = 退化为软路径 */
+  forced?: boolean;
+  objective?: string;
+}
+
 export interface TiffaDesktopApi {
   // ── Tiffa 代理命令 ──
   send: (message: string, images: unknown[] | undefined, sessionId: string | null) => Promise<unknown>;
@@ -153,6 +186,11 @@ export interface TiffaDesktopApi {
   schedulerSave: (task: unknown) => Promise<unknown>;
   schedulerRemove: (id: string) => Promise<unknown>;
   schedulerRunNow: (id: string) => Promise<unknown>;
+
+  // ── 目标模式（内核 goal mode）──
+  goalStatus: (sessionId: string | null) => Promise<GoalStatusResult>;
+  goalStart: (objective: string, tokenBudget: number | null, sessionId: string | null) => Promise<GoalActionResult>;
+  goalStop: (op: 'complete' | 'drop', sessionId: string | null) => Promise<GoalActionResult>;
 
   // ── 事件监听 ──
   onEvent: (callback: (data: TiffaEventFrame) => void) => void;

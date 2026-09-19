@@ -12,6 +12,16 @@ import { cwdKey, lsGet, lsSet } from '../services/utils';
 
 export type ApprovalMode = 'auto' | 'yolo' | 'normal';
 
+/** 目标模式运行态（内核 goal 模式，事件 goal_updated 驱动） */
+export interface GoalLiveState {
+  enabled: boolean;
+  /** active | paused | budget-limited | complete | dropped */
+  status: string;
+  objective: string;
+  tokensUsed: number;
+  tokenBudget: number | null;
+}
+
 /** 思考档位（内核协议 set_thinking_level，与 oh-my-pi UI 一致） */
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -74,6 +84,7 @@ export interface UiState {
   gender: string;
   persona: string;
   todoPhases: unknown[];
+  goalState: GoalLiveState | null;
   sessionSwitching: boolean;
   pendingActivation: PendingActivation | null;
   modelSwitching: boolean;
@@ -112,6 +123,8 @@ export interface UiState {
   setGender: (v: string) => void;
   setPersona: (v: string) => void;
   setTodoPhases: (v: unknown[]) => void;
+  /** 目标模式运行态（内核 goal_updated 事件驱动）；null = 当前会话无目标 */
+  setGoalState: (v: GoalLiveState | null) => void;
   setSessionSwitching: (v: boolean) => void;
   setPendingActivation: (v: PendingActivation | null) => void;
   setModelSwitching: (v: boolean) => void;
@@ -146,6 +159,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   gender: '',
   persona: '',
   todoPhases: [],
+  goalState: null,
   sessionSwitching: false,
   pendingActivation: null,
   modelSwitching: false,
@@ -202,6 +216,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   setGender: (v) => set({ gender: v }),
   setPersona: (v) => set({ persona: v }),
   setTodoPhases: (v) => set({ todoPhases: v }),
+  setGoalState: (v) => set({ goalState: v }),
   setSessionSwitching: (v) => set({ sessionSwitching: v }),
   setPendingActivation: (v) => set({ pendingActivation: v }),
   setModelSwitching: (v) => set({ modelSwitching: v }),

@@ -26,6 +26,7 @@ const constants_1 = require("./modules/constants");
 const session_utils_1 = require("./modules/session-utils");
 const models_config_1 = require("./modules/models-config");
 const playwright_utils_1 = require("./modules/playwright-utils");
+const goal_mode_1 = require("./modules/goal-mode");
 const constants_2 = require("./modules/constants");
 /**
  * Tiffa Desktop - Electron Main Process
@@ -1216,6 +1217,106 @@ function setupIpc() {
         catch (err) {
             return { error: err.message };
         }
+    });
+    // ── 目标模式（内核 goal mode）──────────────────────────────────────
+    // 入口机制见 modules/goal-mode.ts 顶部注释：内核 18.0.6 的 goal 模式入口只在 TUI，
+    // rpc-ui 下没有 goal 的 RPC 命令 → 只能借内置 `/force goal <prompt>` 强制模型调用 goal 工具
+    // （provider 不支持命名 tool_choice 时退回「普通消息 + 外挂注入指令」的软路径）。
+    // 目标开关与运行态都按 sessionId 隔离：Tiffa 多对话共用一个 data/agent 目录。
+    /** 取指定会话实例：精确匹配 → 缺失则激活 → 未就绪最多等 15s（比 tiffa:send 轻，只发模式指令） */
+    async function _resolveGoalInstance(sessionId) {
+        let inst = sessionId
+            ? (tiffaManager.getBySessionIdAnywhere(sessionId) || tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId))
+            : null;
+        if (!inst && sessionId) {
+            await tiffaManager.activateSession(tiffaManager.activeCwd, sessionId);
+            inst = tiffaManager.getBySessionIdAnywhere(sessionId) || tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId);
+        }
+        if (!inst)
+            inst = tiffaManager.getActive();
+        if (inst && !inst.ready && sessionId) {
+            await new Promise((resolve) => {
+                let checks = 0;
+                const check = setInterval(() => {
+                    checks++;
+                    if (inst.ready || checks > 150) {
+                        clearInterval(check);
+                        resolve(null);
+                    }
+                }, 100);
+                if (inst.process)
+                    inst.process.once('exit', () => { clearInterval(check); resolve(null); });
+            });
+        }
+        return inst && inst.ready ? inst : null;
+    }
+    /** 读当前会话的模型 api（决定能否用 `/force`）；读不到时按「支持」处理，失败了还有软路径兜底 */
+    async function _goalModelApi(inst) {
+        try {
+            const st = await inst.sendCommand({ type: 'get_state' });
+            return st?.data?.model?.api;
+        }
+        catch {
+            return undefined;
+        }
+    }
+    electron_1.ipcMain.handle('goal:status', async (event, sessionId) => {
+        const arm = (0, goal_mode_1.readGoalArm)();
+        // 运行态按会话分文件读（goal-state.<sessionId>.json），旧版全局文件作兜底
+        const state = (0, goal_mode_1.readGoalState)(sessionId);
+        const armMine = !sessionId || !arm.sessionId || arm.sessionId === sessionId;
+        return {
+            arm: armMine ? arm : { enabled: false, objective: '', tokenBudget: null, sessionId: arm.sessionId },
+            state: state || null,
+        };
+    });
+    electron_1.ipcMain.handle('goal:start', async (event, objective, tokenBudget, sessionId) => {
+        const text = String(objective ?? '').trim();
+        if (!text)
+            return { ok: false, error: '目标描述不能为空' };
+        const inst = await _resolveGoalInstance(sessionId);
+        if (!inst)
+            return { ok: false, error: '没有可用会话实例，请先打开一个对话' };
+        const state = (0, goal_mode_1.readGoalState)(inst.sessionId || sessionId);
+        if (state?.enabled === true && state?.objective) {
+            return { ok: false, error: `当前已有一个进行中的目标（「${String(state.objective).slice(0, 40)}」），请先结束或放弃它` };
+        }
+        const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
+        // 先武装再发指令：外挂在 before_agent_start / tool_call 里读 goal-mode.json，本轮就能读到
+        (0, goal_mode_1.writeGoalArm)({ enabled: true, objective: text, tokenBudget: budget, sessionId: inst.sessionId || sessionId || '' });
+        const api = await _goalModelApi(inst);
+        const forced = (0, goal_mode_1.isForceCapable)(api);
+        try {
+            await inst.sendCommand({ type: 'prompt', message: forced ? (0, goal_mode_1.buildCreateCommand)(text, budget) : (0, goal_mode_1.buildSoftCreateMessage)(text) });
+        }
+        catch (err) {
+            return { ok: false, error: `发送失败：${err.message}` };
+        }
+        console.log(`[主进程] 目标模式开启 session=${inst.sessionId} force=${forced} api=${api || 'unknown'} budget=${budget ?? '-'}`);
+        return { ok: true, forced, objective: text };
+    });
+    electron_1.ipcMain.handle('goal:stop', async (event, op, sessionId) => {
+        const kind = op === 'drop' ? 'drop' : 'complete';
+        const inst = await _resolveGoalInstance(sessionId);
+        if (!inst)
+            return { ok: false, error: '没有可用会话实例' };
+        // 先撤掉武装：即使模型没执行收尾，也不会再有新的目标被创建
+        (0, goal_mode_1.writeGoalArm)({ ...(0, goal_mode_1.readGoalArm)(), enabled: false });
+        const api = await _goalModelApi(inst);
+        if (!(0, goal_mode_1.isForceCapable)(api)) {
+            return {
+                ok: false,
+                error: `当前模型（api=${api || 'unknown'}）不支持强制工具调用，无法自动${kind === 'drop' ? '放弃' : '结束'}目标；可直接在对话里让助手调用 goal 工具。`,
+            };
+        }
+        try {
+            await inst.sendCommand({ type: 'prompt', message: (0, goal_mode_1.buildCloseCommand)(kind) });
+        }
+        catch (err) {
+            return { ok: false, error: `发送失败：${err.message}` };
+        }
+        console.log(`[主进程] 目标模式收尾 op=${kind} session=${inst.sessionId}`);
+        return { ok: true };
     });
     // ── Workspace / Project management ──
     // 打开文件夹选择器

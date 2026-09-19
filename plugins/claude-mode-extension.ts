@@ -574,6 +574,158 @@ export default async function (pi: any) {
     `portableRoot: ${PORTABLE_ROOT}`,
   ])
 
+  // ═══════════════════════════════════════════════════════════
+  // 目标模式（内核 goal mode）桥接
+  // ═══════════════════════════════════════════════════════════
+  // 背景（2026-09-19 核实，内核 18.0.6）：goal 模式的**入口只在 TUI** ——
+  //   · `src/slash-commands/builtin-modes.ts` 的 `/goal` 只挂了 `handleTui`，没有 text/ACP 用的 `handle`；
+  //     RPC 的 prompt 只走 `executeAcpBuiltinSlashCommand()`（要求 handle）→ `/goal` 会被当普通文本喂给模型。
+  //   · RPC 协议（`src/modes/rpc/rpc-types.ts` 的 RpcCommand 联合）里没有任何 goal 命令，`get_state` 也不含 goal。
+  //   · 扩展 API（ExtensionContext）没有 session / goalRuntime 句柄 → 外挂无法直接调 createGoal()。
+  // 所以外挂能用的入口只有两条，这里都用上：
+  //   ① `/force goal <prompt>`（前端主进程发）：内核内置斜杠命令，`setForcedToolChoice()` 让下一轮**必须**调用
+  //      goal 工具。⚠️ 它要求工具**已在活跃集**（会 throw），故 goal 在 sanitizeTools 里常驻激活。
+  //      provider 需支持命名 tool_choice（见 `src/utils/tool-choice.ts`：anthropic / openai-* / ollama-chat / google）。
+  //   ② 兜底：before_agent_start 注入中文指令，逼模型自己调 goal 工具（provider 不支持强制调用时唯一手段）。
+  // 另有两处内核在 rpc-ui 下**不生效**，需要自己补：
+  //   · `goal.continuationModes` 默认 ["interactive"]，且全仓只在 interactive-mode.ts 被读 → 无自动续跑（本版不做）。
+  //   · `goal-mode-context` 只由 TUI 的 sendGoalModeContext() 注入 → 目标上下文由这里每轮自己注入。
+  // 文件分工（都在 `data/agent/`）：
+  //   · `goal-mode.json`            ：前端开关（主进程写，本扩展读）——「是否放行 create」+ 目标原文
+  //   · `goal-state.<sessionId>.json`：运行态（本扩展写，主进程/前端读）——**按会话分文件**，详见 goalStatePathFor 注释
+  const GOAL_ARM_PATH = join(AGENT_DIR, "goal-mode.json")     // 前端开关（主进程写，本扩展读）
+  const GOAL_STATE_PATH = join(AGENT_DIR, "goal-state.json")  // 旧版全局运行态（只读兜底）
+  /** 运行态按会话分文件：`goal-state.<sessionId>.json`（本扩展写，主进程/前端读）。
+   *  ⚠️ 不能只写一个全局文件 —— 内核 `task` 子代理会在**同一进程内**再加载一次本扩展
+   *  （实测：同一 pid 出现多次 "extension loaded"），子会话也会收到 goal_updated。
+   *  若共用一份文件，子代理会把主会话的目标状态覆盖掉（实测 token 数在几个数值间来回跳），
+   *  表现为前端"目标突然没了"且每轮注入的目标上下文消失。 */
+  function goalStatePathFor(sid?: string): string {
+    return sid ? join(AGENT_DIR, `goal-state.${sid}.json`) : GOAL_STATE_PATH
+  }
+  let goalArmCache: { mtimeMs: number; enabled: boolean; objective: string; sessionId: string } | null = null
+
+  /** 本 hook 所属会话 id。Tiffa 是多对话并发（最多 8 个实例共用同一个 data/agent），
+   *  goal 是**每会话**的，所以 arm/state 两个文件都带 sessionId 做隔离，不能全局生效。
+   *  拿不到 ctx（fail-open）时按「匹配」处理，保证功能可用。 */
+  function hookSessionId(ctx?: any): string {
+    try {
+      return String(ctx?.sessionManager?.getSessionId?.() ?? "")
+    } catch {
+      return ""
+    }
+  }
+
+  function readGoalArm(ctx?: any): { enabled: boolean; objective: string } {
+    try {
+      if (!existsSync(GOAL_ARM_PATH)) {
+        goalArmCache = null
+        return { enabled: false, objective: "" }
+      }
+      const st = statSync(GOAL_ARM_PATH)
+      if (goalArmCache && goalArmCache.mtimeMs === st.mtimeMs) {
+        return goalArmCache
+      }
+      const raw = JSON.parse(readFileSync(GOAL_ARM_PATH, "utf8")) as { enabled?: boolean; objective?: string; sessionId?: string }
+      goalArmCache = {
+        mtimeMs: st.mtimeMs,
+        enabled: raw?.enabled === true,
+        objective: typeof raw?.objective === "string" ? raw.objective : "",
+        sessionId: typeof raw?.sessionId === "string" ? raw.sessionId : "",
+      }
+      const mine = hookSessionId(ctx)
+      if (goalArmCache.sessionId && mine && goalArmCache.sessionId !== mine) {
+        // 别的对话的目标模式，与本次会话无关
+        return { enabled: false, objective: "" }
+      }
+      return goalArmCache
+    } catch (e: any) {
+      log("goal.arm.read.error", e?.message || String(e))
+      return { enabled: false, objective: "" }
+    }
+  }
+
+  function readGoalState(ctx?: any): { enabled: boolean; objective: string; status: string; tokensUsed: number; tokenBudget?: number } | null {
+    const mine = hookSessionId(ctx)
+    // 先读本会话专属文件；没有再看旧版全局文件（老版本或手工造的文件）
+    for (const p of [goalStatePathFor(mine), GOAL_STATE_PATH]) {
+      try {
+        if (!existsSync(p)) continue
+        const raw = JSON.parse(readFileSync(p, "utf8"))
+        if (!raw || typeof raw !== "object") continue
+        // 全局文件里若写着别的会话，本次会话视作无目标（fail-open 只在 sessionId 缺失时生效）
+        if (p === GOAL_STATE_PATH && raw.sessionId && mine && raw.sessionId !== mine) continue
+        return raw
+      } catch {
+        continue
+      }
+    }
+    return null
+  }
+
+  /** 把内核目标状态落盘到**本会话专属文件**：主进程/前端读它显示状态，before_agent_start 读它注入上下文 */
+  function writeGoalState(ctx: any, payload: Record<string, unknown>): void {
+    try {
+      ensureDir(AGENT_DIR)
+      writeFileSync(goalStatePathFor(hookSessionId(ctx)), JSON.stringify(payload, null, 2) + "\n", "utf8")
+    } catch (e: any) {
+      log("goal.state.write.error", e?.message || String(e))
+    }
+  }
+
+  /**
+   * 目标上下文注入文本。
+   * 内核在 rpc-ui 下不会自动注入 `goal-mode-context`（只有 TUI 会），所以这里每轮自己注入；
+   * 顺带把「待创建」的兜底指令也放这里（`/force goal` 没生效时的唯一补救）。
+   */
+  function buildGoalContext(ctx?: any): string | null {
+    const state = readGoalState(ctx)
+    // 只在目标**仍在进行**时注入；已完成/已放弃的文件不再注入（内核那边 enabled 也会置 false，这里双保险）
+    const goalStatus = String(state?.status || "")
+    if (state?.enabled === true && state.objective && goalStatus !== "complete" && goalStatus !== "dropped") {
+      const lines = [
+        "# 目标模式（进行中）",
+        "",
+        "用户已为本次会话设定持久目标，**整个会话都必须围绕它推进，不得中途更换**：",
+        "",
+        `> ${state.objective}`,
+      ]
+      if (typeof state.tokenBudget === "number") {
+        lines.push("", `预算：已用 ${state.tokensUsed ?? 0} / ${state.tokenBudget} tokens`)
+      }
+      if (goalStatus === "budget-limited") {
+        lines.push(
+          "",
+          "⚠️ token 预算已耗尽：**这不代表目标完成**。把已有成果收尾交代清楚即可，不要为了「显得完成」而调用 `goal({op:\"complete\"})`。",
+        )
+      }
+      lines.push(
+        "",
+        "规则：",
+        "- 目标由用户设定，**禁止**自行缩小、改写或替换成更容易达成的小目标；",
+        "- 每轮先确认「这一步是否在推进该目标」，不做与目标无关的探索；",
+        "- 只有**逐项核对当前真实状态**（读文件 / 跑检查，验证范围与声称范围一致）后才可调用 `goal({op:\"complete\"})`；",
+        "- 预算耗尽 ≠ 完成；工作没做完就让目标保持 active；",
+        "- 用户说「结束 / 放弃目标」时分别按 `goal({op:\"complete\"})` / `goal({op:\"drop\"})` 处理。",
+      )
+      return lines.join("\n")
+    }
+    const arm = readGoalArm(ctx)
+    if (arm.enabled && arm.objective) {
+      return [
+        "# 目标模式（待创建）",
+        "",
+        "用户已开启目标模式并给出目标原文：",
+        "",
+        `> ${arm.objective}`,
+        "",
+        "你**本轮的第一步必须调用 `goal` 工具**创建它：`op` 传 `\"create\"`，`objective` 用上面原文",
+        "（不要改写、不要翻译、不要概括）。建完目标再开始干活；在创建目标之前不要先做别的工具调用。",
+      ].join("\n")
+    }
+    return null
+  }
+
   // ── 工具清理：移除 eval/hub，确保记忆工具可用 ──
   // 内核可能在 compacting 后重新注册全部工具，故需在 session_start + before_agent_start 都调用
   async function sanitizeTools(tag: string) {
@@ -605,10 +757,15 @@ export default async function (pi: any) {
         }),
       )
       let filtered = all.filter((t: string) => !removed.includes(t))
-      const missing = memoryTools.filter((t: string) => !filtered.includes(t))
+      // goal 工具常驻激活（详见下方「目标模式桥接」块）：
+      // 内核 `/force goal` 的 setForcedToolChoice() 会对「不在活跃集」的工具直接 throw
+      // （agent-session.ts:1739）→ 必须提前在活跃集里，否则前端发来的 `/force goal` 直接失败。
+      // 成本只有 goal.md 的 ~600 字节描述；误建目标由 tool_call 守卫兜住（未开启目标模式时 block op=create）。
+      const wanted = [...memoryTools, "goal"]
+      const missing = wanted.filter((t: string) => !filtered.includes(t))
       if (missing.length > 0) {
         filtered = [...filtered, ...missing]
-        log(tag, `ensured memory tools: [${missing.join(", ")}]`)
+        log(tag, `ensured tools: [${missing.join(", ")}]`)
       }
       if (filtered.length !== all.length || missing.length > 0) {
         await pi.setActiveTools(filtered)
@@ -1066,6 +1223,15 @@ export default async function (pi: any) {
         "- 跨机合并：`mcp__mnemopi_export` 导出全局库 JSON（拷到另一台机器），`mcp__mnemopi_import` 导入合并（按 id 去重，同一文件重复合并幂等；语义近重复项合并后用 recall 核对并 invalidate）",
       ].join("\n"))
 
+      // (d) 目标模式：内核在 rpc-ui 下**不会**注入 goal-mode-context（只有 TUI 的 sendGoalModeContext 会）
+      //     → 目标上下文每轮由这里补；顺带兜住「已开启但还没建目标」的情况。
+      try {
+        const goalCtx = buildGoalContext(ctx)
+        if (goalCtx) injected.push(goalCtx)
+      } catch (e: any) {
+        log("before_agent_start.goal.error", e?.message || String(e))
+      }
+
       // ── 进度追踪：每次会话启动先聚合（跨天/周/月 -> 日报/周报/月报 -> PROJECT.md）──
       // 聚合只做一次（写 state.json 水位），不依赖模型；目标推演提示在聚合后生成。
       try {
@@ -1144,7 +1310,7 @@ export default async function (pi: any) {
     }
   }
 
-  pi.on("tool_call", async (event: any) => {
+  pi.on("tool_call", async (event: any, ctx?: any) => {
     // 静默提醒标志：必须声明在 try 块「之外」。
     // 它要在 catch 之后的收尾逻辑里被读取，而 try{} 是块级作用域 ——
     // 若声明在 try 内，catch 后面引用它会 TS2304 + 运行时 ReferenceError。
@@ -1152,6 +1318,33 @@ export default async function (pi: any) {
     try {
       const tool = event.toolName || ""
       const input = event.input || {}
+
+      // ── 目标模式守卫 ──
+      // goal 工具为了 `/force goal` 而常驻活跃（见「目标模式桥接」块），但创建目标必须由用户发起：
+      // 未开启目标模式时拦住 op=create，避免弱模型自己乱建目标；无目标时拦住 complete/drop 免刷错误。
+      // 放在刹车逻辑**之前**：这是模式闸门，不该计入 noProgressStreak / consecutiveBlockCount。
+      if (tool === "goal") {
+        const op = String(input.op ?? "")
+        const arm = readGoalArm(ctx)
+        const state = readGoalState(ctx)
+        if (op === "create" && !arm.enabled) {
+          log("goal.block.create", `未开启目标模式，拦截 create（objective=${String(input.objective ?? "").slice(0, 60)}）`)
+          return {
+            block: true,
+            reason:
+              "[claude-mode 目标模式] 当前会话未开启目标模式，禁止创建目标。\n" +
+              "目标由用户在 Tiffa 的「目标模式」开关里设定（设置 → 目标模式）。请直接按用户当前的指令继续工作，不要自行建目标。",
+          }
+        }
+        if ((op === "complete" || op === "drop") && !state?.objective) {
+          log("goal.block.nogoal", `无目标却调用 goal ${op}`)
+          return {
+            block: true,
+            reason: `[claude-mode 目标模式] 当前没有目标，无法执行 goal({op:"${op}"})。请直接按用户当前的指令工作。`,
+          }
+        }
+        log("goal.tool_call", `op=${op}`)
+      }
 
       // ── 无进展循环刹车：三级递进（软提醒 → 硬拦截 → 临时移除工具）──
       // 放在所有安全检查之前：本分支只可能拦住「空转/完全重复/意图背离」的调用，
@@ -2440,6 +2633,32 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
       }
     } catch (err: any) {
       log("tool_result.error", err?.message || String(err))
+    }
+  })
+
+  // ── 目标模式状态落盘 ──
+  // 内核在 rpc-ui 下会把 goal_updated 事件转发给宿主（rpc-client 事件白名单内含 goal_updated），
+  // 但主进程只转发不落盘。这里落一份：before_agent_start 注入上下文要读它，前端状态查询兜底也读它。
+  pi.on("goal_updated", async (event: any, ctx?: any) => {
+    try {
+      const goal = event?.goal ?? null
+      const state = event?.state
+      const payload = {
+        sessionId: hookSessionId(ctx),
+        ts: Date.now(),
+        enabled: state?.enabled === true,
+        status: typeof goal?.status === "string" ? goal.status : (state?.enabled ? "active" : "none"),
+        objective: typeof goal?.objective === "string" ? goal.objective : "",
+        tokensUsed: typeof goal?.tokensUsed === "number" ? goal.tokensUsed : 0,
+        tokenBudget: typeof goal?.tokenBudget === "number" ? goal.tokenBudget : null,
+      }
+      writeGoalState(ctx, payload)
+      log(
+        "goal.updated",
+        `enabled=${payload.enabled} status=${payload.status} tokens=${payload.tokensUsed}/${payload.tokenBudget ?? "-"} objective=${payload.objective.slice(0, 80)}`,
+      )
+    } catch (e: any) {
+      log("goal.updated.error", e?.message || String(e))
     }
   })
 
