@@ -172,11 +172,14 @@ function goalDraftPath(sessionId) {
 const EMPTY_ARM = { enabled: false, objective: '', tokenBudget: null, sessionId: '', autoResume: null };
 function parseAutoResume(raw) {
     const r = raw?.autoResume;
-    if (!r || typeof r !== 'object' || r.enabled !== true)
+    // ⚠️ enabled=false（用户暂停）**不能**读成 null：配置丢了就再也恢复不了，
+    // 前端也会因为读不到 autoResume 而把「继续续跑」按钮藏起来。
+    // 「要不要续跑」由消费方判 `.enabled === true`，这里只负责把配置原样读出来。
+    if (!r || typeof r !== 'object' || typeof r.enabled !== 'boolean')
         return null;
     const n = (v, def) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : def);
     return {
-        enabled: true,
+        enabled: r.enabled === true,
         maxTurns: n(r.maxTurns, exports.DEFAULT_AUTO_RESUME.maxTurns),
         maxMinutes: n(r.maxMinutes, exports.DEFAULT_AUTO_RESUME.maxMinutes),
         minIntervalMs: n(r.minIntervalMs, exports.DEFAULT_AUTO_RESUME.minIntervalMs ?? 800),
