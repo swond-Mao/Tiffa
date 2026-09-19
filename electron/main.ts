@@ -54,6 +54,7 @@ import {
   readGoalArm,
   writeGoalArm,
   readGoalState,
+  clearGoalState,
   isForceCapable,
   buildCreateCommand,
   buildSoftCreateMessage,
@@ -1301,6 +1302,9 @@ function setupIpc() {
     const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
     // 先武装再发指令：外挂在 before_agent_start / tool_call 里读 goal-mode.json，本轮就能读到
     const armedWith = inst.sessionId || sessionId || '';
+    // 开新目标前先清掉本会话的旧运行态：否则外挂见旧 objective 会以为「已建过」而不注入
+    // 「待创建」指令（软路径失效），前端也会继续显示上一个已完成/已放弃的目标
+    clearGoalState(armedWith || sessionId);
     writeGoalArm({ enabled: true, objective: text, tokenBudget: budget, sessionId: armedWith });
     const api = await _goalModelApi(inst);
     const forced = isForceCapable(api);

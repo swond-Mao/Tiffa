@@ -95,6 +95,25 @@ export function readGoalState(sessionId?: string | null): GoalState | null {
   return null;
 }
 
+/** 清掉某会话的运行态（用户开新目标时调用）。
+ *  不清的话旧文件里的 objective 会让外挂以为「这个目标已建过」→ 不再注入「待创建」指令；
+ *  前端也会继续显示上一个（已完成/已放弃的）目标。 */
+export function clearGoalState(sessionId?: string | null): void {
+  for (const p of [goalStatePath(sessionId), GOAL_STATE_PATH]) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      if (p === GOAL_STATE_PATH) {
+        // 全局文件里若装着别的会话，别动它
+        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (raw?.sessionId && sessionId && raw.sessionId !== sessionId) continue;
+      }
+      fs.unlinkSync(p);
+    } catch {
+      /* 删不掉也不影响主流程 */
+    }
+  }
+}
+
 /** 外挂实际激活路径写出的 `api`（`tool-choice.ts` 的命名 tool_choice 支持表） */
 const FORCE_CAPABLE_APIS = new Set([
   'anthropic-messages',

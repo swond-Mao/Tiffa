@@ -713,8 +713,14 @@ export default async function (pi: any) {
       )
       return lines.join("\n")
     }
+    // 「待创建」只在**这次武装的目标还没建过**时注入。
+    // ⚠️ 不能只看 arm.enabled：模型**自己**调 `goal({op:"complete"})` 收尾时主进程并不知道，
+    // 武装文件仍是 enabled=true → 目标已完成后又被要求"创建目标" → 目标重建、来回循环。
+    // 判据用「本会话是否已有运行态（含 objective）」：主进程在用户每次点「开始目标」时
+    // 会清掉旧运行态（clearGoalState），所以「有 objective」= 这次武装的目标已经建出来了。
     const arm = readGoalArm(ctx)
-    if (arm.enabled && arm.objective) {
+    const alreadyCreated = Boolean(state?.objective)
+    if (arm.enabled && arm.objective && !alreadyCreated) {
       return [
         "# 目标模式（待创建）",
         "",
@@ -1337,6 +1343,17 @@ export default async function (pi: any) {
             reason:
               "[claude-mode 目标模式] 当前会话未开启目标模式，禁止创建目标。\n" +
               "目标由用户在 Tiffa 的「目标模式」开关里设定（设置 → 目标模式）。请直接按用户当前的指令继续工作，不要自行建目标。",
+          }
+        }
+        // 已有目标运行态还去 create：多半是模型刚把目标标完成、又想重新建一遍（来回循环）。
+        // 用户真要开新目标会通过「开始目标」按钮下发，那时主进程已清掉旧运行态 → 这里不会拦。
+        if (op === "create" && state?.objective) {
+          log("goal.block.recreate", `已有目标运行态仍 create（status=${state.status}），拦截`)
+          return {
+            block: true,
+            reason:
+              `[claude-mode 目标模式] 本会话已有目标（状态 ${state.status || "unknown"}），不要重复创建。\n` +
+              "已完成就如实汇报结果；要换新目标请在回复里说明由用户重新设定，不要自行建目标或改目标。",
           }
         }
         if ((op === "complete" || op === "drop") && !state?.objective) {
