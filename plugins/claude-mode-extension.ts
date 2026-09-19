@@ -60,6 +60,62 @@ function ensureDir(dir: string) {
   try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }) } catch {}
 }
 
+// ═══════════════════════════════════════════════════════════
+// 无进展循环刹车的纯判定函数（纯函数，导出供自检脚本 import —— 单一真源，杜绝测试逻辑漂移）
+// ═══════════════════════════════════════════════════════════
+// 自检：~/.workbuddy/skills/tiffa-loop-brake/scripts/guard-selfcheck.ts
+//       （回放真实会话命令算误伤率 + mock pi 端到端驱动本文件的钩子）
+
+// 空转命令：整条命令（按换行/&&/;/||/| 拆段后）全部是不改变任何状态的指令。
+// 实测回放 2628 条真实 bash：命中 38 条（1.4%），逐条人工核对全部为真空转，零误伤。
+// 两个边界（都踩过）：
+//   ① 换行必须一起拆 —— 否则 `cd X\ngit status` 会被 cd 分支整条吞掉（[^&|;]* 能吃换行）；
+//   ② cd 参数不许含空白 —— `cd(?:\s+[^\s&|;]+)?` 只吃掉一个路径 token，不吞后续命令。
+const NOOP_SEGMENT_RE =
+  /^(?:echo\b.*|printf\b.*|:.*|true|false|pwd|whoami|date|exit(?:\s+0)?|sleep\s+[\d.]+|cd(?:\s+[^\s&|;]+)?)$/i
+export function isNoopBashCommand(raw: unknown): boolean {
+  if (typeof raw !== "string") return false
+  const cmd = raw.replace(/^\s*#.*$/gm, "").trim()
+  if (!cmd) return true
+  // 重定向 / 命令替换可能真在写文件或取数据，一律不算空转
+  if (/[><`]|\$\(/.test(cmd)) return false
+  const segments = cmd.split(/\n|&&|\|\||;|\|/).map((s) => s.trim()).filter(Boolean)
+  if (segments.length === 0) return true
+  return segments.every((s) => NOOP_SEGMENT_RE.test(s))
+}
+
+// 调用指纹：剔除内核意图字段 i（pi-wire INTENT_FIELD = "i"），只留真实参数。
+// 剔 i 的原因：模型每次都会重写意图文案，不剔则永远判不出「同一次调用被重复」。
+export function callFingerprint(tool: string, input: Record<string, unknown>): string {
+  try {
+    const rest: Record<string, unknown> = {}
+    for (const k of Object.keys(input || {}).sort()) if (k !== "i") rest[k] = input[k]
+    return `${tool}:${JSON.stringify(rest).slice(0, 400)}`
+  } catch {
+    return `${tool}:?`
+  }
+}
+
+// 意图-动作背离：i 字段里点名了别的工具，实际却调了当前工具。
+// 8-26 会话原话：i = "停止占位，改用 write 工具" 而 toolName = bash（重复上百次）。
+// ⚠️ 必须「调用动词 + 紧邻工具名」才算（回放 2628 条实测）：
+//   裸词匹配会把领域词汇全误判 —— "用 ComfyUI edit 做脱衣编辑"、"查找 edit 相关代码"、
+//   包装脚本里的 edit 管线 —— 本机真实命令里这类误报 6/6。
+//   加动词邻接后：真阳 5/5 命中，真阴 6/6 排除。
+const DISSOCIATION_RE =
+  /(?:改用|换成|改调|调用|使用|切到|切换到|should\s+use|use|call|switch\s+to|invoke)\s*(?:the\s+)?\b(write|edit|todo|read|grep|glob|ast_edit)\b/gi
+export function intentTargetsOtherTool(input: Record<string, unknown>, actual: string): string | null {
+  const intent = typeof input?.i === "string" ? input.i : ""
+  if (!intent) return null
+  DISSOCIATION_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = DISSOCIATION_RE.exec(intent)) !== null) {
+    const name = m[1].toLowerCase()
+    if (name !== actual) return name
+  }
+  return null
+}
+
 // ── snapcompact 帧预算字节预判（纯函数，导出供单测）──
 // 背景：内核硬预算 = 新帧组 b64 总长 > 3,000,000 B → 抛 "standing image payload exceeds the per-request budget"
 // （手动路径无 LLM 兜底）。旧 130K 字符预判（1 字符 ≈ 17.7 B，内核静态估算）把中文密集内容低估 ~1.9 倍
@@ -710,6 +766,12 @@ export default async function (pi: any) {
 
   pi.on("session_start", async () => {
     resetSkillState()
+    // 新会话：刹车状态全清，并确保 bash 没有被上一次会话的隐藏态残留
+    noProgressStreak = 0
+    lastCallKey = ""
+    pendingBrakeNote = undefined
+    pendingResultNote = ""
+    await restoreBashTool("session_start")
     await sanitizeTools("session_start")
     void syncBypassRoles()
     // 内核在 rpc-ui/rpc/acp 模式下设置 PI_NO_TITLE=1，完全禁用 AI 标题生成。
@@ -732,6 +794,11 @@ export default async function (pi: any) {
       agentTurnCount++
       silentToolCallCount = 0
       consecutiveBlockCount = 0
+      // 无进展循环刹车：新一轮用户提示 = 全新周期
+      noProgressStreak = 0
+      lastCallKey = ""
+      pendingBrakeNote = undefined
+      pendingResultNote = ""
       // skill/ask 状态已改为会话级持久+超时重置，不在此处清零。
       // 仅清理过期的 skill 状态（超过 TTL 的条目）
       const now = Date.now()
@@ -741,6 +808,9 @@ export default async function (pi: any) {
       if (askTimestamp && now - askTimestamp >= SKILL_STATE_TTL_MS) askTimestamp = 0
       if (styleAskedAt && now - styleAskedAt >= SKILL_STATE_TTL_MS) styleAskedAt = 0
       if (craftmanRanTimestamp && now - craftmanRanTimestamp >= SKILL_STATE_TTL_MS) craftmanRanTimestamp = 0
+      // 必须先恢复 bash：sanitizeTools 是按 getActiveTools() 现状做筛选的，
+      // 若 bash 仍在刹车隐藏态，sanitize 不会把它加回来，会永久残留。
+      await restoreBashTool("before_agent_start")
       await sanitizeTools("before_agent_start")
 
       const injected: string[] = []
@@ -974,6 +1044,60 @@ export default async function (pi: any) {
   })
 
   // ── 2. tool_call ── 危险路径/配置文件/.env 拦截 + 静默工具调用检测
+  // ═══════════════════════════════════════════════════════════
+  // 无进展循环刹车（No-progress loop brake）
+  // ═══════════════════════════════════════════════════════════
+  // 症状：弱模型为了「显得在干活」，反复调用空转 bash（echo/true/pwd/sleep/cd），
+  //       或在意图字段 i 里写着「改用 write 工具」却始终调用 bash（意图-动作背离）。
+  // 实测（2026-08-26 会话）：连续 398 次空转 bash，模型自己的 thinking 一路写
+  //       「I keep calling bash — this is clearly a malfunction」，然后继续调 bash。
+  // 内核为什么拦不住：model.toolCallLoopGuard 的判据是「该回合只有 1 个工具调用 +
+  //       参数规范化后全等」（pi-ai/src/utils/tool-call-loop-guard.ts:82-98）。
+  //       参数稍变（echo ready → echo done）哈希就不同，永远不触发 ——
+  //       整段 398 次空转里内核 redirect 只命中 1 次。
+  // 本刹车补的是「同工具 + 无状态变化」的连续计数，与参数是否相同无关；
+  // 三级递进：软提醒 → 硬拦截 → 临时把该工具移出活跃工具集
+  //（最后一级是唯一能真正打断解码层锚点的手段：工具不在列表里，模型就采样不到它）。
+  let noProgressStreak = 0          // 连续「无状态变化」的工具调用次数
+  let lastCallKey = ""              // 上一次调用的规范化指纹（剔除意图字段 i）
+  let bashHiddenByBrake = false     // bash 是否已被刹车临时移出工具集
+  let pendingBrakeNote: string | undefined  // 待随 tool_result 追加给模型的软提醒
+  let pendingResultNote = ""        // tool_call → tool_result 的提醒传递通道
+  const NO_PROGRESS_SOFT = 2        // 第 2 次：结果里追加软提醒
+  const NO_PROGRESS_BLOCK = 3       // 第 3 次起：硬拦截后续空转 bash
+  const NO_PROGRESS_HIDE = 5        // 第 5 次起：把 bash 移出活跃工具集
+  const BRAKE_RESTORE_MS = 60_000   // 安全联锁：bash 最多隐藏 60 秒，绝不允许永久消失
+
+  async function hideBashForBrake(): Promise<void> {
+    if (bashHiddenByBrake) return
+    try {
+      const active: string[] = pi.getActiveTools()
+      if (!active.includes("bash")) return
+      await pi.setActiveTools(active.filter((t: string) => t !== "bash"))
+      bashHiddenByBrake = true
+      log("brake.hide_bash", `连续 ${noProgressStreak} 次无进展，bash 已临时移出工具集`)
+      // 安全联锁：任何意外都不能让 bash 永久消失，否则会话直接残废
+      setTimeout(() => {
+        void restoreBashTool("safety-timeout")
+      }, BRAKE_RESTORE_MS)
+    } catch (e: any) {
+      log("brake.hide_bash.error", e?.message || String(e))
+    }
+  }
+
+  async function restoreBashTool(why: string): Promise<void> {
+    if (!bashHiddenByBrake) return
+    bashHiddenByBrake = false
+    try {
+      const active: string[] = pi.getActiveTools()
+      if (active.includes("bash")) return
+      await pi.setActiveTools([...active, "bash"])
+      log("brake.restore_bash", `${why} → bash 已恢复`)
+    } catch (e: any) {
+      log("brake.restore_bash.error", e?.message || String(e))
+    }
+  }
+
   pi.on("tool_call", async (event: any) => {
     // 静默提醒标志：必须声明在 try 块「之外」。
     // 它要在 catch 之后的收尾逻辑里被读取，而 try{} 是块级作用域 ——
@@ -982,6 +1106,58 @@ export default async function (pi: any) {
     try {
       const tool = event.toolName || ""
       const input = event.input || {}
+
+      // ── 无进展循环刹车：三级递进（软提醒 → 硬拦截 → 临时移除工具）──
+      // 放在所有安全检查之前：本分支只可能拦住「空转/完全重复/意图背离」的调用，
+      // 这类调用不可能是危险写入，因此提前 return 不会绕过后面的守卫。
+      pendingBrakeNote = undefined
+      {
+        const badKey = callFingerprint(tool, input)
+        let noProgressReason: string | null = null
+        if (tool === "bash" && isNoopBashCommand(input.command ?? input.cmd)) {
+          noProgressReason = "空转命令，不改变任何状态"
+        } else if (lastCallKey && badKey === lastCallKey) {
+          noProgressReason = "与上一次调用完全重复"
+        } else {
+          const target = intentTargetsOtherTool(input, tool)
+          if (target) noProgressReason = `意图字段说明要调用 ${target}，实际却调用了 ${tool}`
+        }
+
+        if (noProgressReason) {
+          noProgressStreak++
+        } else {
+          if (noProgressStreak > 0) void restoreBashTool("检测到真实进展")
+          noProgressStreak = 0
+        }
+        lastCallKey = badKey
+
+        // 硬拦截（仅对 bash —— 避免误伤 read/write 等正常重复）
+        if (tool === "bash" && noProgressStreak >= NO_PROGRESS_BLOCK) {
+          log("brake.block", `streak=${noProgressStreak} reason=${noProgressReason}`)
+          if (noProgressStreak >= NO_PROGRESS_HIDE) await hideBashForBrake()
+          return {
+            block: true,
+            reason:
+              `[claude-mode 循环刹车] 你已连续 ${noProgressStreak} 次调用不产生任何进展的工具（${noProgressReason}）。` +
+              (bashHiddenByBrake
+                ? `bash 已被临时移出可用工具列表，本轮内你无法再调用它。`
+                : `这次调用已被拦截，不要再尝试同类命令。`) +
+              `\n下一步只有两种合法选择：\n` +
+              `① 调用真正能改变状态的工具推进任务（write / edit / todo / ast_edit，或一条有实际作用的 bash 命令）；\n` +
+              `② 若工作确已完成，直接用中文给出最终结论并结束本轮，不要再调用任何工具。`,
+          }
+        }
+
+        // 软提醒（第 2 次）：随 tool_result 追加，不打断调用。
+        // 只对 bash 发 —— 后续硬拦截也只作用于 bash，否则提醒里「会被拦截」是假承诺。
+        if (tool === "bash" && noProgressReason && noProgressStreak === NO_PROGRESS_SOFT) {
+          log("brake.soft_warn", `streak=${noProgressStreak} reason=${noProgressReason}`)
+          pendingBrakeNote =
+            `⚠️ [claude-mode 空转警告] 连续第 ${noProgressStreak} 次无进展调用：${noProgressReason}。\n` +
+            `这条命令没有推进任何任务。再出现同类调用会被直接拦截，bash 也会被临时移出工具列表。\n` +
+            `请立刻改为：① 调用真正改变状态的工具（write / edit / todo）；或 ② 若已完成，直接给出最终结论并结束。`
+        }
+      }
 
       // ── 连续拦截熔断：同一轮被 block 3 次后强制终止，避免弱模型反复重试撑爆 context ──
       if (consecutiveBlockCount >= 3) {
@@ -1197,8 +1373,17 @@ export default async function (pi: any) {
     }
     // 工具放行（没有被任何拦截规则 block）→ 重置连续拦截计数
     consecutiveBlockCount = 0
-    // 安全检查已全部跑完，此时才补发静默提醒
-    if (pendingSteer) return { steer: pendingSteer }
+    // 安全检查已全部跑完，此时才生成给模型的提醒。
+    // ⚠️ 原实现 `return { steer: pendingSteer }` 是死代码：内核处理 tool_call 钩子返回值时
+    // 只读 block / reason / input（session/agent-session.ts:3542-3549、
+    // extensibility/hooks/tool-wrapper.ts:52-58），steer 字段被直接丢弃 ——
+    // 这条「静默工具调用提醒」模型从来没收到过。
+    // 改为挂到 tool_result 通道（下方 tool_result 钩子把它追加到结果文本），
+    // 该通道本文件已用于技能路径提示，已验证可用且无重入风险。
+    const notes: string[] = []
+    if (pendingSteer) notes.push(pendingSteer)
+    if (pendingBrakeNote) notes.push(pendingBrakeNote)
+    pendingResultNote = notes.join("\n\n")
   })
 
   // ── 旁路模型压缩（Phase B：复刻 Claude Code subagent 总结）──
@@ -2163,6 +2348,20 @@ REMINDER: 不要调用任何工具。只输出纯文本——先 <analysis> 再�
             }],
             isError: true,
           }
+        }
+      }
+
+      // 空转软提醒 / 静默工具提醒：由 tool_call 钩子产生（见该钩子尾部 pendingResultNote）。
+      // 内核不支持从 tool_call 钩子 steer 注入（steer 字段被内核丢弃），改用追加结果文本这条通道。
+      // 放在堆栈清洗之后：安全过滤优先，绝不能因为要加提醒而绕过错漏清洗。
+      // 若本分支被上面的早退跳过，提醒不会被消费，会自动搭在下一条结果上（自愈，不丢）。
+      if (pendingResultNote) {
+        const note = pendingResultNote
+        pendingResultNote = ""
+        const existing = Array.isArray(event.content) ? event.content : []
+        log("tool_result.brake_note", `tool=${tool} len=${note.length}`)
+        return {
+          content: [...existing, { type: "text", text: note }],
         }
       }
     } catch (err: any) {
