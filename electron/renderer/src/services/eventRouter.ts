@@ -741,6 +741,7 @@ function handleEvent(event: TiffaEventFrame): void {
       }
       const status = String(goal.status || '');
       ui.setGoalState({
+        sessionId: String(event._sessionId || ''),
         enabled: event.state?.enabled === true,
         status,
         objective: String(goal.objective),

@@ -14,6 +14,10 @@ export type ApprovalMode = 'auto' | 'yolo' | 'normal';
 
 /** 目标模式运行态（内核 goal 模式，事件 goal_updated 驱动） */
 export interface GoalLiveState {
+  /** 这份状态属于哪个会话。goalState 只在收到 goal_updated 时更新、**不会在切对话时自动清空**，
+   *  所以消费方必须按它过滤，否则切到没有目标的对话时会继续显示上一个对话的目标
+   *  （最坏情况：在 B 对话里点「结束目标」，却对 B 发了一条收尾指令）。 */
+  sessionId: string;
   enabled: boolean;
   /** active | paused | budget-limited | complete | dropped */
   status: string;

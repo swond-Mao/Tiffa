@@ -1542,6 +1542,7 @@ function GoalModeSection() {
         setFileState(
           st && st.objective
             ? {
+                sessionId: String(activeSessionId ?? ''),
                 enabled: st.enabled === true,
                 status: String(st.status || ''),
                 objective: String(st.objective),
@@ -1557,8 +1558,13 @@ function GoalModeSection() {
     void load();
   }, [activeSessionId]);
 
-  // 实时事件优先（最新），没有则退回磁盘快照
-  const live = (goalState && goalState.objective ? goalState : null) ?? fileState;
+  // 实时事件优先（最新），但它**不会在切对话时清空** → 必须比对 sessionId，
+  // 否则切到没有目标的对话会继续显示上一个对话的目标（并在收尾时误发指令给错的会话）。
+  const liveGoal =
+    goalState && goalState.objective && (!activeSessionId || !goalState.sessionId || goalState.sessionId === activeSessionId)
+      ? goalState
+      : null;
+  const live = liveGoal ?? fileState;
 
   // 发出「开始目标」后等 goal_updated 回来；20s 没等到就提示可能没生效（软路径/模型不配合）
   useEffect(() => {
@@ -1598,6 +1604,10 @@ function GoalModeSection() {
         return;
       }
       setPending(true);
+      // 清掉上一轮目标的快照（磁盘 + 实时）：否则「等待模型创建…」会被旧目标的状态盖住，
+      // 用户以为新目标没生效（实际只是还在等内核回 goal_updated）。下一次 goal_updated 会重新填上。
+      setFileState(null);
+      useUiStore.getState().setGoalState(null);
       setNote(r.forced ? '已通过 /force 强制模型创建目标…' : '当前模型不支持强制工具调用，已改用提示方式，等模型自己创建目标…');
     } catch (err) {
       setNote(String((err as Error)?.message || err));
