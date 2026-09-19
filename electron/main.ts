@@ -1248,6 +1248,36 @@ function setupIpc() {
     }
   }
 
+  /**
+   * 武装文件里的 sessionId 要跟着实例迁移（前端临时 UUID → 内核真实 id）。
+   *
+   * ⚠️ 不跟随就会漏：**新对话的第一条消息**如果就是「开始目标」，写进 goal-mode.json 的是前端
+   * 的 `__new__` 临时 id；内核建好会话后发 session_switch，实例才迁到真实 id，而外挂的
+   * `hookSessionId(ctx)` 拿到的一直是真实 id → 归属判定不匹配 → `tool_call` 守卫把
+   * `goal({op:"create"})` 当「未经用户授权的自建目标」拦掉，用户看到的是目标模式静默失效。
+   *
+   * 时序上安全：session_switch 在建会话时就发出（早于 before_agent_start），而守卫跑在
+   * 模型第一轮返回之后（≥数百 ms）→ 这里 100ms 一次的探测足够在守卫之前改好文件。
+   */
+  function _syncGoalArmSessionId(inst, armedWith: string) {
+    if (!inst || !armedWith) return;
+    let checks = 0;
+    const timer = setInterval(() => {
+      checks++;
+      const now = inst.sessionId;
+      if (now && now !== armedWith) {
+        const arm = readGoalArm();
+        if (arm.enabled && arm.sessionId === armedWith) {
+          writeGoalArm({ ...arm, sessionId: now });
+          console.log(`[主进程] 目标模式武装会话 id 跟随迁移 ${armedWith} → ${now}`);
+        }
+        clearInterval(timer);
+        return;
+      }
+      if (checks > 40 || !inst.process) clearInterval(timer); // 最多看 4s
+    }, 100);
+  }
+
   ipcMain.handle('goal:status', async (event, sessionId) => {
     const arm = readGoalArm();
     // 运行态按会话分文件读（goal-state.<sessionId>.json），旧版全局文件作兜底
@@ -1270,7 +1300,8 @@ function setupIpc() {
     }
     const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
     // 先武装再发指令：外挂在 before_agent_start / tool_call 里读 goal-mode.json，本轮就能读到
-    writeGoalArm({ enabled: true, objective: text, tokenBudget: budget, sessionId: inst.sessionId || sessionId || '' });
+    const armedWith = inst.sessionId || sessionId || '';
+    writeGoalArm({ enabled: true, objective: text, tokenBudget: budget, sessionId: armedWith });
     const api = await _goalModelApi(inst);
     const forced = isForceCapable(api);
     try {
@@ -1278,6 +1309,9 @@ function setupIpc() {
     } catch (err) {
       return { ok: false, error: `发送失败：${err.message}` };
     }
+    // 新对话的首条消息会触发实例 sessionId 迁移（临时 UUID → 真实 id），武装文件必须跟随，
+    // 否则本轮 goal 守卫按旧 id 判归属 → 把 create 拦掉（详见 _syncGoalArmSessionId 注释）
+    _syncGoalArmSessionId(inst, armedWith);
     console.log(`[主进程] 目标模式开启 session=${inst.sessionId} force=${forced} api=${api || 'unknown'} budget=${budget ?? '-'}`);
     return { ok: true, forced, objective: text };
   });

@@ -635,7 +635,10 @@ export default async function (pi: any) {
       }
       const mine = hookSessionId(ctx)
       if (goalArmCache.sessionId && mine && goalArmCache.sessionId !== mine) {
-        // 别的对话的目标模式，与本次会话无关
+        // 别的对话的目标模式，与本次会话无关。
+        // 这条日志只在文件 mtime 变化时打一次 —— 若「刚点了开始目标却看到这里」，
+        // 说明武装文件里的会话 id 没跟上实例迁移（temp UUID → 真实 id）。
+        log("goal.arm.foreign", `武装属于别的会话 arm=${goalArmCache.sessionId} mine=${mine}`)
         return { enabled: false, objective: "" }
       }
       return goalArmCache
