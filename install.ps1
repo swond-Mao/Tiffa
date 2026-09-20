@@ -264,8 +264,11 @@ try {
         $untrackedCount = @($lines | Where-Object { $_.ToString().Trim() -match "^\?\?" }).Count
         if ($trackedChanges.Count -gt 0) {
             # 标注其中多少处是【编译产物】(main.js/dist 等): 选 Y 会把它们还原成仓库版, 不算丢改动。
+            # ⚠️ porcelain 行格式是 "XY 路径"（如 `" M app.ts"` / `"?? x"`），路径从第 3 个字符起。
+            # 必须**在未 Trim 的原始行**上取 Substring(3) —— 先 Trim 会去掉状态位前的空格、整体错位一格
+            #（实测取成 "lectron/main.js"，判定恒假 → 这行提示永远不显示）。
             $buildCount = @($trackedChanges | Where-Object {
-                $s = $_.ToString().Trim()
+                $s = $_.ToString()
                 $s.Length -gt 3 -and (Test-IsBuildArtifact $s.Substring(3).Trim())
             }).Count
             Write-Host ""
@@ -281,10 +284,12 @@ try {
                 Restore-BuildOutputs
                 $left = @((& git -C $ROOT status --porcelain 2>$null) | Where-Object { $_ -and $_.ToString().Trim() -ne "" })
                 $stashFailed = $false
+                $stashed = $false
                 if ($left.Count -gt 0) {
                     # ② 其余改动(源码/运行时)才 stash —— 可恢复
                     & git -C $ROOT stash push -m "install.ps1 升级前自动暂存" 2>$null
                     if ($LASTEXITCODE -eq 0) {
+                        $stashed = $true
                         OK "已清除代码改动(编译产物已还原成仓库版; 其余 $($left.Count) 处已暂存, 想找回: git stash pop; 确定不要: git stash drop)"
                     } else {
                         $stashFailed = $true
@@ -295,7 +300,9 @@ try {
                 }
                 # ③ 立刻 pull: 必须在后面的"重新编译"之前 —— 先拿最新源码, 再编译才有意义。
                 if (Invoke-TiffaPull) { OK "已升级到最新版本。" }
-                else { if ($stashFailed) { WARN "升级(git pull)没成功: 工作区仍有未清除的改动。手动: git stash 或 git checkout -- . 后重试 git pull" } else { WARN "升级没成功, 但改动没丢(暂存了)。稍后可: git stash pop 恢复, git pull 重试。" } }
+                elseif ($stashFailed) { WARN "升级(git pull)没成功: 工作区仍有未清除的改动。手动: git stash 或 git checkout -- . 后重试 git pull" }
+                elseif ($stashed) { WARN "升级没成功, 但改动没丢(暂存了)。稍后可: git stash pop 恢复, git pull 重试。" }
+                else { WARN "升级(git pull)没成功(原因见上)。工作区已无残留改动, 网络恢复后直接重试 git pull 即可。" }
             } else {
                 WARN "已保留代码改动, 未升级。要继续升级, 请先处理改动(或下次再选 Y)。"
             }
