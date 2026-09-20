@@ -12,8 +12,9 @@ import { useUiStore } from '../stores/useUiStore';
 import { useSessionsStore } from '../stores/useSessionsStore';
 
 const POLL_MS = 2000;
-const POLL_MAX = 90; // 3 分钟：长上下文调研可能很慢，超时后由用户手动刷新/放弃
-/** 超过这个秒数还停在 pending，基本可以判定"内核没发起模型请求"而不是"模型在慢慢想" */
+const POLL_MAX = 900; // 30 分钟。实测出现过**请求 200 秒才到达模型**的情况（切模型重载 / 单槽位排队），
+// 原来的 90 次（3 分钟）会在方案产出前就停掉轮询 —— 用户白等一场，方案却永远不显示。
+/** 超过这个秒数还停在 pending，就不再让用户干等：按主进程的自诊断说明「卡在哪」 */
 const STALL_SEC = 45;
 
 export default function GoalDraftCard() {
@@ -33,10 +34,14 @@ export default function GoalDraftCard() {
   const pollRef = useRef<number | null>(null);
   const pollsRef = useRef(0);
 
-  // 草稿属于别的会话就当没有：切对话后不该继续显示上一个对话的方案
+  // 草稿属于别的会话就当没有：切对话后不该继续显示上一个对话的方案。
+  // ⚠️ 归属匹配优先用 uiSessionId —— 会话 id 在「新对话首条消息」时会迁移，主进程按实例 id 写、
+  // 外挂按 hook id 写、这里按渲染层 id 读，三方不一致时用 sessionId 判断会把卡片整块隐藏：
+  // 方案明明已经产出，用户却只看到"模型正在转写…"一直转圈。
+  const owner = draft?.uiSessionId || draft?.sessionId;
   const mine =
     draft && draft.objective !== undefined
-      ? !activeSessionId || !draft.sessionId || draft.sessionId === activeSessionId
+      ? !activeSessionId || !owner || owner === activeSessionId
         ? draft
         : null
       : draft;
@@ -78,13 +83,20 @@ export default function GoalDraftCard() {
           pollRef.current = null;
           return;
         }
+        // 仍是 pending：把主进程 4 秒时写回的自诊断（diag）与模型名同步进卡片。
+        // 否则「卡在内核排队」和「卡在模型端」两种完全不同的处境长得一模一样，
+        // 用户只能盯着秒表猜 —— 实测那两种情况的等待时间都可能到 200 秒级。
+        const cur = useUiStore.getState().goalDraft;
+        if (d && (d.diag?.atSec !== cur?.diag?.atSec || (d.model && d.model !== cur?.model))) {
+          setGoalDraft({ ...(cur ?? {}), ...d, sessionId: cur?.sessionId ?? d.sessionId ?? activeSessionId ?? '' } as never);
+        }
       } catch {
         /* 读不到就下一轮再试 */
       }
       if (pollsRef.current > POLL_MAX && pollRef.current) {
         window.clearInterval(pollRef.current);
         pollRef.current = null;
-        setNote('等待方案超时。模型可能还在调研，可稍后在「设置 → 目标模式」里手动填写目标。');
+        setNote('已等待 30 分钟仍没有方案。请求可能一直卡在队列里 —— 点「停止」后重发，或到「设置 → 目标模式」手动填写目标。');
       }
     };
     pollRef.current = window.setInterval(tick, POLL_MS);
@@ -154,9 +166,21 @@ export default function GoalDraftCard() {
           {mine.model ? ` 本次转写用的是当前会话的模型：${mine.model}。` : ''}
           {waited >= STALL_SEC ? (
             <div className="goal-draft-error" style={{ marginTop: 8 }}>
-              已等待 {waited} 秒仍无任何产出 —— 这通常不是"模型在慢慢想"，而是<b>请求根本没发出去</b>
-              （上一条消息被排队 / 内核卡住 / 模型端点不通）。先点「停止」再重发一次；若依旧不动，去
-              「设置 → 目标模式」手动填写目标，并检查这个会话选的模型端点是否可达。
+              {mine.diag?.invoked === true ? (
+                <>
+                  已等待 {waited} 秒：请求<b>已经交给模型</b>了（内核起了回合），慢在模型侧 ——
+                  常见于模型服务被别的会话占着排队、刚切换模型需要重载权重、或首包本来就慢。
+                  继续等通常能出；也可以点「停止」后到「设置 → 目标模式」换个更快的转写模型重发。
+                </>
+              ) : mine.diag?.invoked === false ? (
+                <>
+                  已等待 {waited} 秒：内核<b>受理了但没起回合</b>，请求排在内核任务队列后面（上一条命令没收尾
+                  {mine.diag.pendingAsks > 0 ? `；当前有 ${mine.diag.pendingAsks} 个确认框在等你答复` : ''}
+                  ）。点「停止」再重发一次。
+                </>
+              ) : (
+                <>已等待 {waited} 秒，正在确认请求究竟走到了哪一步…</>
+              )}
             </div>
           ) : null}
         </div>

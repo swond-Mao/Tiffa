@@ -165,6 +165,14 @@ export interface GoalState {
  */
 export interface GoalDraft {
   sessionId: string;
+  /** 渲染层发起这次转写时用的会话 id（前端自己穿进来的那个值，前后一致）。
+   *  会话 id 在「新对话首条消息」时会迁移，而主进程按实例 id 写、外挂按 hook id 写、
+   *  前端按渲染层 id 读 —— 三方不一致时靠 sessionId 匹配会让卡片误判成"别的会话的草稿"
+   *  而直接隐藏（方案明明产出了却看不到）。匹配一律优先用这个字段。 */
+  uiSessionId?: string;
+  /** 这次转写流程涉及过的所有会话 id（实例 id / 渲染层 id / 内核 hook id）。
+   *  会话 id 迁移后旧草稿仍能按别名找回；无关会话的 id 不在其中，隔离性不受影响。 */
+  aliases?: string[];
   ts: number;
   status: 'pending' | 'ready' | 'error';
   /** 用户原话（转写前的输入） */
@@ -176,6 +184,15 @@ export interface GoalDraft {
   /** 执行步骤 */
   todos: string[];
   error?: string;
+  /** 下发后由主进程补写的自诊断（见 main.ts goal:draft）：
+   *  区分「内核没起回合（排队）」与「已交给模型（慢在模型端）」——
+   *  实测两者等待时间都可能到 200 秒级，光看秒表分不出来。 */
+  diag?: {
+    invoked: boolean;
+    atSec: number;
+    idleSec: number;
+    pendingAsks: number;
+  };
 }
 
 const EMPTY_ARM: GoalArm = { enabled: false, objective: '', tokenBudget: null, sessionId: '', autoResume: null };
@@ -254,13 +271,38 @@ export function clearGoalState(sessionId?: string | null): void {
 }
 
 /** 草稿读写（都在本会话专属文件里；sessionId 缺失时退回全局文件，手工调试用） */
+/**
+ * 草稿归属判定：这个 id 是不是这份草稿的「主人之一」。
+ *
+ * 为什么需要多身份：同一次转写流程会牵涉三个不同的会话 id ——
+ * 主进程按**实例 id** 写、渲染层按**自己的会话 id** 读、外挂按 **hook id**（内核真实会话 id）读；
+ * 而「新对话首条消息」会触发 id 迁移，三方拿到的值可能各不相同。
+ * 只认单一 `sessionId` 会让整条闸门静默失效（前端永远转圈 + 外挂不注入转写指令 →
+ * 这一轮退化成普通回合，实测表现为"等了 200 秒模型才动，但走的不是目标模式"）。
+ *
+ * 但仍然**必须**拒绝无关会话：外挂读到别人的 pending 会误以为自己在草稿阶段（拦掉写类工具）。
+ * 所以只认「明确列名」的 id：sessionId / uiSessionId / aliases 三处任一命中才算。
+ */
+function draftBelongsTo(raw: any, sessionId?: string | null): boolean {
+  if (!sessionId) return true;
+  if (raw?.sessionId === sessionId) return true;
+  if (raw?.uiSessionId === sessionId) return true;
+  if (Array.isArray(raw?.aliases) && raw.aliases.includes(sessionId)) return true;
+  // 完全没有身份信息的草稿（异常写入/旧格式）：无从判断归属，放行优于静默失效
+  return !raw?.sessionId && !raw?.uiSessionId && !(Array.isArray(raw?.aliases) && raw.aliases.length);
+}
+
 export function readGoalDraft(sessionId?: string | null): GoalDraft | null {
-  for (const p of sessionId ? [goalDraftPath(sessionId), goalDraftPath(null)] : [goalDraftPath(null)]) {
+  const named = goalDraftPath(sessionId);
+  const fallback = goalDraftPath(null);
+  for (const p of sessionId && named !== fallback ? [named, fallback] : [fallback]) {
     try {
       if (!fs.existsSync(p)) continue;
       const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (!raw || typeof raw !== 'object') continue;
-      if (raw.sessionId && sessionId && raw.sessionId !== sessionId) continue;
+      if (!draftBelongsTo(raw, sessionId)) continue;
+      // 兜底副本只认「新近」的：陈年草稿不该在几小时后把某轮消息误判成草稿阶段
+      if (p === fallback && typeof raw.ts === 'number' && Date.now() - raw.ts > 30 * 60 * 1000) continue;
       return raw as GoalDraft;
     } catch {
       continue;
@@ -272,7 +314,21 @@ export function readGoalDraft(sessionId?: string | null): GoalDraft | null {
 export function writeGoalDraft(draft: GoalDraft): void {
   const dir = path.dirname(GOAL_ARM_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(goalDraftPath(draft.sessionId), JSON.stringify(draft, null, 2) + '\n', 'utf8');
+  // 累积别名：写进来的每个 id 都记下，让「迁移后也能找回来」。只增不减（草稿是短命对象）。
+  const aliases = Array.from(
+    new Set([...(draft.aliases ?? []), draft.sessionId, draft.uiSessionId].filter(Boolean) as string[]),
+  );
+  const body = JSON.stringify({ ...draft, aliases }, null, 2) + '\n';
+  fs.writeFileSync(goalDraftPath(draft.sessionId), body, 'utf8');
+  // 再写一份 sid 无关的兜底副本：前端按渲染层 id 读、外挂按 hook id 读，都与实例 id 不同，
+  // 只写带 id 的文件会让方案产出了却没人读得到（卡片一直转圈）。
+  if (goalDraftPath(draft.sessionId) !== goalDraftPath(null)) {
+    try {
+      fs.writeFileSync(goalDraftPath(null), body, 'utf8');
+    } catch {
+      /* 兜底写失败不影响主副本 */
+    }
+  }
 }
 
 /** 清掉草稿（用户点「开始执行」或「放弃」之后）：留着会让下一轮继续被判成草稿阶段 */
@@ -284,8 +340,10 @@ export function clearGoalDraft(sessionId?: string | null): void {
         fs.unlinkSync(p);
         continue;
       }
+      // 归属用同一套判定（含别名）：既保证 id 迁移后仍清得掉自己那份，
+      // 也不会误删别的会话的草稿 —— 漏清的后果是下一轮消息被当成"草稿阶段"（闸门误拦）。
       const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (raw?.sessionId && raw.sessionId !== sessionId) continue;
+      if (!draftBelongsTo(raw, sessionId)) continue;
       fs.unlinkSync(p);
     } catch {
       /* 删不掉不影响主流程 */

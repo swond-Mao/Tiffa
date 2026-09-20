@@ -224,6 +224,35 @@ describe('目标草稿：转写 + 人审闸门', () => {
     expect(readGoalDraft(SID_B)?.status).toBe('pending');
   });
 
+  it('会话 id 迁移后仍能按别名找回草稿，且无关会话依旧读不到', () => {
+    const INST = 'inst-uuid-1'; // 主进程侧：实例 id
+    const UI = 'ui-uuid-1'; // 渲染层侧：前端自己的会话 id
+    const REAL = '019fec89-real'; // 迁移后：内核真实会话 id（外挂 hook id）
+    writeGoalDraft({
+      sessionId: INST,
+      uiSessionId: UI,
+      ts: Date.now(),
+      status: 'pending',
+      request: 'q',
+      objective: '',
+      criteria: [],
+      todos: [],
+    });
+    // 写入方（实例 id）与读取方（渲染层 id）不同，两份都要读得到 ——
+    // 否则前端永远转圈、外挂不注入转写指令，整条闸门静默失效
+    expect(readGoalDraft(INST)?.status).toBe('pending');
+    expect(readGoalDraft(UI)?.status).toBe('pending');
+
+    // 迁移：主进程把草稿改挂到内核真实 id 上，并把旧 id 记进别名
+    const d = readGoalDraft(INST)!;
+    clearGoalDraft(INST);
+    writeGoalDraft({ ...d, sessionId: REAL, aliases: [...(d.aliases ?? []), INST, REAL] });
+    expect(readGoalDraft(REAL)?.status).toBe('pending'); // 外挂按 hook id 读
+    expect(readGoalDraft(INST)?.status).toBe('pending'); // 迁移前的 id 仍可用
+    // 隔离性不能被迁移容错破坏：无关会话读到 pending 会误进草稿闸门、拦掉所有写类工具
+    expect(readGoalDraft('someone-else')).toBeNull();
+  });
+
   it('composeObjective 把验收标准与步骤一起钉进目标（只留摘要会让「完成」退化成主观判断）', () => {
     const obj = composeObjective({
       objective: 'npm test 从 47 个失败降到 0',

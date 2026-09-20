@@ -609,15 +609,29 @@ export default async function (pi: any) {
     return sid ? join(AGENT_DIR, `goal-draft.${sid}.json`) : join(AGENT_DIR, "goal-draft.json")
   }
 
+  /** 草稿归属：这个 id 是不是这份草稿的主人之一（见 goal-mode.ts 的 draftBelongsTo）。
+   *  必须同时满足两点 —— ①迁移链上的任何 id（实例 id / 渲染层 id / hook id）都算；
+   *  ②**无关会话一律不算**，否则别的会话读到 pending 会误进草稿闸门、把写类工具全拦掉。 */
+  function draftBelongsTo(raw: any, sid?: string | null): boolean {
+    if (!sid) return true
+    if (raw?.sessionId === sid || raw?.uiSessionId === sid) return true
+    if (Array.isArray(raw?.aliases) && raw.aliases.includes(sid)) return true
+    return !raw?.sessionId && !raw?.uiSessionId && !(Array.isArray(raw?.aliases) && raw.aliases.length)
+  }
+
   /** 读本会话草稿。status=pending 表示「用户已发需求、等模型转写」，此时本扩展进入草稿闸门模式。 */
   function readGoalDraft(ctx?: any): { status: string; request: string; objective: string; criteria: string[]; todos: string[]; error?: string } | null {
     const mine = hookSessionId(ctx)
-    for (const p of [goalDraftPathFor(mine), goalDraftPathFor("")]) {
+    const named = goalDraftPathFor(mine)
+    const fallback = goalDraftPathFor("")
+    for (const p of mine && named !== fallback ? [named, fallback] : [fallback]) {
       try {
         if (!existsSync(p)) continue
         const raw = JSON.parse(readFileSync(p, "utf8"))
         if (!raw || typeof raw !== "object") continue
-        if (raw.sessionId && mine && raw.sessionId !== mine) continue
+        if (!draftBelongsTo(raw, mine)) continue
+        // 兜底副本只认新近的：陈年草稿不该在几小时后把某轮消息误判成草稿阶段
+        if (p === fallback && typeof raw.ts === "number" && Date.now() - raw.ts > 30 * 60 * 1000) continue
         return raw
       } catch {
         continue
@@ -630,8 +644,19 @@ export default async function (pi: any) {
     try {
       ensureDir(AGENT_DIR)
       const sid = hookSessionId(ctx)
-      const cur = readGoalDraft(ctx) || { status: "pending", request: "", objective: "", criteria: [], todos: [] }
-      writeFileSync(goalDraftPathFor(sid), JSON.stringify({ ...cur, ...patch, sessionId: sid, ts: Date.now() }, null, 2) + "\n", "utf8")
+      const cur: any = readGoalDraft(ctx) || { status: "pending", request: "", objective: "", criteria: [], todos: [] }
+      // 把本扩展的 hook id 也记进别名：主进程只知道实例 id 与渲染层 id，
+      // 缺了 hook id 的话下一轮读取（例如工具拦截）可能就找不回这份草稿了
+      const aliases = Array.from(new Set([
+        ...((cur.aliases as string[]) || []),
+        ...((patch.aliases as string[]) || []),
+        cur.sessionId, cur.uiSessionId, sid,
+      ].filter(Boolean) as string[]))
+      const body = JSON.stringify({ ...cur, ...patch, sessionId: sid, aliases, ts: Date.now() }, null, 2) + "\n"
+      writeFileSync(goalDraftPathFor(sid), body, "utf8")
+      // 同步写兜底副本：前端轮询用的是渲染层会话 id，与本扩展的 hook id 不同，
+      // 只写带 id 的文件会让方案产出了却显示不出来（卡片一直转圈）。
+      if (goalDraftPathFor(sid) !== goalDraftPathFor("")) writeFileSync(goalDraftPathFor(""), body, "utf8")
     } catch (e: any) {
       log("goal.draft.write.error", e?.message || String(e))
     }

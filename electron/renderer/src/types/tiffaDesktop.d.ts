@@ -190,6 +190,10 @@ export interface GoalActionResult {
 /** 目标草稿：模型把用户需求转写成可验收方案，等人审（status 由外挂在 agent_end 里推进） */
 export interface GoalDraftState {
   sessionId?: string;
+  /** 发起这次转写时渲染层用的会话 id（前端自己传的值）。会话 id 在「新对话首条消息」时会迁移，
+   *  主进程按实例 id 写、外挂按 hook id 写、这里按渲染层 id 读 —— 三方不一致时靠 sessionId
+   *  匹配会把卡片判成"别的会话的草稿"而隐藏。匹配优先用这个字段。 */
+  uiSessionId?: string;
   ts?: number;
   /** pending=等模型转写 | ready=等人审 | error=模型没按格式输出 */
   status: 'pending' | 'ready' | 'error';
@@ -201,6 +205,19 @@ export interface GoalDraftState {
   error?: string;
   /** 展示用：这次转写实际用的模型（如 `llama.cpp / Qwen3.X`），由 goalDraft 回带 */
   model?: string;
+  /** 下发后的自动诊断：回答「到底卡在内核排队，还是卡在模型端」——
+   *  之前只能靠"等了 N 秒没动静"猜，实测出现过 200 秒才到模型的情况。 */
+  diag?: {
+    /** 内核是否已为这次转写起了新回合：true=请求已交给模型（慢在模型端）；
+     *  false=内核受理了但没起回合（排在内核任务队列后面 / 卡在未应答的确认框上）。 */
+    invoked: boolean;
+    /** 判定发生在下发后多少秒 */
+    atSec: number;
+    /** 当时内核已静默多少秒 */
+    idleSec: number;
+    /** 当时未应答的确认框数量 */
+    pendingAsks: number;
+  };
 }
 
 export interface TiffaDesktopApi {

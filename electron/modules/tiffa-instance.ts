@@ -575,9 +575,13 @@ export class TiffaInstance {
     return Date.now() - this.lastActiveTime > TiffaInstance.BUSY_STALE_MS;
   }
 
+  /** 未应答的确认框数量（诊断用：转写"没起回合"时最常见的原因就是它） */
+  get pendingAskCount(): number {
+    return this._pendingAskIds.size;
+  }
+
   /** 拦截时给用户看的具体原因（别再让"忙"变成一个无法证伪的黑箱） */
-  get busyReason(): string {
-    const idle = Math.round((Date.now() - this.lastActiveTime) / 1000);
+  get busyReason(): string {    const idle = Math.round((Date.now() - this.lastActiveTime) / 1000);
     const parts: string[] = [];
     if (this.agentRunning) parts.push('agent 回合在进行中');
     if (this.userPromptInFlight) parts.push('上一条消息发出后还没收到 agent_end');

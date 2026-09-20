@@ -1431,7 +1431,18 @@ function setupIpc() {
         catch {
             /* 拿不到就留空，不影响转写本身 */
         }
-        (0, goal_mode_1.writeGoalDraft)({ sessionId: sid, ts: Date.now(), status: 'pending', request: text, objective: '', criteria: [], todos: [] });
+        const draftTs = Date.now();
+        // uiSessionId = 渲染层传进来的会话 id：草稿与会话的匹配一律用它（实例 id / hook id 都会漂移）
+        (0, goal_mode_1.writeGoalDraft)({
+            sessionId: sid,
+            uiSessionId: sessionId ?? '',
+            ts: draftTs,
+            status: 'pending',
+            request: text,
+            objective: '',
+            criteria: [],
+            todos: [],
+        });
         // 转写专用模型（可空 = 跟随当前会话）：临时切过去，转写结束后切回，
         // 免得会话挂在本机弱模型上时转写卡住，却以为是目标模式坏了。
         const draftModel = (0, goal_mode_1.readGoalDraftModel)();
@@ -1453,26 +1464,53 @@ function setupIpc() {
         }
         // 与武装同理：新对话首条消息会触发 sessionId 迁移，草稿文件必须跟着改名，
         // 否则外挂按新 id 读不到 pending 草稿 → 既不注入草稿指令、也不拦写类工具（闸门失效）。
+        // ⚠️ 跟随窗口必须**贯穿整个草稿生命周期**：实测出现过请求 200 秒才起回合的情况，
+        // 原来 4 秒的窗口必然错过 —— 外挂读不到草稿，这一轮就退化成普通回合。
+        // 循环本身只做字段比较（零 IO），id 真变了才读写文件。
         if (sid) {
+            let curSid = sid;
             let checks = 0;
             const timer = setInterval(() => {
                 checks++;
                 const now = inst.sessionId;
-                if (now && now !== sid) {
-                    const d = (0, goal_mode_1.readGoalDraft)(sid) || (0, goal_mode_1.readGoalDraft)(null);
+                if (now && now !== curSid) {
+                    const d = (0, goal_mode_1.readGoalDraft)(curSid) || (0, goal_mode_1.readGoalDraft)(null);
                     if (d && d.status === 'pending') {
-                        (0, goal_mode_1.clearGoalDraft)(sid);
-                        (0, goal_mode_1.writeGoalDraft)({ ...d, sessionId: now });
-                        console.log(`[主进程] 目标草稿会话 id 跟随迁移 ${sid} → ${now}`);
+                        // 旧 id 也记进别名：迁移可能发生多次（临时 UUID → 真实 id），别名保证任一方都能找回
+                        (0, goal_mode_1.clearGoalDraft)(curSid);
+                        (0, goal_mode_1.writeGoalDraft)({ ...d, sessionId: now, aliases: [...(d.aliases ?? []), curSid, now] });
+                        console.log(`[主进程] 目标草稿会话 id 跟随迁移 ${curSid} → ${now}`);
                     }
-                    clearInterval(timer);
-                    return;
+                    curSid = now;
                 }
-                if (checks > 40 || !inst.process)
-                    clearInterval(timer);
+                if (checks > 3000 || !inst.process)
+                    clearInterval(timer); // 最长跟 5 分钟
             }, 100);
         }
         console.log(`[主进程] 目标草稿已下发 session=${sid} model=${model ? `${model.provider}/${model.modelId}` : '未知'}`);
+        // 下发后 4 秒自动判定「卡在哪」并写回草稿。
+        // 之前只能让用户盯着"已等待 N 秒"猜，而实测出现过**请求 200 秒才到达模型**的情况：
+        // 前端按"45 秒没动静 = 请求没发出去"下结论，纯属误导。真正能区分的是内核有没有起回合：
+        // 　invoked=true  → 请求已交给模型，慢在模型侧（单槽位排队 / 切模型重载 / 首包慢）
+        // 　invoked=false → 内核受理了但没起回合，排在内核任务队列后面（上一条没完 / 确认框没答）
+        setTimeout(() => {
+            try {
+                const cur = (0, goal_mode_1.readGoalDraft)(inst.sessionId || sid) || (0, goal_mode_1.readGoalDraft)(sid);
+                if (!cur || cur.status !== 'pending' || cur.ts !== draftTs)
+                    return; // 已产出/已放弃/换了一轮
+                const diag = {
+                    invoked: inst.agentRunning,
+                    atSec: Math.round((Date.now() - draftTs) / 1000),
+                    idleSec: Math.round((Date.now() - inst.lastActiveTime) / 1000),
+                    pendingAsks: inst.pendingAskCount,
+                };
+                (0, goal_mode_1.writeGoalDraft)({ ...cur, diag });
+                console.log(`[主进程] 转写诊断+${diag.atSec}s invoked=${diag.invoked} idle=${diag.idleSec}s asks=${diag.pendingAsks}`);
+            }
+            catch (e) {
+                console.warn(`[主进程] 转写诊断写入失败: ${e?.message || e}`);
+            }
+        }, 4000);
         return { ok: true, sessionId: sid, model };
     });
     electron_1.ipcMain.handle('goal:draftStatus', async (event, sessionId) => {
