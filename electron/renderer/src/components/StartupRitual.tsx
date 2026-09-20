@@ -1,7 +1,7 @@
 /**
  * StartupRitual — 启动剧本（等价旧版 init 中的遮罩控制段）
  *
- * - 剧本固定 11.5s 播完：4 句字幕各按时间轴切换，进度条匀速到 95%
+ * - 剧本固定 8s 播完：2 句字幕各按时间轴切换，进度条匀速到 95%
  * - 末句停留 0.8s 后主题词渐显（.revealed）
  * - 真实加载：isReady 轮询（最多 20s），未就绪字幕「棋局未启，请稍候…」
  * - 加载完成（或超时兜底）→ 进度条 100% → fade-out → 1.4s 后移除
@@ -14,11 +14,9 @@ import { restoreLastModelIfNeeded } from '../services/sessionController';
 /** 启动剧本：字幕 + 进度条按固定节奏播放，与真实加载完全解耦 */
 const SCRIPT = [
   { label: '夜色将尽，晨光初透', end: 2000 },
-  { label: '静水深流，暗涌潜行', end: 4000 },
-  { label: '行囊在肩，天地为卷', end: 6000 },
-  { label: '灯火已明，门扉待启', end: 8500 },
+  { label: '灯火已明，门扉待启', end: 5500 },
 ];
-const SCRIPT_DURATION = 11500;
+const SCRIPT_DURATION = 8000;
 const TITLE_REVEAL_DELAY = 800;
 const MAX_READY_WAIT = 20000;
 const FADE_OUT_WAIT = 1400;
