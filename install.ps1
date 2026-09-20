@@ -249,6 +249,10 @@ function Invoke-TiffaPull {
         $ErrorActionPreference = $prevPullEAP
     }
 }
+$prevUpgEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"   # 本块全程与 git 的 stderr/非零退出码打交道:
+                                      # 文件顶部是 Stop, 会把 git 写 stderr 变成异常并被下面的 catch 静默吞掉,
+                                      # 症状就是"选了 Y 却什么都没发生"(踩过)
 try {
     $isGitRepo = (& git -C $ROOT rev-parse --is-inside-work-tree 2>$null) -like "true*"
     if ($isGitRepo) {
@@ -260,7 +264,10 @@ try {
         $untrackedCount = @($lines | Where-Object { $_.ToString().Trim() -match "^\?\?" }).Count
         if ($trackedChanges.Count -gt 0) {
             # 标注其中多少处是【编译产物】(main.js/dist 等): 选 Y 会把它们还原成仓库版, 不算丢改动。
-            $buildCount = @($trackedChanges | Where-Object { Test-IsBuildArtifact ($_.ToString().Substring(3).Trim()) }).Count
+            $buildCount = @($trackedChanges | Where-Object {
+                $s = $_.ToString().Trim()
+                $s.Length -gt 3 -and (Test-IsBuildArtifact $s.Substring(3).Trim())
+            }).Count
             Write-Host ""
             Write-Host "  [升级] 这台机器有 $($trackedChanges.Count) 处代码改动(未保存的修改):" -ForegroundColor Yellow
             $trackedChanges | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
@@ -304,6 +311,8 @@ try {
     }
 } catch {
     # git 不可用 / 非 git 目录 / 无交互输入 → 静默跳过, 不影响依赖安装
+} finally {
+    $ErrorActionPreference = $prevUpgEAP
 }
 # Step 1: 确保便携 Node.js（自包含核心：无论系统有没有 node，都确保 node\ 目录存在）
 # 自包含是 Tiffa 特色：整目录拷到内网直接跑，不依赖系统环境，所以 node 必须便携化。
