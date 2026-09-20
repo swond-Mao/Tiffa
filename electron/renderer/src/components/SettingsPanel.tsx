@@ -1527,6 +1527,36 @@ function GoalModeSection() {
   const [resumePaused, setResumePaused] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
 
+  // 转写专用模型：留空 = 跟随当前会话（默认）。会话挂在本机弱模型上时，转写最容易卡住/不按格式输出。
+  const [draftModels, setDraftModels] = useState<Array<{ id: string; name?: string; provider?: string }>>([]);
+  const [draftModelKey, setDraftModelKey] = useState('');
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await getModelListCached();
+        setDraftModels((list || []).map((m) => ({ id: m.id, name: m.name, provider: m.provider })));
+      } catch {
+        setDraftModels([]);
+      }
+      try {
+        const cfg = await window.tiffaDesktop.getGoalDraftModel();
+        setDraftModelKey(cfg?.provider && cfg?.modelId ? `${cfg.provider}::${cfg.modelId}` : '');
+      } catch {
+        /* 读不到就按「跟随当前会话」显示 */
+      }
+    })();
+  }, []);
+  const pickDraftModel = async (key: string) => {
+    setDraftModelKey(key);
+    try {
+      const [provider, modelId] = key ? key.split('::') : ['', ''];
+      await window.tiffaDesktop.saveGoalDraftModel(provider && modelId ? { provider, modelId } : null);
+      addToast('info', provider && modelId ? `转写改用 ${provider}/${modelId}` : '转写改为跟随当前会话的模型');
+    } catch (err) {
+      addToast('error', String((err as Error)?.message || err));
+    }
+  };
+
   const toggleRun = async (on: boolean) => {
     setPauseBusy(true);
     try {
@@ -1690,6 +1720,20 @@ function GoalModeSection() {
       <div className="settings-section-desc" style={{ marginTop: 4 }}>
         更省事的用法：点输入框旁的<b>靶心按钮</b>打开目标模式再发需求 —— 模型会<b>先只转写</b>成带验收标准和步骤的方案
         （这一轮它只读代码、不动手），你在输入区上方的卡片里改完点「开始执行」才真正开工。
+      </div>
+
+      <div style={{ margin: '8px 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13 }}>转写用模型</span>
+        <select value={draftModelKey} onChange={(e) => void pickDraftModel(e.target.value)}>
+          <option value="">跟随当前会话的模型（默认）</option>
+          {draftModels.map((m) => (
+            <option key={`${m.provider}::${m.id}`} value={`${m.provider}::${m.id}`}>
+              {m.provider}/{m.id}
+              {m.name ? ` · ${m.name}` : ''}
+            </option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, opacity: 0.75 }}>只用于「把需求写成方案」这一轮，结束后自动切回</span>
       </div>
 
       <div

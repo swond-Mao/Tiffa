@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_AUTO_RESUME = exports.GOAL_STATE_PATH = exports.GOAL_ARM_PATH = void 0;
+exports.GOAL_DRAFT_MODEL_PATH = exports.DEFAULT_AUTO_RESUME = exports.GOAL_STATE_PATH = exports.GOAL_ARM_PATH = void 0;
 exports.goalStatePath = goalStatePath;
 exports.setAutoResumeEnabled = setAutoResumeEnabled;
 exports.setAutoResumeLimits = setAutoResumeLimits;
@@ -48,6 +48,8 @@ exports.clearGoalState = clearGoalState;
 exports.readGoalDraft = readGoalDraft;
 exports.writeGoalDraft = writeGoalDraft;
 exports.clearGoalDraft = clearGoalDraft;
+exports.readGoalDraftModel = readGoalDraftModel;
+exports.writeGoalDraftModel = writeGoalDraftModel;
 exports.composeObjective = composeObjective;
 exports.buildDraftCommand = buildDraftCommand;
 exports.isForceCapable = isForceCapable;
@@ -292,6 +294,37 @@ function clearGoalDraft(sessionId) {
         catch {
             /* 删不掉不影响主流程 */
         }
+    }
+}
+exports.GOAL_DRAFT_MODEL_PATH = path.join(constants_1.AGENT_DIR, 'goal-draft-model.json');
+function readGoalDraftModel() {
+    try {
+        const raw = JSON.parse(fs.readFileSync(exports.GOAL_DRAFT_MODEL_PATH, 'utf8'));
+        if (raw && typeof raw.provider === 'string' && typeof raw.modelId === 'string' && raw.provider && raw.modelId) {
+            return { provider: raw.provider, modelId: raw.modelId };
+        }
+    }
+    catch {
+        /* 缺失/损坏 = 跟随当前会话 */
+    }
+    return null;
+}
+/** 传 null 表示「跟随当前会话」（删配置文件） */
+function writeGoalDraftModel(cfg) {
+    try {
+        if (!cfg) {
+            try {
+                fs.unlinkSync(exports.GOAL_DRAFT_MODEL_PATH);
+            }
+            catch {
+                /* 本来就没有 */
+            }
+            return;
+        }
+        fs.writeFileSync(exports.GOAL_DRAFT_MODEL_PATH, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+    }
+    catch {
+        /* 写不进不影响主流程 */
     }
 }
 /** 从草稿合成最终 objective：目标原文 + 验收标准 + 执行步骤一起钉进上下文，

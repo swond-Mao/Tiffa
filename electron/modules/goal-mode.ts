@@ -293,6 +293,49 @@ export function clearGoalDraft(sessionId?: string | null): void {
   }
 }
 
+/**
+ * 转写专用模型配置：`goal-draft-model.json`。
+ *
+ * 转写阶段（把需求写成 objective/criteria/todos）默认**沿用当前会话的模型**，
+ * 这对强模型没问题，但会话挂在本机弱模型上时最容易卡住/不按格式输出 —— 而"转写"本身
+ * 是纯文本结构化活儿，完全可以单独指定一个模型。留空/缺失 = 跟随当前会话（保持原行为）。
+ */
+export interface GoalDraftModel {
+  provider: string;
+  modelId: string;
+}
+
+export const GOAL_DRAFT_MODEL_PATH = path.join(AGENT_DIR, 'goal-draft-model.json');
+
+export function readGoalDraftModel(): GoalDraftModel | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(GOAL_DRAFT_MODEL_PATH, 'utf8'));
+    if (raw && typeof raw.provider === 'string' && typeof raw.modelId === 'string' && raw.provider && raw.modelId) {
+      return { provider: raw.provider, modelId: raw.modelId };
+    }
+  } catch {
+    /* 缺失/损坏 = 跟随当前会话 */
+  }
+  return null;
+}
+
+/** 传 null 表示「跟随当前会话」（删配置文件） */
+export function writeGoalDraftModel(cfg: GoalDraftModel | null): void {
+  try {
+    if (!cfg) {
+      try {
+        fs.unlinkSync(GOAL_DRAFT_MODEL_PATH);
+      } catch {
+        /* 本来就没有 */
+      }
+      return;
+    }
+    fs.writeFileSync(GOAL_DRAFT_MODEL_PATH, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+  } catch {
+    /* 写不进不影响主流程 */
+  }
+}
+
 /** 从草稿合成最终 objective：目标原文 + 验收标准 + 执行步骤一起钉进上下文，
  *  否则目标只留一句摘要，长跑中「完成」很容易退化成主观判断。 */
 export function composeObjective(draft: Pick<GoalDraft, 'objective' | 'criteria' | 'todos'>): string {

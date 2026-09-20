@@ -169,6 +169,8 @@ contextBridge.exposeInMainWorld('tiffaDesktop', {
   // ── 旁路模型 / MCP 模型配置 ──
   getBypassModel: () => ipcRenderer.invoke('settings:getBypassModel'),
   saveBypassModel: (cfg) => ipcRenderer.invoke('settings:saveBypassModel', cfg),
+  getGoalDraftModel: () => ipcRenderer.invoke('settings:getGoalDraftModel'),
+  saveGoalDraftModel: (cfg) => ipcRenderer.invoke('settings:saveGoalDraftModel', cfg),
   getGroundingModel: () => ipcRenderer.invoke('settings:getGroundingModel'),
   saveGroundingModel: (cfg) => ipcRenderer.invoke('settings:saveGroundingModel', cfg),
   checkModelHealth: (arg) => ipcRenderer.invoke('settings:checkModelHealth', arg),

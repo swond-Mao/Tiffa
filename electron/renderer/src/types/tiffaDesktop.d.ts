@@ -360,6 +360,9 @@ export interface TiffaDesktopApi {
   getGroundingModel: () => Promise<TiffaBypassModelConfig | undefined>;
   saveGroundingModel: (cfg: TiffaBypassModelConfig) => Promise<unknown>;
   checkModelHealth: (arg: unknown) => Promise<unknown>;
+  /** 转写专用模型（null = 跟随当前会话的模型） */
+  getGoalDraftModel: () => Promise<{ provider: string; modelId: string } | null>;
+  saveGoalDraftModel: (cfg: { provider: string; modelId: string } | null) => Promise<unknown>;
 
   // ── 渲染库 ──
   marked: (src: string) => string;

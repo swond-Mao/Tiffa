@@ -1224,6 +1224,30 @@ function setupIpc() {
     // （provider 不支持命名 tool_choice 时退回「普通消息 + 外挂注入指令」的软路径）。
     // 目标开关与运行态都按 sessionId 隔离：Tiffa 多对话共用一个 data/agent 目录。
     /** 取指定会话实例：精确匹配 → 缺失则激活 → 未就绪最多等 15s（比 tiffa:send 轻，只发模式指令） */
+    /**
+     * 转写期间被临时借走的「原模型」：`sessionId → 原模型`。
+     * 转写只在那一回合借用转写模型，结束（ready / error / 放弃 / 开始执行）后必须切回，
+     * 否则用户之后的普通对话会莫名其妙跑在另一个模型上。
+     */
+    const _goalDraftRestore = new Map();
+    /** 把会话模型切回转写前的那个（幂等：没有借调记录就直接返回） */
+    async function _restoreDraftModel(sessionId) {
+        const key = sessionId || '';
+        const prev = _goalDraftRestore.get(key);
+        if (!prev)
+            return;
+        _goalDraftRestore.delete(key);
+        const inst = await _resolveGoalInstance(sessionId).catch(() => null);
+        if (!inst)
+            return;
+        try {
+            await inst.sendCommand({ type: 'set_model', provider: prev.provider, modelId: prev.modelId });
+            console.log(`[主进程] 转写结束，模型切回 ${prev.provider}/${prev.modelId}`);
+        }
+        catch (e) {
+            console.warn(`[主进程] 转写后切回模型失败: ${e?.message || e}`);
+        }
+    }
     async function _resolveGoalInstance(sessionId) {
         let inst = sessionId
             ? (tiffaManager.getBySessionIdAnywhere(sessionId) || tiffaManager.getBySessionId(tiffaManager.activeCwd, sessionId))
@@ -1400,6 +1424,19 @@ function setupIpc() {
             /* 拿不到就留空，不影响转写本身 */
         }
         (0, goal_mode_1.writeGoalDraft)({ sessionId: sid, ts: Date.now(), status: 'pending', request: text, objective: '', criteria: [], todos: [] });
+        // 转写专用模型（可空 = 跟随当前会话）：临时切过去，转写结束后切回，
+        // 免得会话挂在本机弱模型上时转写卡住，却以为是目标模式坏了。
+        const draftModel = (0, goal_mode_1.readGoalDraftModel)();
+        if (draftModel && model && (draftModel.provider !== model.provider || draftModel.modelId !== model.modelId)) {
+            try {
+                await inst.sendCommand({ type: 'set_model', provider: draftModel.provider, modelId: draftModel.modelId });
+                _goalDraftRestore.set(sid, { provider: model.provider, modelId: model.modelId });
+                console.log(`[主进程] 转写临时切模型 ${model.provider}/${model.modelId} → ${draftModel.provider}/${draftModel.modelId}`);
+            }
+            catch (e) {
+                console.warn(`[主进程] 转写切模型失败，沿用原模型: ${e?.message || e}`);
+            }
+        }
         try {
             await inst.sendCommand({ type: 'prompt', message: (0, goal_mode_1.buildDraftCommand)(text) });
         }
@@ -1432,6 +1469,10 @@ function setupIpc() {
     });
     electron_1.ipcMain.handle('goal:draftStatus', async (event, sessionId) => {
         const draft = (0, goal_mode_1.readGoalDraft)(sessionId);
+        // 草稿一落地（ready/error）就把借来的转写模型还回去：前端每 2 秒轮询这里，
+        // 正好是「转写结束」最可靠的观测点（外挂没有切模型的通道，只能主进程做）。
+        if (draft && draft.status !== 'pending')
+            await _restoreDraftModel(sessionId);
         return { draft: draft || null };
     });
     electron_1.ipcMain.handle('goal:draftApply', async (event, draft, tokenBudget, sessionId, autoResume) => {
@@ -1439,6 +1480,8 @@ function setupIpc() {
         if (!objective)
             return { ok: false, error: '草稿里没有目标描述，无法开始' };
         const budget = typeof tokenBudget === 'number' && tokenBudget > 0 ? Math.floor(tokenBudget) : null;
+        // 真正开工前先把模型切回：目标是按用户当前会话的模型跑的，不能沿用转写模型
+        await _restoreDraftModel(sessionId);
         const r = await _armAndStart(objective, budget, sessionId, autoResume);
         // 兜底再清一次：_armAndStart 里已清过（那是防竞态的关键位置），这里只是确保不残留
         (0, goal_mode_1.clearGoalDraft)(sessionId);
@@ -1463,6 +1506,16 @@ function setupIpc() {
     });
     electron_1.ipcMain.handle('goal:draftCancel', async (event, sessionId) => {
         (0, goal_mode_1.clearGoalDraft)(sessionId);
+        await _restoreDraftModel(sessionId);
+        return { ok: true };
+    });
+    // ── 转写专用模型（可空 = 跟随当前会话的模型）──
+    electron_1.ipcMain.handle('settings:getGoalDraftModel', async () => (0, goal_mode_1.readGoalDraftModel)());
+    electron_1.ipcMain.handle('settings:saveGoalDraftModel', async (_event, cfg) => {
+        const provider = String(cfg?.provider ?? '').trim();
+        const modelId = String(cfg?.modelId ?? '').trim();
+        (0, goal_mode_1.writeGoalDraftModel)(provider && modelId ? { provider, modelId } : null);
+        console.log(`[主进程] 转写模型设置为 ${provider && modelId ? `${provider}/${modelId}` : '跟随当前会话'}`);
         return { ok: true };
     });
     electron_1.ipcMain.handle('goal:stop', async (event, op, sessionId) => {
