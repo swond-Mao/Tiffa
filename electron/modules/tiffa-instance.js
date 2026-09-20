@@ -11,8 +11,14 @@ exports.setMigrateCallback = setMigrateCallback;
  *
  * 从 main.js 搬移。依赖通过模块导入 + setter 注入：
  * - mainWindow: setMainWindow() 注入（窗口创建后调用）
- * - migrateSessionId: setMigrateCallback() 注入（tiffa-manager 加载后调用）
+ * - migrateSessionId: setMigrateCallback() 注入（**目前无调用点，见下**）
  * - titleGenerateCallback: setTitleGenerateCallback() 注入
+ *
+ * ⚠️ `setMigrateCallback` 这套机制**当前未接线**（`tiffa-manager` 里没有调用它，
+ * 所以 `_migrateSessionId` 恒为 null，`aliasKeys` 也恒为空）：实例迁移 sessionId 时，
+ * manager 的 `instances` key **不会跟着改名**。这不影响功能 —— 所有查找都是
+ * `getBySessionIdAnywhere(...)`（全池比对 `inst.sessionId`，该字段确实随迁移更新）优先，
+ * key 路径只是次级兜底。判断「迁移后能不能找回实例」时**别依赖 aliasKeys**。
  */
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
