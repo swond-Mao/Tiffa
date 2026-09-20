@@ -161,31 +161,134 @@ if (-not $Online) {
 
 # ---- 升级辅助: 检测本地【已跟踪代码改动】, 通俗提示一键清除+升级(不用看代码) ----
 # 区分: 已跟踪代码改动(M/A/D, 真正的修改) vs 未跟踪文件(??, 运行时产物/缓存, 不影响升级)。
-# 只对代码改动询问清除(stash); 未跟踪文件不影响 git pull, 提示可忽略。
+#
+# ⚠️ 铁律顺序: ①清编译内容 → ②stash 其余改动 → ③git pull → ④(这之后)才重新编译。
+# 本仓库的构建产物（electron\main.js / electron\preload.js / electron\modules\*.js /
+# electron\renderer\dist\*）是【入库跟踪】的。本地只要跑过一次 build:
+#   · 被跟踪的产物 → 既显示为"代码改动"挡下 pull, 又会被 stash 进暂存区
+#     （以后 git stash pop 会把旧 bundle 盖回新版, 是隐患）;
+#   · 新产出的未跟踪文件（新 hash bundle 等）→ stash 根本管不到, 而 git pull 遇到
+#     "未跟踪文件将被覆盖" 会**直接失败**。
+# 所以"清除编译内容"必须做全两件事（还原被跟踪产物 + 删未跟踪残留）, 且必须发生在
+# pull 之前、编译之前 —— 否则就是"清完又被编脏 → pull 永远拉不到最新"(实测病根)。
+# 产物可随时重编, 内容仍在提交里, 还原无损。
+$TiffaBuildPaths = @(
+    "electron/renderer/dist",    # vite 产物（含 hash bundle）
+    "electron/main.js",          # tsc 产物
+    "electron/preload.js",       # tsc 产物
+    "electron/modules/*.js"      # tsc 产物（模块）
+)
+function Test-IsBuildArtifact($rel) {
+    # 判断某个仓库相对路径是否属于"编译产物"
+    $p = ("$rel".Trim() -replace '\\', '/')
+    if ($p -eq "electron/main.js" -or $p -eq "electron/preload.js") { return $true }
+    if ($p -like "electron/modules/*.js") { return $true }
+    if ($p -eq "electron/renderer/dist" -or $p -like "electron/renderer/dist/*") { return $true }
+    return $false
+}
+function Clear-BuildResidue {
+    # 删【未跟踪】的构建残留: git clean 不动已入库文件, 源码(.ts)也不受影响。
+    # 用 `& git -C $ROOT` 而非 cmd /c 拼接: 与上面几处 git 调用一致, 也省掉引号转义。
+    $prevCleanEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        foreach ($rel in $TiffaBuildPaths) {
+            & git -C $ROOT clean -fdq -- $rel 2>&1 | Out-Null
+        }
+    } finally {
+        $ErrorActionPreference = $prevCleanEAP
+    }
+}
+function Restore-BuildOutputs {
+    # 【被跟踪】的编译产物还原成仓库版: 产物不是用户的改动, 留着只会冒充代码改动、
+    # 并被 stash 进暂存区。内容仍在提交里, 随时可重编, 还原无损。
+    $prevRestoreEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        foreach ($rel in $TiffaBuildPaths) {
+            & git -C $ROOT checkout -- $rel 2>&1 | Out-Null
+        }
+    } finally {
+        $ErrorActionPreference = $prevRestoreEAP
+    }
+}
+function Invoke-TiffaPull {
+    # 拉最新代码; 失败时按 git 给出的原因对症补救一次, 别让用户卡在"必须手动 pull"。
+    $prevPullEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & git -C $ROOT pull 2>&1
+        $pullCode = $LASTEXITCODE
+        $out | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }
+        if ($pullCode -eq 0) { return $true }
+        $text = ($out | Out-String)
+        $needRetry = $false
+        # ① 未跟踪的构建残留挡住 → 删掉后重试
+        if ($text -match "untracked working tree files would be overwritten" -or $text -match "未跟踪的工作区文件|未跟踪文件") {
+            Write-Host "    [INFO] 未跟踪的构建残留挡住了拉取, 清除后重试..." -ForegroundColor Yellow
+            Clear-BuildResidue
+            $needRetry = $true
+        }
+        # ② 当前分支没有 upstream（换过默认分支/特殊克隆常见）→ 指向同名远端分支后重试
+        if ($text -match "no tracking information" -or $text -match "没有跟踪信息") {
+            $br = (& git -C $ROOT rev-parse --abbrev-ref HEAD 2>$null) | Select-Object -First 1
+            if ($br -and "$br".Trim() -notin @("", "HEAD")) {
+                Write-Host "    [INFO] 分支 $br 没有跟踪远端, 自动指向 origin/$br 后重试..." -ForegroundColor Yellow
+                & git -C $ROOT branch --set-upstream-to=origin/$br $br 2>&1 | Out-Null
+                $needRetry = $true
+            }
+        }
+        if ($needRetry) {
+            $out2 = & git -C $ROOT pull 2>&1
+            $pullCode2 = $LASTEXITCODE
+            $out2 | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }
+            return ($pullCode2 -eq 0)
+        }
+        return $false
+    } finally {
+        $ErrorActionPreference = $prevPullEAP
+    }
+}
 try {
     $isGitRepo = (& git -C $ROOT rev-parse --is-inside-work-tree 2>$null) -like "true*"
     if ($isGitRepo) {
+        # ① 先清掉未跟踪的编译残留: 它是 pull 被挡的头号原因, 也会干扰下面的改动判断。
+        Clear-BuildResidue
         $porcelain = & git -C $ROOT status --porcelain 2>$null
         $lines = @($porcelain | Where-Object { $_ -and $_.ToString().Trim() -ne "" })
         $trackedChanges = @($lines | Where-Object { $_.ToString().Trim() -notmatch "^\?\?" })
         $untrackedCount = @($lines | Where-Object { $_.ToString().Trim() -match "^\?\?" }).Count
         if ($trackedChanges.Count -gt 0) {
+            # 标注其中多少处是【编译产物】(main.js/dist 等): 选 Y 会把它们还原成仓库版, 不算丢改动。
+            $buildCount = @($trackedChanges | Where-Object { Test-IsBuildArtifact ($_.ToString().Substring(3).Trim()) }).Count
             Write-Host ""
             Write-Host "  [升级] 这台机器有 $($trackedChanges.Count) 处代码改动(未保存的修改):" -ForegroundColor Yellow
             $trackedChanges | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+            if ($buildCount -gt 0) { Write-Host "         (其中 $buildCount 处是编译产物: main.js / dist 等, 选 Y 直接还原成仓库版, 你的施工内容不受影响)" -ForegroundColor DarkGray }
             if ($untrackedCount -gt 0) { Write-Host "         (另有 $untrackedCount 个未跟踪文件是运行时产物, 不影响升级, 可忽略)" -ForegroundColor DarkGray }
             Write-Host "         如果你【没有】在这台机器改过 Tiffa 代码(部署机/运行机) → 选 Y: 清除改动并升级到最新" -ForegroundColor Yellow
             Write-Host "         如果你【正在】这台机器改代码 → 选 N: 保留改动(升级可能需要你先手动处理)" -ForegroundColor Yellow
             $ans = Read-Host "         清除代码改动并升级到最新? [Y/N, 默认N]"
             if ($ans -match "^[Yy]") {
-                & git -C $ROOT stash push -m "install.ps1 升级前自动暂存" 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    OK "已清除代码改动(其实暂存了, 想找回: git stash pop; 确定不要: git stash drop)"
-                    & git -C $ROOT pull 2>&1 | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }
-                    if ($LASTEXITCODE -eq 0) { OK "已升级到最新版本。" } else { WARN "升级没成功, 但改动没丢(暂存了)。稍后可: git stash pop 恢复, git pull 重试。" }
+                # ① 清编译内容: 还原被跟踪产物(不 stash, 免得以后 pop 把旧 bundle 盖回新版) + 删未跟踪残留
+                Restore-BuildOutputs
+                $left = @((& git -C $ROOT status --porcelain 2>$null) | Where-Object { $_ -and $_.ToString().Trim() -ne "" })
+                $stashFailed = $false
+                if ($left.Count -gt 0) {
+                    # ② 其余改动(源码/运行时)才 stash —— 可恢复
+                    & git -C $ROOT stash push -m "install.ps1 升级前自动暂存" 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        OK "已清除代码改动(编译产物已还原成仓库版; 其余 $($left.Count) 处已暂存, 想找回: git stash pop; 确定不要: git stash drop)"
+                    } else {
+                        $stashFailed = $true
+                        WARN "清除改动没成功, 请手动: git stash(暂存) 或 git checkout -- .(丢弃)"
+                    }
                 } else {
-                    WARN "清除改动没成功, 请手动: git stash(暂存) 或 git checkout -- .(丢弃)"
+                    OK "已清除编译产物(全部还原成仓库版)"
                 }
+                # ③ 立刻 pull: 必须在后面的"重新编译"之前 —— 先拿最新源码, 再编译才有意义。
+                if (Invoke-TiffaPull) { OK "已升级到最新版本。" }
+                else { if ($stashFailed) { WARN "升级(git pull)没成功: 工作区仍有未清除的改动。手动: git stash 或 git checkout -- . 后重试 git pull" } else { WARN "升级没成功, 但改动没丢(暂存了)。稍后可: git stash pop 恢复, git pull 重试。" } }
             } else {
                 WARN "已保留代码改动, 未升级。要继续升级, 请先处理改动(或下次再选 Y)。"
             }
@@ -196,8 +299,7 @@ try {
             } else {
                 Write-Host "  [升级] 无本地改动, 直接升级到最新..." -ForegroundColor Cyan
             }
-            & git -C $ROOT pull 2>&1 | ForEach-Object { Write-Host "   $_" -ForegroundColor DarkGray }
-            if ($LASTEXITCODE -eq 0) { OK "已是最新版本。" } else { WARN "升级(git pull)没成功, 手动: git pull" }
+            if (Invoke-TiffaPull) { OK "已是最新版本。" } else { WARN "升级(git pull)没成功, 手动: git pull" }
         }
     }
 } catch {
