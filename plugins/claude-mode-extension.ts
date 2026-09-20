@@ -677,20 +677,95 @@ export default async function (pi: any) {
     }
   }
 
-  /** 从模型本轮输出里抽 ```tiffa-goal 代码块并解析成草稿 */
+  /** 宽容 JSON 解析：先直接 parse，失败后按「去尾逗号 → 中文引号归一 → 单引号换双引号」依次再试。
+   *  弱本地模型最常见的翻车点（围栏里夹说明文字、尾逗号、单引号包键名）都在这里兜住。 */
+  function lenientJsonParse(s: string): any | null {
+    const variants: string[] = [s]
+    const noTrailing = s.replace(/,\s*([}\]])/g, "$1")
+    if (noTrailing !== s) variants.push(noTrailing)
+    const cnQuote = noTrailing.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'")
+    if (cnQuote !== noTrailing) variants.push(cnQuote)
+    const singleQuote = cnQuote.replace(/'/g, '"')
+    if (singleQuote !== cnQuote) variants.push(singleQuote)
+    for (const v of variants) {
+      try {
+        const r = JSON.parse(v)
+        if (r && typeof r === "object") return r
+      } catch {
+        /* 试下一个变体 */
+      }
+    }
+    return null
+  }
+
+  /** 从一段文本里按字符扫描出第一个含 "objective" 键的最外层平衡 {...}（跳过字符串内的花括号）。
+   *  救「模型没写代码围栏、把 JSON 混在散文里」这类输出。 */
+  function extractBalancedObject(text: string): string | null {
+    let depth = 0
+    let inStr = false
+    let esc = false
+    let start = -1
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i]
+      if (inStr) {
+        if (esc) { esc = false; continue }
+        if (ch === "\\") { esc = true; continue }
+        if (ch === '"') inStr = false
+        continue
+      }
+      if (ch === '"') { inStr = true; continue }
+      if (ch === "{") {
+        if (depth === 0) start = i
+        depth++
+      } else if (ch === "}") {
+        if (depth > 0) {
+          depth--
+          if (depth === 0 && start >= 0) {
+            const candidate = text.slice(start, i + 1)
+            if (/"\s*objective\s*":/.test(candidate)) return candidate
+            start = -1
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  /** 从模型本轮输出里抽目标草稿。三级容错 + 宽容解析，弱本地模型也能救回：
+   *  1) ```tiffa-goal 围栏（严格档，老实模型直接命中）
+   *  2) 任意 ``` 代码围栏内的内容（救「围栏语言写成 json/text/goal」的最高频失败点）
+   *  3) 无围栏时，整段里找含 objective 键的最外层平衡 {...}（救「JSON 混在散文里」）
+   *  每档都先宽容 parse，再对围栏内夹了说明文字的候选做一次平衡对象提取。
+   *  唯一硬门仍是 objective 非空；criteria/todos 缺失或为空兜底成 []。 */
   function parseGoalDraft(text: string): { objective: string; criteria: string[]; todos: string[] } | null {
-    const m = /```tiffa-goal\s*([\s\S]*?)```/.exec(text || "")
-    if (!m) return null
-    try {
-      const raw = JSON.parse(m[1].trim())
-      if (!raw || typeof raw !== "object") return null
+    const src = text || ""
+    const candidates: string[] = []
+    const strict = /```tiffa-goal\s*([\s\S]*?)```/i.exec(src)
+    if (strict) candidates.push(strict[1])
+    const anyFence = /```[a-zA-Z]*\s*([\s\S]*?)```/g
+    let fm: RegExpExecArray | null
+    while ((fm = anyFence.exec(src))) candidates.push(fm[1])
+    if (/"\s*objective\s*":/.test(src)) candidates.push(src)
+
+    const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean) : [])
+    const finish = (raw: any): { objective: string; criteria: string[]; todos: string[] } | null => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
       const objective = String(raw.objective ?? "").trim()
       if (!objective) return null
-      const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean) : [])
       return { objective, criteria: arr(raw.criteria), todos: arr(raw.todos) }
-    } catch {
-      return null
     }
+    for (const cand of candidates) {
+      const raw = lenientJsonParse(cand.trim())
+      const done = finish(raw)
+      if (done) return done
+      // 围栏内夹了说明文字（如「以下是方案：」）→ 从候选里提取平衡对象再试一次
+      const obj = extractBalancedObject(cand)
+      if (obj) {
+        const done2 = finish(lenientJsonParse(obj))
+        if (done2) return done2
+      }
+    }
+    return null
   }
 
   /** 取本轮最后一条 assistant 的纯文本（agent_end 的 messages[0] 是 assistant，其余是工具结果） */
