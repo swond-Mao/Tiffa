@@ -114,6 +114,40 @@ export default function GoalDraftCard() {
     loadedKey.current = '';
   };
 
+  /** 转写失败后的「重发一次」：用原始需求重新下发，卡片回到 pending 继续等方案 */
+  const retry = async () => {
+    const text = (mine?.request ?? '').trim();
+    if (!text) {
+      setNote('原始需求为空，无法自动重发。请到「设置 → 目标模式」手动填写目标。');
+      return;
+    }
+    setBusy(true);
+    setNote('');
+    // 先置本地下 pending（卡片立刻回到转写态），再下发；失败则回退清空
+    useUiStore.getState().setGoalDraft({
+      sessionId: mine?.sessionId ?? activeSessionId ?? '',
+      ts: Date.now(),
+      status: 'pending',
+      request: text,
+      objective: '',
+      criteria: [],
+      todos: [],
+      model: '',
+    } as never);
+    const r = await window.tiffaDesktop.goalDraft(text, activeSessionId ?? null);
+    setBusy(false);
+    if (!r?.ok) {
+      useUiStore.getState().setGoalDraft(null);
+      setNote(r?.error || '重发失败');
+      return;
+    }
+    const label = r.model ? `${r.model.provider} / ${r.model.modelId}`.trim() : '';
+    if (label && label !== '/') {
+      const cur = useUiStore.getState().goalDraft;
+      if (cur) useUiStore.getState().setGoalDraft({ ...cur, model: label } as never);
+    }
+  };
+
   const start = async () => {
     const text = objective.trim();
     if (!text) {
@@ -187,7 +221,15 @@ export default function GoalDraftCard() {
       ) : null}
 
       {mine.status === 'error' ? (
-        <div className="goal-draft-error">{mine.error || '模型没有按规定格式输出方案。'} 可以重发一次，或到「设置 → 目标模式」手动填写。</div>
+        <div className="goal-draft-error">
+          {mine.error || '模型没有按规定格式输出方案。'}
+          <div className="goal-draft-actions" style={{ marginTop: 8 }}>
+            <button type="button" className="goal-draft-primary" disabled={busy} onClick={() => void retry()}>
+              {busy ? '重发中…' : '重发一次'}
+            </button>
+            <span className="goal-draft-note">用原始需求重新转写；也可到「设置 → 目标模式」手动填写目标</span>
+          </div>
+        </div>
       ) : null}
 
       {mine.status === 'ready' ? (

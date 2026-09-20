@@ -197,6 +197,15 @@ export interface GoalDraft {
 
 const EMPTY_ARM: GoalArm = { enabled: false, objective: '', tokenBudget: null, sessionId: '', autoResume: null };
 
+/**
+ * pending（转写中/卡死）与 error（转写失败）草稿的最长存活时间。
+ * 这两种状态都属于「没人管的残局」——转写卡住或失败后用户没点「放弃」，
+ * 草稿会一直挂着，后续每条消息都被判成草稿阶段、闸门一直拦（表现为"发消息没反应/干不了活"）。
+ * 超时后 read 直接跳过，让它自然失效。ready（等用户人审）不设时限。
+ */
+export const DRAFT_STALE_MS = 10 * 60 * 1000;
+
+
 function parseAutoResume(raw: any): GoalAutoResume | null {
   const r = raw?.autoResume;
   // ⚠️ enabled=false（用户暂停）**不能**读成 null：配置丢了就再也恢复不了，
@@ -303,6 +312,10 @@ export function readGoalDraft(sessionId?: string | null): GoalDraft | null {
       if (!draftBelongsTo(raw, sessionId)) continue;
       // 兜底副本只认「新近」的：陈年草稿不该在几小时后把某轮消息误判成草稿阶段
       if (p === fallback && typeof raw.ts === 'number' && Date.now() - raw.ts > 30 * 60 * 1000) continue;
+      // pending（转写卡死）/ error（转写失败）是没人管的残局：超时即失效，否则会永久
+      // 把后续消息判成草稿阶段、闸门一直拦。ready 是等人审的正常态，不设时限。
+      const st = String(raw.status || '');
+      if ((st === 'pending' || st === 'error') && typeof raw.ts === 'number' && Date.now() - raw.ts > DRAFT_STALE_MS) continue;
       return raw as GoalDraft;
     } catch {
       continue;

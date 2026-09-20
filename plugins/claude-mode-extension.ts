@@ -619,6 +619,10 @@ export default async function (pi: any) {
     return !raw?.sessionId && !raw?.uiSessionId && !(Array.isArray(raw?.aliases) && raw.aliases.length)
   }
 
+  /** pending / error 草稿最长存活时间：超时视为「没人管的残局」，read 直接跳过，
+   *  避免转写卡死/失败后永久把后续消息判成草稿阶段（闸门一直拦）。ready 不设时限。 */
+  const DRAFT_STALE_MS = 10 * 60 * 1000
+
   /** 读本会话草稿。status=pending 表示「用户已发需求、等模型转写」，此时本扩展进入草稿闸门模式。 */
   function readGoalDraft(ctx?: any): { status: string; request: string; objective: string; criteria: string[]; todos: string[]; error?: string } | null {
     const mine = hookSessionId(ctx)
@@ -632,12 +636,23 @@ export default async function (pi: any) {
         if (!draftBelongsTo(raw, mine)) continue
         // 兜底副本只认新近的：陈年草稿不该在几小时后把某轮消息误判成草稿阶段
         if (p === fallback && typeof raw.ts === "number" && Date.now() - raw.ts > 30 * 60 * 1000) continue
+        // pending（转写卡死）/ error（转写失败）是没人管的残局：超时即失效，否则会永久
+        // 把后续消息判成草稿阶段、闸门一直拦。ready 是等人审的正常态，不设时限。
+        const st = String(raw.status || "")
+        if ((st === "pending" || st === "error") && typeof raw.ts === "number" && Date.now() - raw.ts > DRAFT_STALE_MS) continue
         return raw
       } catch {
         continue
       }
     }
     return null
+  }
+
+  /** 草稿闸门是否生效：pending（转写中）与 error（转写失败）都属于闸门期；
+   *  ready（方案已产出、等人审）不算 —— 那一轮 agent_end 已结束，不该再拦用户后续操作。
+   *  旧实现只认 pending，导致转写失败（error）后闸门消失、模型退化普通回合自行跑飞。 */
+  function inDraftGate(d: { status?: string } | null | undefined): boolean {
+    return Boolean(d && d.status !== "ready")
   }
 
   function writeGoalDraft(ctx: any, patch: Record<string, unknown>): void {
@@ -853,7 +868,22 @@ export default async function (pi: any) {
     // ① 草稿阶段优先：用户已开启目标模式并发了需求，本轮只做「转写」，**不动手**。
     //    Qoder 式「转写 + 人审闸门」：先出可验收方案，用户点「开始执行」才真正干活。
     const draft = readGoalDraft(ctx)
-    if (draft?.status === "pending") {
+    if (inDraftGate(draft)) {
+      // 转写失败（error）：本轮立即停手，别再注入"只转写"指令（转写已结束，
+      // 再让模型转写只会二次跑飞）。让模型停手并提示用户重发 / 手动填。
+      if (draft!.status === "error") {
+        return [
+          "# 目标模式（转写失败：立即停止，不要动手）",
+          "",
+          "用户开启了目标模式，但上一轮**没有按规定格式输出转写方案**，转写已失败。",
+          "",
+          draft!.request ? `> 用户需求：${draft!.request}` : "",
+          "",
+          "**本轮请立刻停止**：不要执行任务、不要修改文件、不要运行命令、不要调用 goal 工具。",
+          "只回一句简短说明，提示用户两条出路：① 在输入框里把需求**重发一次**；② 到「设置 → 目标模式」手动填写目标。",
+          "不要自己重试转写、不要尝试直接干活。",
+        ].filter(Boolean).join("\n")
+      }
       return [
         "# 目标模式（草稿阶段：只转写，不动手）",
         "",
@@ -1553,17 +1583,22 @@ export default async function (pi: any) {
       // 放在 goal 守卫之前：草稿阶段模型若先去建目标或改文件，「人审」就没意义了。
       {
         const draft = readGoalDraft(ctx)
-        if (draft?.status === "pending") {
+        if (inDraftGate(draft)) {
           const inReadonly = DRAFT_READONLY_TOOLS.has(tool)
           if (tool === "goal" || DRAFT_BLOCKED_TOOLS.has(tool) || !inReadonly) {
-            log("goal.draft.block", `草稿阶段拦截 ${tool}`)
+            const isError = draft!.status === "error"
+            log("goal.draft.block", `草稿阶段拦截 ${tool}（status=${draft!.status}）`)
             return {
               block: true,
-              reason:
-                "[claude-mode 目标模式·草稿阶段] 现在只做方案转写，**不允许执行任何改动**。\n" +
-                "允许的操作：读文件 / grep / glob 等只读调研。\n" +
-                "禁止：写文件、执行命令、创建目标。\n" +
-                "请直接输出 ```tiffa-goal 代码块（objective / criteria / todos），等用户点「开始执行」再干活。",
+              reason: isError
+                ? "[claude-mode 目标模式·转写失败] 上一轮没按规定格式输出转写方案，本轮**不要执行任何改动**。\n" +
+                  "允许的操作：只读调研（read / grep / glob）。\n" +
+                  "禁止：写文件、执行命令、创建目标。\n" +
+                  "请停手并提示用户：把需求重发一次，或到「设置 → 目标模式」手动填写目标。"
+                : "[claude-mode 目标模式·草稿阶段] 现在只做方案转写，**不允许执行任何改动**。\n" +
+                  "允许的操作：读文件 / grep / glob 等只读调研。\n" +
+                  "禁止：写文件、执行命令、创建目标。\n" +
+                  "请直接输出 ```tiffa-goal 代码块（objective / criteria / todos），等用户点「开始执行」再干活。",
             }
           }
         }
