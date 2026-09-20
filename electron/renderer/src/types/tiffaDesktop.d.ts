@@ -183,6 +183,8 @@ export interface GoalActionResult {
   forced?: boolean;
   objective?: string;
   sessionId?: string;
+  /** 目标草稿下发时回带的「这次实际用哪个模型转写」（转写没有独立模型，就是当前会话的） */
+  model?: { provider: string; modelId: string; api: string };
 }
 
 /** 目标草稿：模型把用户需求转写成可验收方案，等人审（status 由外挂在 agent_end 里推进） */
@@ -197,6 +199,8 @@ export interface GoalDraftState {
   criteria?: string[];
   todos?: string[];
   error?: string;
+  /** 展示用：这次转写实际用的模型（如 `llama.cpp / Qwen3.X`），由 goalDraft 回带 */
+  model?: string;
 }
 
 export interface TiffaDesktopApi {

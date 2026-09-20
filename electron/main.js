@@ -1379,7 +1379,26 @@ function setupIpc() {
         if (running?.enabled === true && running?.objective) {
             return { ok: false, error: `当前已有一个进行中的目标（「${String(running.objective).slice(0, 40)}」），请先结束或放弃它再开新目标` };
         }
+        // 内核还在忙时下发 prompt 只会被**排队**（受理但不起回合）：前端照常显示「正在转写」，
+        // 模型服务器却零请求 —— 这正是"点了目标图标却毫无动静"最常见的原因，直接拦掉并说清楚。
+        if (inst.isBusy) {
+            return {
+                ok: false,
+                error: '上一轮还没结束（内核忙）。这时发转写请求只会被排队、不会真正请求模型。请先点「停止」，等它空闲后重发。',
+            };
+        }
         const sid = inst.sessionId || sessionId || '';
+        // 转写用的是**当前会话正在用的模型**（没有独立的转写模型）—— 查出来一路带到卡片上，
+        // 用户一眼能看出"这次请求会打到哪个模型"，不必翻日志猜。
+        let model;
+        try {
+            const st = await inst.sendCommand({ type: 'get_state' });
+            const m = st?.data?.model ?? {};
+            model = { provider: String(m.provider ?? ''), modelId: String(m.id ?? m.modelId ?? ''), api: String(m.api ?? '') };
+        }
+        catch {
+            /* 拿不到就留空，不影响转写本身 */
+        }
         (0, goal_mode_1.writeGoalDraft)({ sessionId: sid, ts: Date.now(), status: 'pending', request: text, objective: '', criteria: [], todos: [] });
         try {
             await inst.sendCommand({ type: 'prompt', message: (0, goal_mode_1.buildDraftCommand)(text) });
@@ -1408,8 +1427,8 @@ function setupIpc() {
                     clearInterval(timer);
             }, 100);
         }
-        console.log(`[主进程] 目标草稿已下发 session=${sid}`);
-        return { ok: true, sessionId: sid };
+        console.log(`[主进程] 目标草稿已下发 session=${sid} model=${model ? `${model.provider}/${model.modelId}` : '未知'}`);
+        return { ok: true, sessionId: sid, model };
     });
     electron_1.ipcMain.handle('goal:draftStatus', async (event, sessionId) => {
         const draft = (0, goal_mode_1.readGoalDraft)(sessionId);

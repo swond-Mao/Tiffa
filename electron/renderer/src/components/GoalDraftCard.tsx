@@ -13,6 +13,8 @@ import { useSessionsStore } from '../stores/useSessionsStore';
 
 const POLL_MS = 2000;
 const POLL_MAX = 90; // 3 分钟：长上下文调研可能很慢，超时后由用户手动刷新/放弃
+/** 超过这个秒数还停在 pending，基本可以判定"内核没发起模型请求"而不是"模型在慢慢想" */
+const STALL_SEC = 45;
 
 export default function GoalDraftCard() {
   const draft = useUiStore((s) => s.goalDraft);
@@ -27,6 +29,7 @@ export default function GoalDraftCard() {
   const [note, setNote] = useState('');
   // 自动续跑：长任务勾选后，模型每轮结束会被自动拉起下一回合（护栏在设置里配，这里给默认 30 轮 / 240 分钟）
   const [autoResume, setAutoResume] = useState(false);
+  const [waited, setWaited] = useState(0);
   const pollRef = useRef<number | null>(null);
   const pollsRef = useRef(0);
 
@@ -49,6 +52,16 @@ export default function GoalDraftCard() {
     setCriteria(mine.criteria ?? []);
     setTodos(mine.todos ?? []);
   }, [mine]);
+
+  // 等待计时：pending 状态是前端自己置的，不能证明模型真在跑 —— 超时就得把话说清楚
+  useEffect(() => {
+    if (!mine || mine.status !== 'pending') {
+      setWaited(0);
+      return;
+    }
+    const t = window.setInterval(() => setWaited((s) => s + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [mine?.status, mine?.sessionId]);
 
   // 轮询推进 pending → ready/error（外挂在 agent_end 落盘，没有事件通道）
   useEffect(() => {
@@ -123,7 +136,11 @@ export default function GoalDraftCard() {
     <div className="goal-draft-card">
       <div className="goal-draft-head">
         <span className="goal-draft-title">目标方案（待确认）</span>
-        {mine.status === 'pending' && <span className="goal-draft-badge pending">模型正在转写…</span>}
+        {mine.status === 'pending' ? (
+          <span className="goal-draft-badge pending">
+            {mine.model ? `正在用 ${mine.model} 转写…` : '模型正在转写…'}
+          </span>
+        ) : null}
         <button type="button" className="goal-draft-close" title="放弃这份方案" onClick={() => void close()}>
           ✕
         </button>
@@ -134,6 +151,14 @@ export default function GoalDraftCard() {
       {mine.status === 'pending' ? (
         <div className="goal-draft-hint">
           模型正在把你的需求转写成可验收的目标方案（这一轮它只读代码、不会动手改任何东西）。方案出来后在这里等你确认。
+          {mine.model ? ` 本次转写用的是当前会话的模型：${mine.model}。` : ''}
+          {waited >= STALL_SEC ? (
+            <div className="goal-draft-error" style={{ marginTop: 8 }}>
+              已等待 {waited} 秒仍无任何产出 —— 这通常不是"模型在慢慢想"，而是<b>请求根本没发出去</b>
+              （上一条消息被排队 / 内核卡住 / 模型端点不通）。先点「停止」再重发一次；若依旧不动，去
+              「设置 → 目标模式」手动填写目标，并检查这个会话选的模型端点是否可达。
+            </div>
+          ) : null}
         </div>
       ) : null}
 

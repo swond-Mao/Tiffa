@@ -514,6 +514,16 @@ class TiffaInstance {
             this._askTimeouts.delete(id);
         }
     }
+    /**
+     * 内核是否真的在忙：agent 在跑 / 有 prompt 在飞 / 有审批在等。
+     *
+     * ⚠️ 不能只看渲染层的 `agentRunning`：abort 后前端会立刻置 false，而内核可能还卡在原处
+     * （串行链卡住、停在等审批上）。此时再发一条 prompt，内核会**受理并入队但不起回合** →
+     * 前端显示「正在转写」，模型服务器零请求。`goal:draft` 这类"发一条就完事"的命令必须先查它。
+     */
+    get isBusy() {
+        return this.agentRunning || this.userPromptInFlight || this._pendingAskIds.size > 0;
+    }
     sendCommand(frame) {
         return new Promise((resolve, reject) => {
             if (!this.process || !this.process.stdin.writable) {
@@ -635,9 +645,17 @@ class TiffaInstance {
                 this.announceNewSessionReady();
             }
         }
-        if (event.type === 'prompt_result' && event.agentInvoked) {
-            this.agentRunning = true;
-            (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] prompt_result agentInvoked`);
+        if (event.type === 'prompt_result') {
+            if (event.agentInvoked) {
+                this.agentRunning = true;
+                (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] prompt_result agentInvoked`);
+            }
+            else {
+                // 内核受理了命令但**没有起新回合**：消息多半被排队（上一轮还没收尾 / 内核卡在审批上）。
+                // 表现是：前端已置「运行中 / 正在转写」，而模型侧零请求、永远不动。
+                // 之前这里静默无日志，是最难排查的一类故障，必须留痕。
+                (0, session_utils_1.mainLog)(`[${this._shortCwd()}#${this.sessionId}] prompt_result agentInvoked=false（已排队，未发起模型请求）`);
+            }
         }
         else if (event.type === 'agent_start') {
             this.agentRunning = true;

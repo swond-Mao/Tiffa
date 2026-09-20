@@ -247,6 +247,7 @@ export default function InputBox() {
       objective: '',
       criteria: [],
       todos: [],
+      model: '',
     });
     setText('');
     setGoalDraftOn(false); // 一次性的：发完就关，避免后续每条消息都走转写
@@ -254,6 +255,13 @@ export default function InputBox() {
     if (!r?.ok) {
       useUiStore.getState().setGoalDraft(null);
       useUiStore.getState().addToast('error', r?.error || '目标模式下发失败');
+      return;
+    }
+    // 回带这次实际用来转写的模型：卡片上直接显示，免得"转了半天不知道打给谁"
+    const label = r.model ? `${r.model.provider} / ${r.model.modelId}`.trim() : '';
+    if (label && label !== '/') {
+      const cur = useUiStore.getState().goalDraft;
+      if (cur) useUiStore.getState().setGoalDraft({ ...cur, model: label });
     }
   };
 
