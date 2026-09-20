@@ -1406,10 +1406,18 @@ function setupIpc() {
         // 内核还在忙时下发 prompt 只会被**排队**（受理但不起回合）：前端照常显示「正在转写」，
         // 模型服务器却零请求 —— 这正是"点了目标图标却毫无动静"最常见的原因，直接拦掉并说清楚。
         if (inst.isBusy) {
+            const why = inst.busyReason || '原因未知';
+            console.log(`[主进程] 目标草稿被拦：内核忙（${why}）`);
             return {
                 ok: false,
-                error: '上一轮还没结束（内核忙）。这时发转写请求只会被排队、不会真正请求模型。请先点「停止」，等它空闲后重发。',
+                error: `内核正忙（${why}）。这时发转写请求只会被排队、不会真正请求模型。请先点「停止」，等它空闲后重发。`,
             };
+        }
+        if (inst.isStale) {
+            console.log(`[主进程] 内核已 ${Math.round((Date.now() - inst.lastActiveTime) / 1000)} 秒无事件，状态标志不可信，按空闲放行转写`);
+        }
+        if (!inst.ready) {
+            return { ok: false, error: '内核还没就绪（刚启动或刚重启），请等它出现「就绪」后再发一次。' };
         }
         const sid = inst.sessionId || sessionId || '';
         // 转写用的是**当前会话正在用的模型**（没有独立的转写模型）—— 查出来一路带到卡片上，

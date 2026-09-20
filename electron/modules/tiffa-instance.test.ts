@@ -56,6 +56,67 @@ describe('TiffaInstance 边界行为', () => {
   });
 });
 
+/**
+ * 「内核忙」判据回归守卫
+ *
+ * 真实故障：实例 ready 后 3 秒会自动发 `/memory rebuild` 预热。slash 命令由内核本地执行、
+ * 不走 agent 循环，**永远等不到 agent_end** → userPromptInFlight 被永久置 true →
+ * isBusy 恒为 true → 刚启动、什么任务都没跑也被拦在「内核忙」，目标模式完全点不动。
+ * 这两条守卫分别钉死「slash 命令不置位」与「状态陈旧即放行」。
+ */
+describe('TiffaInstance 忙判定', () => {
+  afterEach(() => {
+    setMainWindow(null);
+  });
+
+  function fakeStdin(inst: TiffaInstance): void {
+    (inst as unknown as { process: unknown }).process = {
+      stdin: { writable: true, write: () => true },
+    };
+  }
+
+  it('slash 命令不置 userPromptInFlight（否则预热 /memory rebuild 会让实例永远忙）', () => {
+    const inst = new TiffaInstance('C:\\proj', 'uuid-1');
+    fakeStdin(inst);
+    inst.sendRaw({ type: 'prompt', message: '/memory rebuild' });
+    expect(inst.userPromptInFlight).toBe(false);
+    expect(inst.isBusy).toBe(false);
+  });
+
+  it('普通 prompt 置位，agent_end 后复位', () => {
+    const inst = new TiffaInstance('C:\\proj', 'uuid-1');
+    fakeStdin(inst);
+    inst.sendRaw({ type: 'prompt', message: '帮我重构这个函数' });
+    expect(inst.userPromptInFlight).toBe(true);
+    expect(inst.busyReason).toContain('agent_end');
+
+    inst.sessionFilePath = 'C:\\proj\\s.json'; // 跳过会话文件探测
+    inst._titleGenerated = true; // 跳过标题生成定时器
+    (inst as unknown as { _handleEvent: (e: Record<string, unknown>) => void })._handleEvent({
+      type: 'agent_end',
+    });
+    expect(inst.userPromptInFlight).toBe(false);
+    expect(inst.isBusy).toBe(false);
+  });
+
+  it('内核长时间无事件 → 标志不可信，按空闲放行（否则用户被永久锁死）', () => {
+    const inst = new TiffaInstance('C:\\proj', 'uuid-1');
+    inst.agentRunning = true;
+    expect(inst.isBusy).toBe(true);
+
+    inst.lastActiveTime = Date.now() - (TiffaInstance.BUSY_STALE_MS + 1000);
+    expect(inst.isStale).toBe(true);
+    expect(inst.isBusy).toBe(false);
+  });
+
+  it('有确认框在等也属忙，且原因可读', () => {
+    const inst = new TiffaInstance('C:\\proj', 'uuid-1');
+    inst._pendingAskIds.add('ask-1');
+    expect(inst.isBusy).toBe(true);
+    expect(inst.busyReason).toContain('确认框');
+  });
+});
+
 /** 替换 sendRaw，收集发往内核的帧（不依赖真实子进程） */
 function stubSendRaw(inst: TiffaInstance): Array<Record<string, unknown>> {
   const sent: Array<Record<string, unknown>> = [];

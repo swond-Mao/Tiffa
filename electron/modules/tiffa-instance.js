@@ -49,7 +49,15 @@ function setMainWindow(win) {
 function setMigrateCallback(fn) {
     _migrateSessionId = fn;
 }
+/** slash 命令（`/memory rebuild`、`/compact`…）：内核本地执行，不进 agent 循环，
+ *  因此不会有 agent_start/agent_end 配对事件。任何"等 agent_end 再复位"的标志都必须绕开它，
+ *  否则就绪后自动发的预热命令会把实例永久标记为忙。 */
+function _isSlashCommand(message) {
+    return typeof message === 'string' && message.trim().startsWith('/');
+}
 class TiffaInstance {
+    /** 内核静默多久后，本地「忙」标志不再可信（见 isBusy / isStale） */
+    static BUSY_STALE_MS = 3 * 60 * 1000;
     cwd;
     sessionId;
     process = null;
@@ -520,9 +528,36 @@ class TiffaInstance {
      * ⚠️ 不能只看渲染层的 `agentRunning`：abort 后前端会立刻置 false，而内核可能还卡在原处
      * （串行链卡住、停在等审批上）。此时再发一条 prompt，内核会**受理并入队但不起回合** →
      * 前端显示「正在转写」，模型服务器零请求。`goal:draft` 这类"发一条就完事"的命令必须先查它。
+     *
+     * ⚠️ 反过来也别把「发了命令还没看到结束」当铁证：`userPromptInFlight` 只在 agent_end /
+     * forceReset 复位，而 **slash 命令（`/memory rebuild` 这类）内核本地执行、根本不走 agent
+     * 循环**，永远等不到 agent_end —— 就绪后 3 秒那次预热 prompt 就会把它永久置 true，
+     * 于是什么都没跑也"永远忙"。故：slash 命令不置位（见 _isSlashCommand），且状态陈旧时一律放行。
      */
     get isBusy() {
+        // 长时间没有内核事件 = 本地标志已不可信（卡死 / 漏复位 / 进程僵死）。
+        // 此时继续拦截会把用户永久锁死，而真卡住时用户还能自己点「停止」——放行代价更小。
+        if (this.isStale)
+            return false;
         return this.agentRunning || this.userPromptInFlight || this._pendingAskIds.size > 0;
+    }
+    /** 内核事件静默时长超过阈值 → 本地运行态标志不可信 */
+    get isStale() {
+        return Date.now() - this.lastActiveTime > TiffaInstance.BUSY_STALE_MS;
+    }
+    /** 拦截时给用户看的具体原因（别再让"忙"变成一个无法证伪的黑箱） */
+    get busyReason() {
+        const idle = Math.round((Date.now() - this.lastActiveTime) / 1000);
+        const parts = [];
+        if (this.agentRunning)
+            parts.push('agent 回合在进行中');
+        if (this.userPromptInFlight)
+            parts.push('上一条消息发出后还没收到 agent_end');
+        if (this._pendingAskIds.size > 0)
+            parts.push(`${this._pendingAskIds.size} 个确认框在等你答复`);
+        if (!parts.length)
+            return '';
+        return `${parts.join('、')}（内核已 ${idle} 秒无事件）`;
     }
     sendCommand(frame) {
         return new Promise((resolve, reject) => {
@@ -535,7 +570,14 @@ class TiffaInstance {
                 console.log(`[TiffaInstance:${this._shortCwd()}] 用户命令到达，取消预热过滤`);
             }
             if (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up') {
-                this.userPromptInFlight = true;
+                // slash 命令（`/memory rebuild` 等）由内核本地执行、不走 agent 循环 → 不会有
+                // agent_start/agent_end 来复位标志。若在此置位，就绪后那次预热就会让实例「永远忙」。
+                if (_isSlashCommand(frame.message)) {
+                    this.userPromptInFlight = false;
+                }
+                else {
+                    this.userPromptInFlight = true;
+                }
             }
             // 记录用户 prompt 文本（内部命令排除），供 agent_start 时探测内核自动创建的会话文件
             if (frame.type === 'prompt' && typeof frame.message === 'string' && !frame.message.trim().startsWith('/')) {
@@ -581,7 +623,8 @@ class TiffaInstance {
             console.log(`[TiffaInstance:${this._shortCwd()}] 用户 raw 命令(${frame.type})到达，取消预热过滤`);
         }
         if (frame.type === 'prompt' || frame.type === 'steer' || frame.type === 'follow_up') {
-            this.userPromptInFlight = true;
+            // 同上：slash 命令不置 userPromptInFlight（预热 /memory rebuild 走的就是这条路）
+            this.userPromptInFlight = _isSlashCommand(frame.message) ? false : true;
         }
         // 记录用户 prompt 文本（内部命令排除），供 agent_start 时探测内核自动创建的会话文件
         if (frame.type === 'prompt' && typeof frame.message === 'string' && !frame.message.trim().startsWith('/')) {
