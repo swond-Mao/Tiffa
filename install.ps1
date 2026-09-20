@@ -17,6 +17,9 @@ function Step($num, $total, $msg) {
 }
 function OK($msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
 function INFO($msg)  { Write-Host "    [INFO] $msg" -ForegroundColor Yellow }
+# WARN 早前被调用 29 处却从未定义 → 每次都打成红色 "不是内部或外部命令"，
+# 提示内容全丢（用户看到的是报错而不是提示）。补上定义（非致命，不 exit）。
+function WARN($msg)   { Write-Host "    [WARN] $msg" -ForegroundColor Yellow }
 function FAIL($msg)   { Write-Host "    [FAIL] $msg" -ForegroundColor Red; exit 1 }
 
 Write-Host ""
@@ -96,6 +99,53 @@ function Invoke-Npm {
     }
 }
 
+# ---- 内核运行时补丁（幂等；安装/升级都在这里收口，别再手工跑脚本）----
+# 内核 dist/cli.js 是压缩产物，Tiffa 对它有几处必须的补丁，统一放仓库根的 patch-kernel-*.py。
+# 为什么必须写进 install.ps1（2026-09-21）：
+#   · 内核 npm-global/ 是 gitignore（不入库）→ 补丁本身不入库，只靠拷整包传播；
+#   · Step 4 在版本不符时会【整包重装内核】→ 手工打的补丁被静默抹掉，且无任何提示；
+#   · 内网机器没法联网重跑 → 漏打就永久缺失，症状是"莫名其妙的措辞/行为"，极难溯源。
+# 调用约定（新增补丁只需往仓库根丢一个 patch-kernel-*.py，无需改本脚本）：
+#   参数唯一 = 便携包根目录；自带幂等判断（已打过则跳过）；成功退出码 0；
+#   锚点失配必须非 0 退出且不写盘（内核版本漂移能立刻暴露，而不是打坏产物）。
+# 现有补丁：async-notice —— 后台任务交付帧头恒写 "has completed"（内核 xCs() 丢了 job.status），
+#           与正文 "Command exited with code N" 自相矛盾，弱模型据此误判。
+function Invoke-KernelPatches {
+    $cli = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent\dist\cli.js"
+    if (-not (Test-Path $cli)) { INFO "内核补丁: 跳过（内核产物尚未就位）"; return }
+    $scripts = @(Get-ChildItem -Path $ROOT -Filter "patch-kernel-*.py" -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    if ($scripts.Count -eq 0) { INFO "内核补丁: 跳过（仓库根无 patch-kernel-*.py）"; return }
+    # 自算便携 python 路径，不依赖外层变量（本函数在脚本不同阶段被调用）
+    $py = Join-Path $ROOT "python\python.exe"
+    if (-not (Test-Path $py)) {
+        INFO "内核补丁: 无便携 python，暂不应用。手动: `"$py`" patch-kernel-*.py `"$ROOT`""
+        return
+    }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        foreach ($s in $scripts) {
+            try {
+                $out = & $py $s.FullName $ROOT 2>&1
+                $code = $LASTEXITCODE
+                $out | ForEach-Object { Write-Host "      $_" -ForegroundColor DarkGray }
+                if ($code -eq 0) { OK "内核补丁 $($s.Name): 已应用/已存在" }
+                else { WARN "内核补丁 $($s.Name) 未应用（退出码 $code）—— 多为内核版本变动导致锚点失配；升级内核后请核对并更新该脚本" }
+            } catch {
+                # 便携 python 存在但跑不起来（DLL 缺失/被杀软拦截）→ 别让整个安装崩在这一步
+                WARN "内核补丁 $($s.Name) 执行失败：$_ ｜ 手动: `"$py`" `"$($s.FullName)`" `"$ROOT`""
+            }
+        }
+        # 校验标记真落进产物（防"脚本报成功、文件其实没变"）
+        # 用 ReadAllText+Contains 而非 Select-String：cli.js 是 19MB 压缩产物，按行切分又慢又费内存
+        $hit = ([System.IO.File]::ReadAllText($cli)).Contains("Tiffa-patch:async-exitcode")
+        if ($hit) { OK "内核产物已含 async-notice 补丁标记" }
+        else { WARN "内核产物无 async-notice 补丁标记：补丁未生效（后台任务通知仍会有矛盾措辞）" }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
 # ── 离线/内网模式：检测镜像可达性；不可达则校验目录内预置依赖（自包含），齐全则跳过联网安装 ──
 # 内网机器无 npmmirror 镜像。正确用法是拷贝整个 Tiffa 目录（含预置依赖）后直接 start-tiffa.bat；
 # 若在内网跑本脚本，检测到离线就校验预置是否齐全，齐全直接 exit，缺则明确告知缺哪个目录。
@@ -130,7 +180,9 @@ if (-not $Online) {
         "python\python.exe|便携 python",
         "npm-global\node_modules\bun\bin\bun.exe|bun",
         "python\Scripts\pip.exe|Python 依赖(pip+site-packages)",
-        "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)"
+        "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)",
+        "home\.omp\cache\fastembed-runtime\fastembed-2.1.0_transitive-ort\node_modules\fastembed|fastembed-runtime(记忆检索embedding)",
+        "home\.omp\cache\fastembed\fast-bge-small-zh-v1.5\model_optimized.onnx|embedding 模型(bge-small-zh)"
     )
     foreach ($spec in $checks) {
         $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)
@@ -152,6 +204,8 @@ if (-not $Online) {
         INFO "可选依赖缺失(降级可用): WPS Office(computer-use WPS/Office 自动化) —— 本机未装 WPS Office;装后 COM 组件自动注册,无需拷贝。不装则降级,其余功能正常"
     }
     if ($missing.Count -eq 0) {
+        # 内网机器同样要保证补丁在位（拷贝来源可能没打过；本函数幂等，已打过秒过）
+        Invoke-KernelPatches
         OK "离线模式：关键依赖齐全，跳过联网安装。直接 start-tiffa.bat 使用。"
         exit 0
     } else {
@@ -439,6 +493,8 @@ if (Test-Path $bunExe) {
 Step 4 7 "检查 Tiffa 内核"
 # 内核锁死精确版本：ask 多题对话框等运行时补丁依赖特定 cli.js 压缩锚点，
 # 浮动版本会导致补丁锚点失配（表现为 ask 面板功能静默降级）。升级内核须同步验证锚点。
+# 注：本脚本尾部的 Invoke-KernelPatches 会自动重打 patch-kernel-*.py；升级内核后若锚点变了，
+#     那里会 WARN 报出来（不需要你记得手动跑脚本），但补丁脚本本身仍需按新锚点更新。
 $KERNEL_VERSION = "18.0.6"
 $agentDir = Join-Path $ROOT "npm-global\node_modules\@oh-my-pi\pi-coding-agent"
 $needKernelInstall = $true
@@ -907,19 +963,89 @@ $embSrc  = Join-Path $ROOT "embedding-assets\fast-bge-small-zh-v1.5"
 $embOnnx = Join-Path $embSrc "model_optimized.onnx"
 if ((Test-Path $embOnnx) -and ((Get-Item $embOnnx).Length -gt 1MB)) {
     $embDst = Join-Path $ROOT "home\.omp\cache\fastembed\fast-bge-small-zh-v1.5"
-    if (-not (Test-Path $embDst)) {
-        New-Item -ItemType Directory -Path (Split-Path $embDst) -Force | Out-Null
-        Copy-Item -Path "$embSrc\*" -Destination $embDst -Recurse -Force
+    # ⚠️ 判据必须是「模型文件在」而不是「目录在」（2026-09-20 实测踩坑）：
+    #   ① 空目录也会让 Test-Path 返回 True → 跳过拷贝，模型永远缺失；
+    #   ② 旧写法只 New-Item 了父目录、没建 $embDst 本身，PowerShell 会把 $embDst
+    #      当成「目标文件名」→ 7 个源文件被合并成 1 个名为 fast-bge-small-zh-v1.5
+    #      的 vocab.txt 副本（130668 字节）。结果 fastembed 初始化永久卡住。
+    $embOnnxDst = Join-Path $embDst "model_optimized.onnx"
+    $embDstItem = Get-Item $embDst -ErrorAction SilentlyContinue
+    $embBroken = $true
+    if ($embDstItem -and $embDstItem.PSIsContainer -and (Test-Path $embOnnxDst)) {
+        if ((Get-Item $embOnnxDst).Length -gt 1MB) { $embBroken = $false }
     }
-    OK "embedding 模型已就位 (LFS 随包)"
+    if ($embBroken) {
+        # 清掉错误产物（可能是"同名文件"或残缺目录），重新拷
+        if ($embDstItem) {
+            Remove-Item $embDst -Recurse -Force -ErrorAction SilentlyContinue
+            INFO "检测到 embedding 模型缓存异常（同名文件/残缺目录），已清除重建"
+        }
+        # 必须先建 $embDst 本身，再往里拷内容，否则会重蹈上面的覆辙
+        New-Item -ItemType Directory -Path $embDst -Force | Out-Null
+        Copy-Item -Path (Join-Path $embSrc "*") -Destination $embDst -Recurse -Force
+    }
+    # 校验拷完的结果：必须是目录，且 onnx 到位
+    $embOk = (Test-Path $embOnnxDst) -and ((Get-Item $embOnnxDst).Length -gt 1MB) -and (Get-Item $embDst).PSIsContainer
+    if ($embOk) {
+        OK "embedding 模型已就位 (LFS 随包)"
+    } else {
+        FAIL "embedding 模型拷贝结果校验失败：$embDst 不是含 model_optimized.onnx 的完整目录。请手动拷贝 embedding-assets\fast-bge-small-zh-v1.5\ 到 home\.omp\cache\fastembed\ 下（保留该目录名）。"
+    }
 } else {
     FAIL "embedding 模型未随包（git clone 需含 LFS 文件）。国内无法从 HuggingFace 下载 BAAI/bge-small-zh-v1.5，请先 `git lfs pull` 或手动拷贝 embedding-assets\fast-bge-small-zh-v1.5\ 到 home\.omp\cache\fastembed\。"
 }
 
 # ---- fastembed-runtime（onnxruntime 原生绑定，~870MB）----
-$rtDst = Join-Path $ROOT "home\.omp\cache\fastembed-runtime"
-if (-not (Test-Path $rtDst)) {
-    INFO "fastembed-runtime 缺失：首次启用记忆时会从国内 npm 镜像自动拉取 onnxruntime；若失败，请从源机器拷贝 home\.omp\cache\fastembed-runtime\ 目录。"
+# 必须在安装阶段用 bun.exe 装好，不能依赖内核运行时自动安装。原因（2026-09-20 实测）：
+#   内核 `yO()` 用 `process.execPath` 执行安装；Tiffa 跑在 Electron 下 → 实际调用的是
+#   `electron.exe install`（不是 bun.exe），静默失败、无任何输出 → 留下一个空锁目录，
+#   之后每次启动都撞锁重试 240×250ms=60s 超时，且无熔断 → 对话每轮固定卡 60 秒。
+# 装配位置必须与内核探测点一致：`<rtDst>\node_modules\fastembed\package.json`
+#   （内核 yO() 开头 await a.exists() 命中即 return，完全跳过安装与抢锁）。
+$rtDst  = Join-Path $ROOT "home\.omp\cache\fastembed-runtime\fastembed-2.1.0_transitive-ort"
+$rtProbe = Join-Path $rtDst "node_modules\fastembed\package.json"
+$rtLock = Join-Path $ROOT "home\.omp\cache\fastembed-runtime\fastembed-2.1.0_transitive-ort.lock"
+
+# 先清残留锁：内核靠 finally 释放，安装中途进程被杀就会漏（本机 2026-08-27 13:47 即此情形）
+if (Test-Path $rtLock) {
+    Remove-Item $rtLock -Recurse -Force -ErrorAction SilentlyContinue
+    INFO "已清理上次中断残留的 fastembed 安装锁"
+}
+
+if (Test-Path $rtProbe) {
+    OK "fastembed-runtime (已装好)"
+} else {
+    INFO "安装 fastembed-runtime（onnxruntime 原生绑定，国内镜像，约 1-2 分钟）..."
+    if (-not (Test-Path $rtDst)) { New-Item -ItemType Directory -Path $rtDst -Force | Out-Null }
+    # 与内核 mho() 写入的 package.json 保持一致
+    $rtPkg = @'
+{
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"fastembed": "2.1.0"
+	},
+	"trustedDependencies": [
+		"onnxruntime-node"
+	]
+}
+'@
+    Set-Content -Path (Join-Path $rtDst "package.json") -Value $rtPkg -Encoding UTF8
+
+    $prevEAP3 = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        # 必须用 bun.exe（仓库自带），不能用 process.execPath —— 见上方说明
+        cmd /c "cd /d `"$rtDst`" && `"$bunExe`" install --production" 2>&1 | Out-String | Out-Null
+    } finally {
+        $ErrorActionPreference = $prevEAP3
+    }
+
+    if (Test-Path $rtProbe) {
+        OK "fastembed-runtime 安装成功"
+    } else {
+        FAIL "fastembed-runtime 安装失败（需联网到国内 npm 镜像）。手动: cd `"$rtDst`" && `"$bunExe`" install --production ；或从源机器整目录拷贝 home\.omp\cache\fastembed-runtime\ 。不装则每轮对话固定卡 60 秒（触发安装锁超时）。"
+    }
 }
 
 # ---- Python 运行时（base 国内拉 + pip 国内装，无需 LFS）----
@@ -1068,6 +1194,9 @@ if (Test-Path $pyExe) {
     }
 }
 
+# ---- 内核运行时补丁（放在内核 Step 4 与 Python 之后：内核可能被重装、补丁需重打）----
+Invoke-KernelPatches
+
 # models.yml 示例
 $modelsEx = Join-Path $ROOT "data\agent\models.yml.example"
 $modelsYml = Join-Path $ROOT "data\agent\models.yml"
@@ -1173,7 +1302,9 @@ $finalCoreChecks = @(
     "python\python.exe|便携 python",
     "npm-global\node_modules\bun\bin\bun.exe|bun",
     "python\Scripts\pip.exe|Python 依赖(pip+site-packages)",
-    "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)"
+    "skill-deps\node_modules\playwright|技能共享依赖(skill-deps)",
+    "home\.omp\cache\fastembed-runtime\fastembed-2.1.0_transitive-ort\node_modules\fastembed|fastembed-runtime(记忆检索embedding)",
+    "home\.omp\cache\fastembed\fast-bge-small-zh-v1.5\model_optimized.onnx|embedding 模型(bge-small-zh)"
 )
 foreach ($spec in $finalCoreChecks) {
     $idx = $spec.IndexOf('|'); $rel = $spec.Substring(0, $idx); $name = $spec.Substring($idx+1)

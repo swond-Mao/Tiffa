@@ -30,12 +30,18 @@ agent 收到后台任务交付帧时看到矛盾状态：
 权威定义：**命令 exit code 为准**（非 0 = 失败）；job 的 "completed" 仅表示进程结束、有结果。
 
 ⚠️ 内核 `npm-global/` 是 gitignore（不入库），升级内核会整包覆盖 → 升级后需重新执行本脚本。
-   本机已应用（2026-09-20，备份 dist/cli.js.bak-async-exitcode）。
+   **不需要手动跑**：install.ps1 会在安装/升级尾声自动执行仓库根的 `patch-kernel-*.py`
+   （`Invoke-KernelPatches`，幂等）。本脚本手动执行仅用于：内网机器单独补打、或诊断。
 
 用法
 ----
     python patch-kernel-async-notice.py [便携包根目录]
     # 不给根目录时依次尝试 $PORTABLE_ROOT、脚本所在目录
+    # 约定：参数唯一 = 便携包根目录；已打过则退出 0；锚点失配则非 0 且不写盘
+
+注：**进度输出刻意用英文 ASCII**——install.ps1 调用时读的是子进程 stdout，
+   中文在 PS 5.1 下会按控制台代码页解码成乱码（实测 `[ok] 已打过补丁` → `宸叉墦杩囪ˉ涓?`）。
+   中文保留在注释/docstring 里（本文件自身的编码不经那条管道）。
 """
 import os
 import shutil
@@ -81,20 +87,20 @@ def main() -> int:
         root, "npm-global", "node_modules", "@oh-my-pi", "pi-coding-agent", "dist", "cli.js"
     )
     if not os.path.isfile(cli):
-        print(f"[skip] 找不到内核产物：{cli}")
-        print("       请确认参数是 Tiffa 便携包根目录（含 npm-global/）。")
+        print(f"[skip] kernel bundle not found: {cli}")
+        print("       arg must be the Tiffa portable root (containing npm-global/).")
         return 1
 
     data = open(cli, "rb").read()
     if MARK in data:
-        print("[ok] 已打过补丁，跳过（幂等）")
+        print("[ok] already patched, skip (idempotent)")
         return 0
 
     # 只在三处都唯一命中时才动手，避免命中错位的旧/新内核
     for i, (old, _new) in enumerate(EDITS, 1):
         c = data.count(old)
         if c != 1:
-            print(f"[fail] 第 {i} 处匹配 {c} 次（期望 1）——内核版本可能已变，未做任何改动")
+            print(f"[fail] anchor {i} matched {c} time(s), expected 1 -- kernel bundle changed; nothing written")
             return 1
 
     bak = cli + ".bak-async-exitcode"
@@ -105,8 +111,8 @@ def main() -> int:
     for old, new in EDITS:
         data = data.replace(old, new, 1)
     open(cli, "wb").write(data)
-    print("[done] 内核补丁已应用：async-result 通知将按 成功/失败 分别表述")
-    print("       重启 Tiffa（重开对话或整包重启）后生效。")
+    print("[done] kernel patched: async-result notice now distinguishes success / failure")
+    print("       restart Tiffa to take effect.")
     return 0
 
 
