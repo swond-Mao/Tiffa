@@ -62,10 +62,10 @@ _out_dir_override = None
 def get_out_dir():
     return _out_dir_override or resolve_out_dir()
 
-WF_EDIT = os.path.join(SKILL_DIR, "workflow_edit_api.json")
-WF_ERNIE = os.path.join(SKILL_DIR, "workflow_ernie_turbo_api.json")
-WF_ZIMAGE = os.path.join(SKILL_DIR, "workflow_zimage_api.json")
+WF_GEN = os.path.join(SKILL_DIR, "workflow_qwen21_gen_api.json")
+WF_EDIT = os.path.join(SKILL_DIR, "workflow_qwen21_edit_api.json")
 WF_KLEIN = os.path.join(SKILL_DIR, "workflow_klein_api.json")
+WF_KLEIN_EDIT = os.path.join(SKILL_DIR, "workflow_klein_edit_api.json")
 WF_SEEDVR2 = os.path.join(SKILL_DIR, "workflow_seedvr2_api.json")
 WF_KREA2 = os.path.join(SKILL_DIR, "workflow_krea2_api.json")
 
@@ -240,6 +240,100 @@ KREA2_PROTAGONISTS = {
     "kopiu": {"trigger": "kopiu", "kop_strength": 1.0, "liu_strength": 0.0},
 }
 
+# Qwen Image 2.1 节点号（API 工作流内）：
+#   gen : 476(KSampler) 471(TextEncodeQwenImage21) 474(EmptyLatentImage)
+#   edit: 482(KSampler) 485(TextEncodeQwenImage21) 470(LoadImage 底图)
+# 参考图最多 11 张（images.image_2..image_12），由 --ref 动态注入 LoadImage 节点
+QWEN21_MAX_REFS = 11
+
+def _parse_size(args, wf, node_width, node_height):
+    """--size WxH → 写入指定节点的 width/height。"""
+    if not args.size:
+        return
+    try:
+        w, h = args.size.lower().split("x")
+        wf[node_width]["inputs"]["width"] = int(w)
+        wf[node_height]["inputs"]["height"] = int(h)
+    except Exception:
+        sys.stderr.write("[comfy] bad --size, expect WxH e.g. 1080x1920\n")
+        sys.exit(2)
+
+def cmd_gen(args):
+    """gen = Qwen Image 2.1 文生图（主力生图管线）。"""
+    global JOB
+    JOB = args.name
+
+    # prompt 来源优先级：1) 命令行参数 2) stdin (用 '-') 3) --prompt-file
+    if args.prompt == '-':
+        args.prompt = sys.stdin.read().strip()
+    elif args.prompt_file:
+        with open(args.prompt_file, 'r', encoding='utf-8') as f:
+            args.prompt = f.read().strip()
+    elif not args.prompt:
+        sys.stderr.write("[comfy] gen: prompt is required (pass text, '-' for stdin, or --prompt-file)\n")
+        sys.exit(2)
+
+    wf = load_wf(WF_GEN)
+
+    if args.size:
+        _parse_size(args, wf, "474", "474")
+    if args.seed and args.seed > 0:
+        wf["476"]["inputs"]["seed"] = args.seed
+    if args.steps and args.steps > 0:
+        wf["476"]["inputs"]["steps"] = args.steps
+
+    # 拆分多行提示词，逐行提交（每行一张图）
+    lines = [l.strip() for l in args.prompt.splitlines() if l.strip()]
+    if not lines:
+        lines = [args.prompt]
+
+    all_results = []
+    for i, line in enumerate(lines):
+        if args.seed and args.seed > 0:
+            wf["476"]["inputs"]["seed"] = args.seed + i
+        wf["471"]["inputs"]["prompt"] = line
+        wf["471"]["inputs"]["negative_prompt"] = args.negative or ""
+        print("[comfy] gen batch %d/%d: %s" % (i + 1, len(lines), line[:60]), flush=True)
+        res = submit_and_wait(wf, args.timeout)
+        all_results.extend(res)
+
+    return all_results
+
+def cmd_edit(args):
+    """edit = Qwen Image 2.1 图片编辑（主力编辑管线，支持多参考图）。"""
+    global JOB
+    JOB = args.name
+
+    wf = load_wf(WF_EDIT)
+
+    if args.size:
+        _parse_size(args, wf, "480", "480")
+
+    if args.seed and args.seed > 0:
+        wf["482"]["inputs"]["seed"] = args.seed
+    if args.steps and args.steps > 0:
+        wf["482"]["inputs"]["steps"] = args.steps
+
+    img_name = upload_image(args.image)
+    wf["470"]["inputs"]["image"] = img_name
+    wf["485"]["inputs"]["prompt"] = args.prompt
+    wf["485"]["inputs"]["negative_prompt"] = args.negative or ""
+
+    # 额外参考图：动态注入 LoadImage 节点，接 images.image_2..image_N
+    refs = args.ref or []
+    for i, p in enumerate(refs[:QWEN21_MAX_REFS]):
+        if not os.path.exists(p):
+            sys.stderr.write("[comfy] ref image not found: %s\n" % p)
+            sys.exit(2)
+        ref_name = upload_image(p)
+        nid = str(900 + i)
+        wf[nid] = {"class_type": "LoadImage", "inputs": {"image": ref_name}}
+        wf["485"]["inputs"]["images.image_%d" % (i + 2)] = [nid, 0]
+        print("[comfy] edit ref%d: %s" % (i + 2, ref_name), flush=True)
+
+    print("[comfy] edit: %s" % args.prompt[:60], flush=True)
+    return submit_and_wait(wf, args.timeout)
+
 def cmd_krea2(args):
     global JOB
     JOB = args.name
@@ -303,65 +397,24 @@ def cmd_krea2(args):
 
     return all_results
 
-def cmd_edit(args):
-    global JOB
-    JOB = args.name
-
-    wf = load_wf(WF_EDIT)
-
-    # edit workflow: seed=102(RandomNoise.noise_seed), steps=109(Flux2Scheduler),
-    #              image=76(LoadImage), prompt=117(CR Text)
-    if args.seed and args.seed > 0:
-        wf["102"]["inputs"]["noise_seed"] = args.seed
-    if args.steps and args.steps > 0:
-        wf["109"]["inputs"]["steps"] = args.steps
-
-    img_name = upload_image(args.image)
-    wf["76"]["inputs"]["image"] = img_name
-    wf["117"]["inputs"]["text"] = args.prompt
-
-    print("[comfy] edit: %s" % args.prompt[:60], flush=True)
-    return submit_and_wait(wf, args.timeout)
-
-def cmd_ernie(args):
-    global JOB
-    JOB = args.name
-
-    wf = load_wf(WF_ERNIE)
-
-    # ernie workflow: seed/steps/cfg=95(KSampler), prompt=98, size=92
-    if args.seed and args.seed > 0:
-        wf["95"]["inputs"]["seed"] = args.seed
-    if args.steps and args.steps > 0:
-        wf["95"]["inputs"]["steps"] = args.steps
-
-    if args.size:
-        try:
-            w, h = args.size.lower().split("x")
-            wf["92"]["inputs"]["width"] = int(w)
-            wf["92"]["inputs"]["height"] = int(h)
-        except Exception:
-            sys.stderr.write("[comfy] bad --size, expect WxH e.g. 1080x1920\n")
-            sys.exit(2)
-
-    lines = [l.strip() for l in args.prompt.splitlines() if l.strip()]
-    if not lines:
-        lines = [args.prompt]
-
-    all_results = []
-    for i, line in enumerate(lines):
-        if args.seed and args.seed > 0:
-            wf["95"]["inputs"]["seed"] = args.seed + i
-        wf["98"]["inputs"]["value"] = line
-        print("[comfy] ernie batch %d/%d: %s" % (i + 1, len(lines), line[:60]), flush=True)
-        res = submit_and_wait(wf, args.timeout)
-        all_results.extend(res)
-
-    return all_results
-
 def cmd_klein(args):
     global JOB
     JOB = args.name
+
+    # --image = klein 图片编辑（原图输入 + 一致性 LoRA 0.4，输出尺寸跟随原图 1MP）
+    if getattr(args, "image", ""):
+        wf = load_wf(WF_KLEIN_EDIT)
+        img_name = upload_image(args.image)
+        wf["76"]["inputs"]["image"] = img_name
+        wf["117"]["inputs"]["text"] = args.prompt
+        if args.seed and args.seed > 0:
+            wf["102"]["inputs"]["noise_seed"] = args.seed
+        print("[comfy] klein-edit: %s -> %s" % (img_name, args.prompt[:60]), flush=True)
+        return submit_and_wait(wf, args.timeout)
+
+    if not args.prompt:
+        sys.stderr.write("[comfy] klein: prompt required, or use --image <原图>\n")
+        sys.exit(2)
 
     wf = load_wf(WF_KLEIN)
 
@@ -405,40 +458,6 @@ def cmd_klein(args):
 
     return all_results
 
-def cmd_zimage(args):
-    global JOB
-    JOB = args.name
-
-    wf = load_wf(WF_ZIMAGE)
-
-    # zimage workflow: seed/steps/cfg=4(KSampler), prompt=88, size=62/63
-    if args.seed and args.seed > 0:
-        wf["4"]["inputs"]["seed"] = args.seed
-    if args.steps and args.steps > 0:
-        wf["4"]["inputs"]["steps"] = args.steps
-
-    if args.size:
-        try:
-            w, h = args.size.lower().split("x")
-            wf["62"]["inputs"]["value"] = int(w)
-            wf["63"]["inputs"]["value"] = int(h)
-        except Exception:
-            sys.stderr.write("[comfy] bad --size, expect WxH e.g. 1080x1920\n")
-            sys.exit(2)
-
-    lines = [l.strip() for l in args.prompt.splitlines() if l.strip()]
-    if not lines:
-        lines = [args.prompt]
-
-    all_results = []
-    for i, line in enumerate(lines):
-        if args.seed and args.seed > 0:
-            wf["4"]["inputs"]["seed"] = args.seed + i
-        wf["88"]["inputs"]["value"] = line
-        print("[comfy] zimage batch %d/%d: %s" % (i + 1, len(lines), line[:60]), flush=True)
-        res = submit_and_wait(wf, args.timeout)
-        all_results.extend(res)
-
 def cmd_upscale(args):
     global JOB
     JOB = args.name or "upscale"
@@ -461,7 +480,33 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    k2 = sub.add_parser("krea2", help="Krea2 Muse (artistic, text encoder: qwen3vl_4b_fp8, multi-line prompt)")
+    g = sub.add_parser("gen", help="Qwen Image 2.1 text-to-image (primary gen pipeline, multi-line prompt)")
+    g.add_argument("prompt", nargs='?', default=None, help="prompt text (supports multi-line batch, each line = one image). Use '-' to read from stdin.")
+    g.add_argument("--prompt-file", default=None, help="read prompt from file (preserves newlines)")
+    g.add_argument("--negative", default="", help="negative prompt")
+    g.add_argument("--size", default="", help="WxH, e.g. 1024x1024 or 1080x1920 (default from workflow)")
+    g.add_argument("--seed", type=int, default=0)
+    g.add_argument("--steps", type=int, default=0)
+    g.add_argument("--name", default="qwen21")
+    g.add_argument("--timeout", type=int, default=600)
+    g.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
+    g.set_defaults(func=cmd_gen)
+
+    e = sub.add_parser("edit", help="Qwen Image 2.1 instruction-based image editing (primary edit pipeline)")
+    e.add_argument("image", help="local image path to edit (base image)")
+    e.add_argument("prompt", help="edit instruction, e.g. '把背景换成海滩'")
+    e.add_argument("--ref", action="append", default=[],
+                   help="extra reference image path (repeatable, max %d, mapped to images.image_2..N)" % QWEN21_MAX_REFS)
+    e.add_argument("--size", default="", help="输出尺寸 WxH, e.g. 1536x1024 (default 1024x1024)\n")
+    e.add_argument("--negative", default="", help="negative prompt")
+    e.add_argument("--seed", type=int, default=0)
+    e.add_argument("--steps", type=int, default=0)
+    e.add_argument("--name", default="qwen21edit")
+    e.add_argument("--timeout", type=int, default=600)
+    e.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
+    e.set_defaults(func=cmd_edit)
+
+    k2 = sub.add_parser("krea2", help="Krea2 Muse (artistic/NSFW special gen, text encoder: qwen3vl_4b_fp8, multi-line prompt)")
     k2.add_argument("prompt", nargs='?', default=None, help="prompt text (supports multi-line batch, each line = one image). Use '-' to read from stdin.")
     k2.add_argument("--prompt-file", default=None, help="read prompt from file (preserves newlines)")
     k2.add_argument("--seed", type=int, default=0)
@@ -474,41 +519,9 @@ def main():
     k2.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     k2.set_defaults(func=cmd_krea2)
 
-    e = sub.add_parser("edit", help="edit an image by instruction")
-    e.add_argument("image", help="local image path to edit")
-    e.add_argument("prompt", help="edit instruction, e.g. '脱掉人物上衣'")
-    e.add_argument("--seed", type=int, default=0)
-    e.add_argument("--steps", type=int, default=0)
-    e.add_argument("--name", default="edit")
-    e.add_argument("--timeout", type=int, default=600)
-    e.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
-    e.set_defaults(func=cmd_edit)
-
-    n = sub.add_parser("ernie", help="Ernie-Image-Turbo (good text rendering, multi-line prompt)")
-    n.add_argument("prompt", help="prompt text (supports multi-line batch, each line = one image)")
-    n.add_argument("--seed", type=int, default=0)
-    n.add_argument("--steps", type=int, default=0)
-    n.add_argument("--size", default="", help="WxH override, e.g. 768x1280")
-    n.add_argument("--name", default="ernie")
-    n.add_argument("--timeout", type=int, default=600)
-    n.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
-    n.set_defaults(func=cmd_ernie)
-
-    z = sub.add_parser("zimage", help="Z-image turbo (distilled, 9 steps, cfg=1, multi-line prompt)")
-    z.add_argument("prompt", help="prompt text (supports multi-line batch, each line = one image)")
-    z.add_argument("--seed", type=int, default=0)
-    z.add_argument("--steps", type=int, default=0)
-    z.add_argument("--size", default="1920x1080", help="WxH, e.g. 1920x1080 or 1080x1080")
-    z.add_argument("--lora-person", default="", help="path to a person LoRA to insert between 68 and KSampler (rare use)")
-    z.add_argument("--lora-strength", type=float, default=0.8)
-    z.add_argument("--with-colleague", action="store_true", help="enable the baked-in colleague LoRA (kopiu-Z) - only for the colleague's face")
-    z.add_argument("--name", default="zimage")
-    z.add_argument("--timeout", type=int, default=600)
-    z.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
-    z.set_defaults(func=cmd_zimage)
-
-    k = sub.add_parser("klein", help="Flux2-Klein standalone (free size, high realism, multi-line prompt)")
-    k.add_argument("prompt", help="prompt text (supports multi-line batch, each line = one image)")
+    k = sub.add_parser("klein", help="Flux2-Klein (NSFW/special edit gen, free size, high realism, multi-line prompt; --image = image editing)")
+    k.add_argument("prompt", nargs='?', default="", help="prompt text (supports multi-line batch, each line = one image)")
+    k.add_argument("--image", default="", help="原图路径（图片编辑模式：原图输入+一致性 LoRA 0.4，输出尺寸跟随原图，提示词单行）")
     k.add_argument("--negative", default="")
     k.add_argument("--size", default="832x1216", help="WxH, e.g. 832x1216 or 1920x1080")
     k.add_argument("--seed", type=int, default=0)
@@ -519,6 +532,7 @@ def main():
     k.add_argument("--timeout", type=int, default=600)
     k.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     k.set_defaults(func=cmd_klein)
+
     u = sub.add_parser("upscale", help="SeedVR2 image upscaler")
     u.add_argument("image", help="local image path to upscale")
     u.add_argument("--seed", type=int, default=0)
@@ -527,6 +541,7 @@ def main():
     u.add_argument("--timeout", type=int, default=600)
     u.add_argument("--output", default="", help="图片输出目录（默认 $PORTABLE_ROOT/workspace/comfyui_out）")
     u.set_defaults(func=cmd_upscale)
+
     a = ap.parse_args()
     global _out_dir_override
     _out_dir_override = resolve_out_dir(getattr(a, "output", "") or None)

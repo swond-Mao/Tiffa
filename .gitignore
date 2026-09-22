@@ -223,3 +223,4 @@ electron/renderer/dist/assets/startup-custom.*
 # ComfyUI 真实端点（含公网 IP，不入库）：一行 URL
 # 读取优先级：COMFY_URL 环境变量 > 本文件 > 报错
 data/agent/comfy-endpoint.txt
+data/agent/managed-skills/comfyui-image-gen/backup-*/
