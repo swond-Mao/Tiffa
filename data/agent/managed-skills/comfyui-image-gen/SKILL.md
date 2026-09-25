@@ -27,7 +27,7 @@ Unified CLI `comfy.py` drives a remote ComfyUI server. Four subcommands, routed 
 > 已退役：`ernie`（Ernie-Image-Turbo）、`zimage`（Z-image）、旧版 Flux2 编辑工作流——Qwen Image 2.1 全面取代。工作流 JSON 归档在技能目录 `retired/` 子目录。
 > **提示词直接写**：工作流中的 TextGenerateLTX2Prompt 提示词增强节点不接入，提示词由调用方完整写清。
 
-> **生图实战指南**：读 `image-gen-playbook.md`（管线选择决策/提示词写法/比例预处理[绝不拉伸]/水印处理/批量素材策略/常见踩坑）。商业 deck 批量生图前必读。
+> **生图实战指南**：读 `image-gen-playbook.md`（管线选择决策/提示词写法/**编辑指令写法 9 条**[提炼自 Qwen 官方 Edit Prompt Enhancer v2：属性解耦、保留物点名不描相、文字逐字承诺否则不添加、比例走 `--size` 不进提示词]/比例预处理[绝不拉伸]/水印处理/批量素材策略/常见踩坑）。商业 deck 批量生图前必读；写 `edit` 指令前必读「编辑指令写法」一节。
 
 ## CLI 用法
 
