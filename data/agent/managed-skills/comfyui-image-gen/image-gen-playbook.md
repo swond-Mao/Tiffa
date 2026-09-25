@@ -67,6 +67,13 @@ high-end [产品/人物] photography, cinematic, premium, ultra high detail, 8k
 
 **贯穿规则**：~20 句 / 400-500 词、每句 ~25 词（thin brief 不等于 thin description）；不确定就留余地（appears to be / likely / 给一对候选 "a notebook or a tablet"），只对用户固定的东西斩钉截铁；**颜色必带修饰**（deep navy, muted olive, pale cream, warm terracotta, off-white），hex 仅当用户给出；**给材质不只给名词**（brushed metal, matte plastic, coarse linen, frosted glass, visible brush strokes, paper fibre）；**枚举不概括**（"several items"不是描述；小数量用单词 three/five，被遮挡就说遮挡并描述可见部分）；**人只写可观察表面**（体型/姿态/视线方向/表情/头发/肤色/每件衣物的颜色材质），年龄用人生阶段不用数字（in her thirties），脸转开/被裁就说转开/被裁；**物体按类别不按品牌**（a silver laptop，除非用户点名）；**物理一致**（阴影背向光源、反射对应眼前物、相邻物体比例自洽、表面回应承重）。
 
+**官方样例实测要点**（零点追缉海报，官方增强器输出 vs 手写，2026-09 对比验证）：
+1. **群像海报用"大头夹持"而非"并排站"**：主角两张巨型侧脸分居左右、各占画面大半高度，配角缩到角落——脸即建筑，中央天然留出负空间；三人等身并排持枪会互相抢戏、显廉价。
+2. **中央只放一个叙事焦点**：废墟孤影 + 天空虫洞光环，一个洞一个人讲尽悬疑；焦点堆多了等于没有焦点。
+3. **色彩克制**：低饱和冷灰蓝单色系 + 零星余烬暖光；teal-orange 双调 + 霓虹满屏是爆米花套路，悬疑片气质靠"收"不靠"炫"。
+4. **给标题区留干净负空间**：主标题背后写明确切载体（"a clean band of storm cloud serves as negative space for the title"），标语用拉开的字距；不留负空间，字就会压在人脸上。
+5. **credits 排成底带两行小字网格**，位置角色写死（lower-left / lower-right / bottom-centre），比散落各处更稳。
+
 ### 编辑指令写法（edit 管线 · 提炼自 Qwen 官方 Edit Prompt Enhancer v2）
 
 > 给 `edit` 写指令前过一遍这 9 条。官方增强器不接入工作流，这套规则由调用方（我们）手工执行。
