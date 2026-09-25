@@ -31,7 +31,7 @@
 - 主体：清晰具体（"黑金香水瓶 + 月光倒影"）
 - 风格词：`black and gold` / `luxury` / `cinematic` / `editorial`
 - 光影：`golden rim light` / `moonlight` / `cinematic lighting`
-- 质量词：`ultra high detail` / `8k` / `premium`
+- 质量词：~~8k / ultra high detail / premium~~ —— 官方 gen 方法**禁用质量 booster 词**（观察者只报告画面里有的东西），见下方「文生图提示词写法」
 
 > **关键：用途 ≠ 内容**——提示词描述"画什么"，**不要写"做什么用"**。
 > 要"背景素材"，描述背景内容（"黑金抽象流线 + 粒子，无主体"），**不要写"ppt 背景"**（否则生成 PPT 版式图）。
@@ -50,6 +50,22 @@
 luxury [产品/人物], black and gold, [细节], black background, golden rim light,
 high-end [产品/人物] photography, cinematic, premium, ultra high detail, 8k
 ```
+> ⚠️ 上为旧速记模板，其中 `premium / ultra high detail / 8k` 属官方禁用质量词，完整写法见下节。
+
+### 文生图提示词写法（gen 管线 · 提炼自 Qwen 官方 Image Prompt Rewriting Expert）
+
+> 核心哲学：**以旁观者口吻报告一张已完成的画面，不是给模型下指令**。现在时、第三人称、陈述句；不写 you/create/make sure/the AI should；**禁质量词**（masterpiece/8K/highly detailed/award-winning）。输出恒为**一段英文长描述**（无论用户语言），唯一例外是渲染进图里的文字——保持原语种、逐字符抄写。
+
+1. **拆任务**：用户固定的东西（文字串逐字符、物体、数量、颜色、位置、比例）原样存活；"关于工作要求而非画面"的指令（用引号/4K清晰/别硬边）静默遵守、不写进描述。没提的一切由你决定——**3 词简报与 300 词简报要长成同样大的描述**，简报意味着你发明更多，不是写更少。
+2. **定画框**：默认横 3:2、竖 2:3；方形徽章/图标/专辑封面 1:1；电影/演示 16:9；手机壁纸/竖幅 banner 9:16 或 1:2；海报 2:3；其余（21:9/4:3/4:5/全景 2:1）仅当主体真需要。**比例只进 `--size`，绝不写进描述文本**。
+3. **首句 ~20 词**：`The image is a ⟨vertical/wide/square⟩ ⟨style⟩ ⟨photograph·poster·illustration·infographic·close-up⟩ of ⟨主体⟩, ⟨背景与调色板⟩.` 风格词只在此出现一次（realistic/cinematic/flat-vector/watercolour/isometric…），medium 名词永不省略。
+4. **先盘点再动笔**：列出每个元素及其画内位置（8-14 个位置短语，必须抵达四角/边缘/中心，不聚中间）+ 全部可读文字清单（阅读顺序）。
+5. **走画框**：分区画面（海报/页面/UI/多物宽景）→ 背景与承载面**紧跟首句**、不放结尾 → 顶部带 → 左·中·右各一两句 → 底部带/地面/前景。单一主体画面 → 背景与衰减 → 姿态与位置 → 头脸 → 身体与每件衣物 → 手持/接触物 → 边缘残迹。**约 1/3 句子以位置短语开头**（"On the right side of the frame, …"）。基本单段；仅堆叠分区图（panels/cards/slides）一段一区。
+6. **定文字**：约三分之一画面本无可读文字，**别发明招牌**；要读的每串用直双引号+位置+外观（weight/colour/case/相对大小）；换行写成"第二行"不放真空行；不可读之物（远景招牌/玻璃后标签/密集正文）写 blurred/indistinct/too small to read，不编字母；图表坐标轴、刻度、图例、表格单元格**都算文字**，逐条写出。
+7. **光单独一句**：`The lighting is …`（光源+方向+质感+留下的阴影高光），或折进它所塑造的那个表面的句子——必须显式，不许隐含。
+8. **收尾一句**：`The overall composition …` 一句总括平衡/对称、调色板、风格、情绪，**只此一句**，不接第二句总结。
+
+**贯穿规则**：~20 句 / 400-500 词、每句 ~25 词（thin brief 不等于 thin description）；不确定就留余地（appears to be / likely / 给一对候选 "a notebook or a tablet"），只对用户固定的东西斩钉截铁；**颜色必带修饰**（deep navy, muted olive, pale cream, warm terracotta, off-white），hex 仅当用户给出；**给材质不只给名词**（brushed metal, matte plastic, coarse linen, frosted glass, visible brush strokes, paper fibre）；**枚举不概括**（"several items"不是描述；小数量用单词 three/five，被遮挡就说遮挡并描述可见部分）；**人只写可观察表面**（体型/姿态/视线方向/表情/头发/肤色/每件衣物的颜色材质），年龄用人生阶段不用数字（in her thirties），脸转开/被裁就说转开/被裁；**物体按类别不按品牌**（a silver laptop，除非用户点名）；**物理一致**（阴影背向光源、反射对应眼前物、相邻物体比例自洽、表面回应承重）。
 
 ### 编辑指令写法（edit 管线 · 提炼自 Qwen 官方 Edit Prompt Enhancer v2）
 
