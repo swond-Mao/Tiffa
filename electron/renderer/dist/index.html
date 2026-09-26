@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:*; connect-src 'self'; font-src 'self' data:; frame-src http://127.0.0.1:*;">
   <title>Tiffa</title>
   <!-- hljs 双主题：由渲染层 JS 按当前主题模式切换 disabled（与旧版行为一致）。
        文件位于 public/hljs/，Vite 原样复制到 dist，不被打包内联。 -->
@@ -14,7 +14,7 @@
        画一帧再跳到用户主题。themes.js 末尾有早期注入 IIFE 负责立即写入变量。
        文件位于 public/themes.js（构建副本），Vite 原样复制到 dist。 -->
   <script src="./themes.js"></script>
-  <script type="module" crossorigin src="./assets/index.CyBQ_WDu.js"></script>
+  <script type="module" crossorigin src="./assets/index.EIqlvy1O.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index.DQaem7pA.css">
 </head>
 <body>

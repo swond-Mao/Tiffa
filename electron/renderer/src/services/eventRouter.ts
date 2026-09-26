@@ -22,8 +22,15 @@ import {
 import { flushPendingQueue, loadSessions, restoreTodoPhases, applySessionMigration, migrateStuckNewTabs, invalidateModelListCache, getModelListCached, THINKING_LEVELS, resolveLevelForEfforts } from './sessionController';
 import { autoRenameWithLightModel, readSessionThinkingLevel } from './historyService';
 import { findSessionPathById, extractSessionId, dirNameFromSessionPath, dbgLog, localizeKernelMessage } from './utils';
-import { normalizeUserContent } from './messageBuilders';
+import { normalizeUserContent, formatTaskProgress, extractToolUpdateText } from './messageBuilders';
 import { finalizeStreamText } from '../stores/useChatStore';
+
+/**
+ * 子代理进度暂存：parentToolCallId → (代理 key → 最新快照)。
+ * 为什么必须攒：subagent_progress 每帧只带**一个**代理的快照，直接覆写卡片文本会让
+ * 并发批次里后到的帧把先到的擦掉、只剩最后一个代理。攒成整批再渲染才完整。
+ */
+const subagentProgressCache = new Map<string, Map<string, Record<string, unknown>>>();
 
 // ── 后台路由守卫 ──
 
@@ -570,13 +577,51 @@ function handleEvent(event: TiffaEventFrame): void {
       if (event.toolName === 'ask') stopStallCheck(wpTool);
       break;
     }
-    case 'tool_execution_update':
-      // 增量结果：React 版暂不渲染（等价 handleToolUpdate no-op）
+    case 'tool_execution_update': {
+      // 不再丢弃：task 工具的 partialResult.progress 是子代理实时进度最直接的来源
+      // （内核 task/types.d.ts 注释写明该 details 正是为父级 UI 展示在途进度而捕获）。
+      const wpUpd = resolveEventWritePath(event, sessions);
+      if (wpUpd && event.toolCallId) {
+        const updText = extractToolUpdateText(event.partialResult);
+        if (updText) chat.toolUpdate(wpUpd, String(event.toolCallId), updText);
+      }
       break;
+    }
+    // ── 子代理帧（需主进程先发 set_subagent_subscription；默认 off 时永不到达）──
+    case 'subagent_lifecycle':
+    case 'subagent_progress': {
+      const subPayload = (event.payload || {}) as Record<string, unknown>;
+      const subParent = String(subPayload.parentToolCallId || '');
+      // TIFFA-SUBAGENT-DIAG: 诊断 —— 确认子代理帧是否到达渲染层（生产环境可删）
+      console.debug('[subagent]', event.type, 'parent=' + subParent, 'agent=' + String(subPayload.agent || '?'));
+      const wpSub = subParent ? resolveEventWritePath(event, sessions) : null;
+      if (!wpSub) break;
+      // progress 帧带嵌套 progress 快照；lifecycle 帧只有 status/agent，取外层
+      const subProg = (event.type === 'subagent_progress' ? subPayload.progress : subPayload) as Record<string, unknown> | undefined;
+      // 每个代理一条槽位：id 优先，其次 index，保证并发批次不互相覆盖
+      const subKey = String(subProg?.id ?? subPayload.id ?? subPayload.index ?? subPayload.agent ?? 'main');
+      let slot = subagentProgressCache.get(subParent);
+      if (!slot) { slot = new Map(); subagentProgressCache.set(subParent, slot); }
+      slot.set(subKey, { ...(slot.get(subKey) || {}), ...subPayload, ...(subProg || {}) });
+      chat.toolUpdate(wpSub, subParent, formatTaskProgress([...slot.values()]));
+      // TIFFA-DETACHED-PROGRESS:E —— 同时写常驻区。task 的 tool_end 在子代理刚起步时就到（实测 12.7s）、
+      // 父轮次 agent_end 更把 streaming[path] 整个删掉，而进度帧一直发到 86.4s ——
+      // 只靠 toolUpdate 会全部静默丢弃，故这里写进不随流式结束消失的常驻区。
+      const subRows = [...slot.values()];
+      const subAllDone = subRows.length > 0 && subRows.every((r) =>
+        r['status'] === 'completed' || r['status'] === 'failed' || r['status'] === 'aborted');
+      chat.setDetachedProgress(wpSub, subParent, formatTaskProgress(subRows), subAllDone);
+      if (subAllDone) subagentProgressCache.delete(subParent);
+      break;
+    }
     case 'tool_execution_end': {
       const wpToolEnd = resolveEventWritePath(event, sessions);
       if (event.toolCallId && event.toolName && wpToolEnd) {
         chat.toolEnd(wpToolEnd, event.toolCallId, event.toolName, event.result, !!event.isError);
+        // toolEnd 已落成终态，暂存表可以放手（否则长会话里只增不减）
+        // TIFFA-DETACHED-PROGRESS:F —— detached task 的 tool_end 远早于子代理结束（实测 12.7s vs 86.4s），
+        // 此刻清表会把并发代理已积累的快照抹掉；改由「全部 done」时清（见上方 :E）
+        if (event.toolName !== 'task') subagentProgressCache.delete(String(event.toolCallId));
       }
       if (event.toolName === 'ask') {
         const running = wpToolEnd ? proc.procStateMap[wpToolEnd]?.agentRunning : false;

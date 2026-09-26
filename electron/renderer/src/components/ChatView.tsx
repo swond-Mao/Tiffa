@@ -56,6 +56,9 @@ export default function ChatView() {
   const agentRunning = useProcStore((s) => (activeSessionPath ? s.procStateMap[activeSessionPath]?.agentRunning : false));
   // 当前会话是否流式中（布尔选择器，细粒度；窗口计算依赖它钉最新）
   const streamingActive = useChatStore((s) => (activeSessionPath ? !!s.streaming[activeSessionPath] : false));
+  // TIFFA-DETACHED-PROGRESS:G —— detached 子代理进度（常驻区，不受 streaming 生命周期影响）
+  const detachedProgress = useChatStore((s) => (activeSessionPath ? s.detachedProgress[activeSessionPath] : undefined));
+  const detachedEntries = Object.entries(detachedProgress ?? {});
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -484,7 +487,31 @@ export default function ChatView() {
         {visible.map((m, idx) => (
           <MessageBubble key={makeKey(m, idx)} msg={m} />
         ))}
-      </div>
+              </div>
+        {/* TIFFA-CARD-POS: 子代理进度卡移到滚动区外 —— 始终可见 */}
+        {/* TIFFA-DETACHED-PROGRESS:H —— 子代理实时进度卡：task 卡片在子代理起步时就已 done，
+            进度只能由这张与流式生命周期解耦的常驻卡承载 */}
+        {detachedEntries.length > 0 && (
+          <div
+            style={{
+              margin: '6px 0 2px',
+              padding: '8px 10px',
+              borderRadius: 8,
+              border: '1px solid rgba(127,209,174,0.30)',
+              background: 'rgba(127,209,174,0.07)',
+              fontSize: 12.5,
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ opacity: 0.72, marginBottom: 3 }}>子代理实时进度</div>
+            {detachedEntries.map(([tcId, e]) => (
+              <div key={tcId} style={{ whiteSpace: 'pre-wrap' }}>
+                {e.done ? '✓ 已结束' : '● 运行中'} · {e.text}
+              </div>
+            ))}
+          </div>
+        )}
+
       <button
         ref={btnRef}
         id="scrollToBottomBtn"

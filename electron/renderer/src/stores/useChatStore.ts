@@ -32,6 +32,10 @@ export interface ChatState {
   messagesMap: Record<string, ChatMessage[]>;
   /** per-session 流式生成状态 */
   streaming: Record<string, StreamingState>;
+  // TIFFA-DETACHED-PROGRESS:A —— detached 子代理进度常驻区（与 streaming 生命周期解耦：
+  // task 的 tool_end 与父轮次 agent_end 都远早于子代理结束，挂在 streaming 上的
+  // toolUpdate 此后会被静默丢弃，进度必须有个不随流式结束而消失的落点）
+  detachedProgress: Record<string, Record<string, { text: string; done: boolean; ts: number }>>;
   /** 会话 DOM 缓存：消息快照 + 滚动位置（上限 3，LRU 淘汰） */
   sessionMessageCache: Record<string, SessionMessageCacheEntry>;
   /** agent_end flush 标记新鲜；agent_start 标记不新鲜 */
@@ -70,8 +74,12 @@ export interface ChatState {
   toolStart: (path: string | null, toolCallId: string, toolName: string, args: unknown) => void;
   /** 流式更新工具参数（toolcall_delta）：更新已存在 tool part 的 args，不重建 */
   toolArgsUpdate: (path: string | null, toolCallId: string, args: unknown) => void;
+  /** 工具增量结果 / 子代理实时进度：覆写既有 part 的 result，不重建 */
+  toolUpdate: (path: string | null, toolCallId: string, result: string) => void;
   toolEnd: (path: string | null, toolCallId: string, toolName: string, result: unknown, isError: boolean) => void;
   finalizeAssistant: (path: string | null) => void;
+  /** TIFFA-DETACHED-PROGRESS:B —— 写入/更新某会话某批 detached 子代理的进度快照 */
+  setDetachedProgress: (path: string | null, toolCallId: string, text: string, done: boolean) => void;
   /** 模型失败：把原因注入当前（可能为空的）assistant 消息，停止流式态 */
   injectAssistantError: (path: string | null, text: string) => void;
 
@@ -96,6 +104,8 @@ export interface ChatState {
 export const useChatStore = create<ChatState>((set) => ({
   messagesMap: {},
   streaming: {},
+  // TIFFA-DETACHED-PROGRESS:C
+  detachedProgress: {},
   sessionMessageCache: {},
   sessionCacheFresh: {},
   history: {},
@@ -306,6 +316,31 @@ export const useChatStore = create<ChatState>((set) => ({
       };
     }),
 
+  /**
+   * 工具增量结果（tool_execution_update / 子代理进度帧）：只覆写既有 tool part 的
+   * result，不重建 part —— 重建会让卡片重新挂载、滚动位置与展开态全丢。
+   * 定位方式与 toolArgsUpdate 一致（streaming[path].toolPartIndexes[toolCallId]）。
+   */
+  toolUpdate: (path: string | null, toolCallId: string, result: string) =>
+    set((s) => {
+      if (!path) return s;
+      const st = s.streaming[path];
+      if (!st) return s;
+      const idx = st.toolPartIndexes[toolCallId];
+      if (idx === undefined) return s;
+      const messages = [...(s.messagesMap[path] || [])];
+      const msg = messages[st.messageIndex];
+      if (!msg) return s;
+      const parts = [...msg.parts];
+      const tp = parts[idx];
+      if (!tp || tp.kind !== 'tool') return s;
+      const text = String(result ?? '').slice(0, 10000);
+      if (tp.result === text) return s; // 无变化不动：进度帧心跳式重发，别白刷
+      parts[idx] = { ...tp, result: text };
+      messages[st.messageIndex] = { ...msg, parts };
+      return { messagesMap: { ...s.messagesMap, [path]: messages } };
+    }),
+
   /** toolcall_delta：更新已存在 tool part 的 args（不重建，避免闪烁） */
   toolArgsUpdate: (path, toolCallId, args) =>
     set((s) => {
@@ -364,6 +399,40 @@ export const useChatStore = create<ChatState>((set) => ({
       };
       messages[st.messageIndex] = { ...msg, parts };
       return { messagesMap: { ...s.messagesMap, [path]: messages } };
+    }),
+
+  // TIFFA-DETACHED-PROGRESS:D —— detached 子代理进度：不读 streaming[path]，父轮次收尾后仍能更新
+  setDetachedProgress: (path, toolCallId, text, done) =>
+    set((s) => {
+      if (!path) return s;
+      const now = Date.now();
+      const next: Record<string, { text: string; done: boolean; ts: number }> = {
+        ...(s.detachedProgress[path] || {}),
+        [toolCallId]: { text, done, ts: now },
+      };
+      // TIFFA-DETACHED-SWEEP:A —— 兜底清扫：页面被后台节流、或定时器竞态失手时仍能收掉
+      for (const [k, v] of Object.entries(next)) {
+        if ((v.done && now - v.ts > 60_000) || now - v.ts > 600_000) delete next[k];
+      }
+      // TIFFA-DETACHED-SWEEP:B —— 关键：done 时必须当场挂定时器。进度停了就再没有下一次调用，
+      // 只靠上面的「顺手清扫」会让这张卡永久留在界面上。
+      if (done) {
+        setTimeout(() => {
+          set((s2) => {
+            const cur = s2.detachedProgress[path];
+            const e = cur?.[toolCallId];
+            // ts 变化说明期间又有新进度（陈旧定时器），不动手
+            if (!cur || !e || !e.done || e.ts !== now) return s2;
+            const left = { ...cur };
+            delete left[toolCallId];
+            const detachedProgress = { ...s2.detachedProgress };
+            if (Object.keys(left).length) detachedProgress[path] = left;
+            else delete detachedProgress[path];
+            return { detachedProgress };
+          });
+        }, 60_000);
+      }
+      return { detachedProgress: { ...s.detachedProgress, [path]: next } };
     }),
 
   /** 80ms 节流 flush 已废弃（textDelta 立即渲染后不再需要） */

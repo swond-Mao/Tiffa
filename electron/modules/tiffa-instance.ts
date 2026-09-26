@@ -694,6 +694,13 @@ export class TiffaInstance {
           .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] RPC 协议 v2 已启用（大帧拆 rpc_chunk 分块）`); })
           .catch((e: Error) => { console.warn(`[TiffaInstance:${this._shortCwd()}] RPC v2 协商失败，保持 v1: ${e.message}`); });
       }
+      // 子代理帧门控：内核默认 off，不发这条订阅就没有任何 subagent_* 帧到达宿主，
+      // 用户看到的永远是「子 agent 在跑却毫无动静」。level 取 progress（每代理一条
+      // 聚合快照）；events 带子代理逐条消息，量大噪声高，不做默认。
+      // 旧内核不认这条命令时只警告，绝不影响启动。
+      this.sendCommand({ type: 'set_subagent_subscription', level: 'progress' })
+        .then(() => { console.log(`[TiffaInstance:${this._shortCwd()}] 子代理进度订阅已启用（level=progress）`); })
+        .catch((e: Error) => { console.warn(`[TiffaInstance:${this._shortCwd()}] 子代理进度订阅失败（内核版本可能不支持）: ${e.message}`); });
       this.agentRunning = false;
       this.crashCount = 0;
       console.log(`[TiffaInstance:${this._shortCwd()}] 就绪`);
