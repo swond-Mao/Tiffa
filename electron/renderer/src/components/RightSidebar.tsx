@@ -692,6 +692,8 @@ export default function RightSidebar() {
       startX = e.clientX;
       startWidth = sidebar.offsetWidth;
       handle.classList.add('dragging');
+      // TIFFA-SIDEBAR-RESIZE: 拖拽期间禁用 CSS transition，否则 width 动画导致"橡皮筋"滞后
+      sidebar.style.transition = 'none';
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
       e.preventDefault();
@@ -705,6 +707,7 @@ export default function RightSidebar() {
       if (!dragging) return;
       dragging = false;
       handle.classList.remove('dragging');
+      sidebar.style.transition = ''; // TIFFA-SIDEBAR-RESIZE: 恢复 CSS 定义的 0.15s ease
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
