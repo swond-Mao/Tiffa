@@ -58,17 +58,18 @@ export default function ChatView() {
   const streamingActive = useChatStore((s) => (activeSessionPath ? !!s.streaming[activeSessionPath] : false));
   // TIFFA-DETACHED-PROGRESS:G —— detached 子代理进度（常驻区，不受 streaming 生命周期影响）
   const detachedProgress = useChatStore((s) => (activeSessionPath ? s.detachedProgress[activeSessionPath] : undefined));
-  // TIFFA-SUBAGENT-EXPIRE: done 超过 60s 不渲染（渲染层兜底，不依赖 store 定时器）
+  // TIFFA-SUBAGENT-EXPIRE — 纯时间过期：2 分钟没更新就不渲染（不依赖 done 标志）
   const [expireTick, setExpireTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setExpireTick((v) => v + 1), 10_000);
     return () => clearInterval(t);
   }, []);
   void expireTick;
-  const now = Date.now();
+  const nowTs = Date.now();
   const detachedEntries = Object.entries(detachedProgress ?? {}).filter(
-    ([, e]) => !(e.done && now - e.ts > 60_000)
+    ([, e]) => nowTs - e.ts < 120_000
   );
+
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
