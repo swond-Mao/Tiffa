@@ -608,7 +608,9 @@ function handleEvent(event: TiffaEventFrame): void {
       // 父轮次 agent_end 更把 streaming[path] 整个删掉，而进度帧一直发到 86.4s ——
       // 只靠 toolUpdate 会全部静默丢弃，故这里写进不随流式结束消失的常驻区。
       const subRows = [...slot.values()];
-      const subAllDone = subRows.length > 0 && subRows.every((r) =>
+      // TIFFA-SUBAGENT-DONE:A —— status 在 progress[] 数组元素里，不在合并对象顶层
+      const progressArr = Array.isArray(subPayload.progress) ? subPayload.progress as Array<Record<string, unknown>> : [];
+      const subAllDone = progressArr.length > 0 && progressArr.every((r) =>
         r['status'] === 'completed' || r['status'] === 'failed' || r['status'] === 'aborted');
       chat.setDetachedProgress(wpSub, subParent, formatTaskProgress(subRows), subAllDone);
       if (subAllDone) subagentProgressCache.delete(subParent);
@@ -621,7 +623,14 @@ function handleEvent(event: TiffaEventFrame): void {
         // toolEnd 已落成终态，暂存表可以放手（否则长会话里只增不减）
         // TIFFA-DETACHED-PROGRESS:F —— detached task 的 tool_end 远早于子代理结束（实测 12.7s vs 86.4s），
         // 此刻清表会把并发代理已积累的快照抹掉；改由「全部 done」时清（见上方 :E）
-        if (event.toolName !== 'task') subagentProgressCache.delete(String(event.toolCallId));
+        if (event.toolName !== 'task') {
+          subagentProgressCache.delete(String(event.toolCallId));
+        } else {
+          // TIFFA-SUBAGENT-DONE:B —— task 工具结束时兜底：progress 数组可能还没收到 completed 帧，
+          // 直接标记 done 让 60s 定时器挂上，卡片不再永久滞留
+          chat.setDetachedProgress(wpToolEnd, String(event.toolCallId), '', true);
+          subagentProgressCache.delete(String(event.toolCallId));
+        }
       }
       if (event.toolName === 'ask') {
         const running = wpToolEnd ? proc.procStateMap[wpToolEnd]?.agentRunning : false;
