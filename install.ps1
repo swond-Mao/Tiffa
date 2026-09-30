@@ -1057,7 +1057,7 @@ if (Test-Path $rtProbe) {
     $ErrorActionPreference = "Continue"
     try {
         # 必须用 bun.exe（仓库自带），不能用 process.execPath —— 见上方说明
-        cmd /c "cd /d `"$rtDst`" && `"$bunExe`" install --production" 2>&1 | Out-String | Out-Null
+        cmd /c "cd /d `"$rtDst`" && `"$bunExe`" install --production --registry $CHINA_NPM" 2>&1 | Out-String | Out-Null
     } finally {
         $ErrorActionPreference = $prevEAP3
     }
