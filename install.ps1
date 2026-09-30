@@ -653,8 +653,18 @@ if (-not (Test-Path $elMainJs) -or (-not (Test-Path $elIndex))) {
     }
 }
 # 本地含构建工具 → 重新编译刷新（main.js/dist 与源码一致）；无工具（内网离线）→ 沿用仓库版
-if (Test-Path $viteBin) {
-    INFO "本地含构建工具，重新编译 Electron 前端（确保与源码一致）..."
+# ── 防呆：源文件完整性检查（拷贝部署场景常漏 tsconfig/main.ts 等，跳过无意义的重试）──
+$tsConfig   = Join-Path $electronDir "tsconfig.main.json"
+$mainTs     = Join-Path $electronDir "main.ts"
+$viteConfig = Join-Path $electronDir "renderer\vite.config.ts"
+$missingSrc = @()
+if (-not (Test-Path $tsConfig))   { $missingSrc += "tsconfig.main.json" }
+if (-not (Test-Path $mainTs))     { $missingSrc += "main.ts" }
+if (-not (Test-Path $viteConfig)) { $missingSrc += "renderer\vite.config.ts" }
+if ($missingSrc.Count -gt 0) {
+    Write-Host "    [SKIP] 源码不完整，跳过本地构建。缺失: $($missingSrc -join ', ')" -ForegroundColor Yellow
+    Write-Host "         请从源机器完整拷贝 electron/ 目录（含 .ts/.json 源文件），或 git clone 完整仓库。" -ForegroundColor Yellow
+} else {
     $prevEAP3 = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $rebuildOk = $false
