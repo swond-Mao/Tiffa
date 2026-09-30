@@ -593,12 +593,26 @@ if ($needKernelInstall) {
 Step 5 7 "检查 Electron 桌面端"
 $electronDir = Join-Path $ROOT "electron"
 $electronExe = Join-Path $electronDir "node_modules\electron\dist\electron.exe"
+$elMainJs    = Join-Path $electronDir "main.js"
+$elIndex     = Join-Path $electronDir "renderer\dist\index.html"
+$viteBin     = Join-Path $electronDir "node_modules\vite\bin\vite.js"
+$tsConfig    = Join-Path $electronDir "tsconfig.main.json"
+$mainTs      = Join-Path $electronDir "main.ts"
+$viteConfig  = Join-Path $electronDir "renderer\vite.config.ts"
+# 源文件完整性（部署机常是文件拷贝而非 git clone，可能缺 .ts/.json 源文件）
+$srcMissing = @()
+if (-not (Test-Path $tsConfig))   { $srcMissing += "tsconfig.main.json" }
+if (-not (Test-Path $mainTs))     { $srcMissing += "main.ts" }
+if (-not (Test-Path $viteConfig)) { $srcMissing += "renderer\vite.config.ts" }
+$srcComplete = ($srcMissing.Count -eq 0)
+
+# ── 安装 electron 依赖（--ignore-scripts 防止 prepare 里的 tsc 在源文件不全时崩）──
 if (Test-Path $electronExe) {
     OK "Electron 桌面端 (已安装)"
 } else {
     INFO "安装 Electron 桌面端（国内镜像，失败自动重试）..."
     if (-not (Test-Path (Join-Path $electronDir "package.json"))) {
-        FAIL "缺少 electron\package.json，请确认已 clone 完整仓库"
+        FAIL "缺少 electron\package.json，请确认已拷贝完整仓库（install.ps1 所在目录下须有 electron\ 文件夹）"
     }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -608,34 +622,42 @@ if (Test-Path $electronExe) {
             INFO "第 $attempt/3 次尝试 ..."
             Start-Sleep -Seconds 3
         }
-        # 用 cmd /c 在 electron 目录执行 npm install（ELECTRON_MIRROR 已设为 npmmirror）
-        $elCmd = "cd /d `"$electronDir`" && $(Get-NpmCmdStr) install --no-save --loglevel=error"
+        # 永远 --ignore-scripts：跳过 prepare(tsc)/postinstall 等钩子，装完依赖再手动补
+        $elCmd = "cd /d `"$electronDir`" && $(Get-NpmCmdStr) install --no-save --loglevel=error --ignore-scripts"
         cmd /c $elCmd 2>&1 | Out-String | Out-Null
-        if ($LASTEXITCODE -eq 0 -and (Test-Path $electronExe)) {
-            $elInstalled = $true
-            break
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "    [WARN] Electron npm install 失败（退出码 $LASTEXITCODE）" -ForegroundColor Yellow
+            continue
         }
-        Write-Host "    [WARN] Electron 安装失败（退出码 $LASTEXITCODE）" -ForegroundColor Yellow
+        # 手动触发 electron 二进制下载（--ignore-scripts 跳过了 postinstall）
+        if (-not (Test-Path $electronExe)) {
+            $dlCmd = "cd /d `"$electronDir`" && `"$nodeExe`" node_modules\electron\install.js"
+            cmd /c $dlCmd 2>&1 | Out-String | Out-Null
+        }
+        if (Test-Path $electronExe) { $elInstalled = $true; break }
+        Write-Host "    [WARN] Electron 二进制未就绪（退出码 $LASTEXITCODE）" -ForegroundColor Yellow
     }
     $ErrorActionPreference = $prevEAP
     if ($elInstalled) {
         OK "Electron 桌面端安装成功"
     } else {
-        FAIL "Electron 安装失败。请手动执行：cd $ROOT\electron && npm install（需联网，ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/）"
+        FAIL "Electron 安装失败。请手动执行：cd $electronDir && npm install --ignore-scripts && node node_modules\electron\install.js"
     }
 }
 
 # ---- 防呆（新装/已装都做）：renderer/dist 入库，install 一律强制清洗到仓库版 ----
 # 本地残留的旧/脏 dist 会挡住新功能（如新设置项不显示），故先还原被跟踪文件 + 清未跟踪残留，
 # 再按本地是否有构建工具决定是否重新编译刷新（有工具→dist/main 与源码一致；无工具内网→沿用仓库版）。
-$elMainJs = Join-Path $electronDir "main.js"
-$elIndex  = Join-Path $electronDir "renderer\dist\index.html"
-$viteBin  = Join-Path $electronDir "node_modules\vite\bin\vite.js"
 # 还原被跟踪的 dist 到仓库提交版 + 清掉本地未跟踪的 dist 残留（旧 hash 文件等）
 cmd /c "cd /d `"$ROOT`" && git checkout -- electron/renderer/dist 2>&1" | Out-Null
 cmd /c "cd /d `"$ROOT`" && git clean -fdq electron/renderer/dist 2>&1" | Out-Null
-# 仓库版 dist/main.js 仍缺失（极端：仓库未提交产物）→ 本地 build 兜底
+
+# ── 构建决策：产物缺失 → 必须 build；产物已在 → 视源文件完整性决定是否刷新 ──
 if (-not (Test-Path $elMainJs) -or (-not (Test-Path $elIndex))) {
+    # 产物缺失：必须本地构建
+    if (-not $srcComplete) {
+        FAIL "Electron 编译产物缺失且源文件不全（缺: $($srcMissing -join ', ')）。请完整拷贝 electron/ 目录（含 .ts 源文件 + .json 配置），或 git clone 仓库。"
+    }
     INFO "检测到 Electron 构建产物缺失，本地构建（tsc + vite）..."
     $prevEAP2 = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
@@ -651,20 +673,9 @@ if (-not (Test-Path $elMainJs) -or (-not (Test-Path $elIndex))) {
     } finally {
         $ErrorActionPreference = $prevEAP2
     }
-}
-# 本地含构建工具 → 重新编译刷新（main.js/dist 与源码一致）；无工具（内网离线）→ 沿用仓库版
-# ── 防呆：源文件完整性检查（拷贝部署场景常漏 tsconfig/main.ts 等，跳过无意义的重试）──
-$tsConfig   = Join-Path $electronDir "tsconfig.main.json"
-$mainTs     = Join-Path $electronDir "main.ts"
-$viteConfig = Join-Path $electronDir "renderer\vite.config.ts"
-$missingSrc = @()
-if (-not (Test-Path $tsConfig))   { $missingSrc += "tsconfig.main.json" }
-if (-not (Test-Path $mainTs))     { $missingSrc += "main.ts" }
-if (-not (Test-Path $viteConfig)) { $missingSrc += "renderer\vite.config.ts" }
-if ($missingSrc.Count -gt 0) {
-    Write-Host "    [SKIP] 源码不完整，跳过本地构建。缺失: $($missingSrc -join ', ')" -ForegroundColor Yellow
-    Write-Host "         请从源机器完整拷贝 electron/ 目录（含 .ts/.json 源文件），或 git clone 完整仓库。" -ForegroundColor Yellow
-} else {
+} elseif ($srcComplete -and (Test-Path $viteBin)) {
+    # 产物已在 + 源文件完整 + 有构建工具 → 重编刷新（确保与源码一致）
+    INFO "本地含构建工具，重新编译 Electron 前端（确保与源码一致）..."
     $prevEAP3 = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $rebuildOk = $false
@@ -681,21 +692,21 @@ if ($missingSrc.Count -gt 0) {
     if ($rebuildOk) {
         OK "Electron 前端已重新编译（与源码一致）"
         # ── 防呆：校验产物确实刷新到最新源码，避免 vite 增量缓存产出旧 bundle（静默落后于源码）──
-        # 判据：dist/index.html mtime 必须 >= 最新源码 mtime；否则说明 build 未真正刷新。
         $srcFiles = Get-ChildItem -Path (Join-Path $electronDir 'renderer\src') -Recurse -Include *.tsx,*.ts,*.css -ErrorAction SilentlyContinue
         if ($srcFiles) {
             $newestSrc = $srcFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
             $idxFile = Get-Item $elIndex
             if ($idxFile.LastWriteTime -lt $newestSrc.LastWriteTime) {
                 Write-Host "    [WARN] 产物疑似落后于源码: dist/index.html ($($idxFile.LastWriteTime)) < 最新源码 ($($newestSrc.Name) $($newestSrc.LastWriteTime))" -ForegroundColor Yellow
-                Write-Host "         vite 增量缓存可能未刷新。补救: Remove-Item electron\node_modules\.vite -Recurse 后重跑本脚本, 或 cd electron && npm run build:renderer 并 grep 产物验证新功能标记" -ForegroundColor Yellow
+                Write-Host "         vite 增量缓存可能未刷新。补救: Remove-Item electron\node_modules\.vite -Recurse 后重跑本脚本, 或 cd electron && npm run build:renderer" -ForegroundColor Yellow
             }
         }
     } else {
         Write-Host "    [WARN] 前端重新编译失败，沿用仓库版（仍可用）" -ForegroundColor Yellow
     }
 } else {
-    OK "Electron 前端（仓库版 dist，内网离线可用）"
+    # 产物已在 + (源文件不全 或 无构建工具) → 直接用仓库版产物，静默通过
+    OK "Electron 前端（仓库版产物，可正常运行）"
 }
 
 # Step 6: 安装技能 npm 依赖与无头浏览器（便携离线关键）
