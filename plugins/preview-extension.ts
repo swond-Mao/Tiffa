@@ -17,6 +17,45 @@
 import { statSync } from "node:fs"
 import { isAbsolute, resolve, sep } from "node:path"
 
+/** 只需一个 setWidget 就够用；其余 UI 方法不碰 */
+type WidgetUi = { setWidget: (key: string, lines: string[]) => void }
+
+/** 事件里捕获的真 UI 通道（execute 的 ctx 在 Tiffa 实测拿不到，见 capture 分片） */
+let liveUi: WidgetUi | null = null
+
+/** 运行时守卫：确有可调 setWidget 才算真通道，不靠类型断言兜形状 */
+function asWidgetUi(cand: unknown): WidgetUi | null {
+  if (!cand || typeof cand !== "object") return null
+  if (!("setWidget" in cand)) return null
+  if (typeof cand.setWidget !== "function") return null
+  // 可调用性已由上面两行运行时确认，这里仅收敛类型
+  return cand as WidgetUi
+}
+
+/** 从事件上下文取 ui（形状由内核决定，逐项校验） */
+function uiFromCtx(ctx: unknown): WidgetUi | null {
+  if (!ctx || typeof ctx !== "object") return null
+  if (!("ui" in ctx)) return null
+  return asWidgetUi(ctx.ui)
+}
+
+/**
+ * 把真通道桥接成 pi.ui：execute 里既有的 `pi?.ui?.setWidget` 探测分支即可命中，
+ * 无需改动已落盘的守卫与调用行（改了会让旧分片的幂等判据失效）。
+ * 内核对象若被冻结则桥接失败，调用方仍可靠 liveUi 自行判空。
+ */
+function bridgePiUi(piObj: unknown, ui: WidgetUi): void {
+  if (!piObj || typeof piObj !== "object") return
+  if (asWidgetUi((piObj as PiSlot).ui)) return
+  try {
+    (piObj as PiSlot).ui = ui
+  } catch {
+    /* 冻结/只读：桥接失败不抛，留给 execute 的 ctx.ui 分支 */
+  }
+}
+
+type PiSlot = Record<string, unknown>
+
 const TYPE_HINT = /\.(html?|svg|png|jpe?g|webp|gif|css|js|json|md|txt|csv|log)$/i
 
 /** 只读校验：不登记、不占用 watcher */
@@ -53,13 +92,23 @@ function buildWidgetLines(file: string, title: string): string[] {
 
 export default async function (pi: any) {
   const Type = pi?.typebox?.Type
-  const hasUi = !!pi?.ui && typeof pi.ui.setWidget === "function"
+  // 通道判断不能放在这里：模块级 pi.ui 是内核给扩展的 lRs() 空壳（无 setWidget），
+  // 真正的 setWidget 在 execute 的第 5 入参 ctx.ui（ExtensionContext）上，见下方 execute。
+  // 【更正 2026-09-26 实测】execute 第 5 入参在 Tiffa 实际拿不到带 ui 的上下文（preview_show
+  // 报「无 setWidget 通道」即由此来）。真通道在事件处理器的第 2 入参 ctx：hasUI=true、
+  // ctx.ui.setWidget 存在，调用即外发 extension_ui_request{method:"setWidget",widgetKey,widgetLines}。
+  // 见下方 before_agent_start 捕获（liveUi）与 execute 里的 pi.ui 桥接。
 
   if (Type && typeof pi?.registerTool === "function") {
     try {
       pi.registerTool({
         name: "preview_show",
         label: "推送预览",
+        // 必须显式 essential：内核把扩展工具默认归一成 discoverable（pi-coding-agent/
+        // extensions/types.d.ts:458），那会把 schema 从顶层请求里摘走、改挂 xd:// 设备
+        // 或 BM25 工具检索 —— 于是模型根本调不到它，而下面注入的使用规则仍会每轮
+        // 宣称「你有 preview_show 工具」。这正是「预览机制失效」的真因，与网络无关。
+        loadMode: "essential",
         description: [
           "把一个本地文件（HTML 页面 / 截图 / SVG / 文本）推送到 Tiffa 侧边栏的「实时预览」区，让用户直接看到成果。",
           "file 必须是绝对路径。同一文件重复推送会顶到同一个预览条目并自动刷新（不必先关后开）。",
@@ -71,7 +120,7 @@ export default async function (pi: any) {
           file: Type.String({ description: "要预览的文件绝对路径，如 G:/proj/output/page.html" }),
           title: Type.Optional(Type.String({ description: "预览条目显示名，缺省用文件名" })),
         }),
-        async execute(_toolCallId: string, params: any) {
+        async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
           const file = resolve(String(params?.file || ""))
           const chk = checkFile(file)
           if (!chk.ok) {
@@ -80,7 +129,9 @@ export default async function (pi: any) {
               isError: true,
             }
           }
-          if (!hasUi) {
+          const ui = typeof ctx?.ui?.setWidget === "function" ? ctx.ui
+            : typeof pi?.ui?.setWidget === "function" ? pi.ui : null;
+          if (!ui) {
             return {
               content: [{ type: "text", text: "预览未推送：当前运行环境无 ui.setWidget 通道（非 Tiffa 桌面端）" }],
               isError: true,
@@ -96,7 +147,7 @@ export default async function (pi: any) {
           }
           const title = String(params?.title || "").trim() || file.split(sep).pop() || file
           try {
-            pi.ui.setWidget("preview:" + file, buildWidgetLines(file, title))
+            ui.setWidget("preview:" + file, buildWidgetLines(file, title))
           } catch (e: any) {
             return {
               content: [{ type: "text", text: `预览推送失败：${e?.message || String(e)}` }],
@@ -123,7 +174,10 @@ export default async function (pi: any) {
 
   // ── 使用规则注入 ──
   // 不注入的话模型不知道有这个工具（扩展工具默认 discoverable），功能等于没装。
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (_event: unknown, ctx: unknown) => {
+    // 捕获真通道并桥接：每轮开始都会走到这里，早于本工具的任何一次 execute 调用。
+    liveUi = uiFromCtx(ctx) ?? liveUi
+    if (liveUi) bridgePiUi(pi, liveUi)
     return {
       systemPrompt: [
         "# 侧边栏实时预览（重要）",
