@@ -168,6 +168,9 @@ export default function Minimap({ messagesRef, onNavigate }: MinimapProps) {
     syncSize();
 
     return () => {
+      // 卸载时必须摘掉这个类：会话超 300 条会切窗口化模式、Minimap 整个卸载，
+      // 但类留在 .messages 上会把原生滚动条一起藏掉 —— 结果是两条滚动条都没有。
+      msgs.classList.remove('minimap-active');
       ro.disconnect();
       mo.disconnect();
       themeMo.disconnect();
