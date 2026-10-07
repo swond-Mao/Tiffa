@@ -224,3 +224,7 @@ electron/renderer/dist/assets/startup-custom.*
 # 读取优先级：COMFY_URL 环境变量 > 本文件 > 报错
 data/agent/comfy-endpoint.txt
 data/agent/managed-skills/comfyui-image-gen/backup-*/
+
+# 技能收敛实验的临时副本（comfyui-converge 等），真源在 managed-skills 下，
+# 只留本地对照，不入库
+temp/
