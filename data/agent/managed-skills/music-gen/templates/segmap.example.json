@@ -1,0 +1,10 @@
+{
+  "intro#1": [],
+  "verse#1": ["verse#1", "verse#2"],
+  "chorus#1": ["chorus#1"],
+  "interlude#1": [],
+  "verse#2": ["bridge#1", "bridge#2", "verse#3"],
+  "chorus#2": ["chorus#2"],
+  "verse#3": ["outro#1"],
+  "outro#1": []
+}

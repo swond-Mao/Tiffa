@@ -1,0 +1,81 @@
+《改天》 定稿歌本
+================================================================
+三个人 · 80 后 · 同校同学 · 二十年后的街机厅
+固化日期 2026-10-04 ｜ 本文件是本曲唯一权威来源，style.txt / lyrics.txt 仅作留档
+
+生成参数（实测有效值，改词后重出歌可直接沿用）
+  seed        88042
+  mode        full
+  请求 BPM    76 → 实际落成 74（谱头 Q:1/4=74）
+  调 / 拍     G 大调 4/4
+  谱          scores/gaitian_88042_x_285s.txt（88 小节，Vocal + Ins 两声部）
+  时长        实测 277.48s ｜ 谱估 285.41s ｜ 校准 268.28s
+  max_duration 由脚本自动置 385s（估时 +35% 余量，不会被中途切）
+  音频        song/gaitian.flac ／ ComfyUI/output/audio/gaitian_00002.flac
+
+间奏：[Interlude] 已验证为 8 小节纯器乐（人声 z32 连休，Ins 声部实奏），
+      位于第一次 Chorus 之后，约 26 秒，口琴 solo。
+      注：[Interlude] 在 yue2 代码里无校验逻辑，是原样进 prompt 由模型自行处理，
+      换 seed 后必须回谱重新核实，不能假定还在。
+
+风格标签为什么用英文：comfy/text_encoders/yue2.py:79 把 style 塞进 [Tags] 段，
+      该段训练语料是英文流派/乐器标签；中文会被映射到 chinese folk 一类最近邻，
+      连带拖进笛子与中国丝弦。改英文标签后风味正确。
+      另注：本链路走 ABC 工作流，cfg_scale=1.0，CFG 关闭，negative 不参与运算，
+      所以 "no flute" 一类只是给 LLM 读的自然语言提示，真正的约束来自正面的
+      western folk 锚点与句尾 only。若仍有丝弦，改用 mode=melody 削掉和弦声部。
+
+[STYLE]
+slow acoustic singer-叙事民谣，娓娓道来，songwriter folk, one husky low middle-aged male voice, conversational intimate delivery, fingerpicked steel-string guitar, harmonica solo interlude, upright bass, soft frame drum and brushed hand percussion only, sparse minimal arrangement, dry close-mic vocal, 76 bpm, G major, western folk, no flute, no orchestral strings, no heavy drums
+
+[LYRICS]
+[Verse]
+那时候的晚自习 窗外是街机的霓虹
+俊杰买了两个币 塞进我手中
+他选八神庵 和安杰把对面的血条打红
+最后啃着包子冲向上课铃声
+
+[Verse]
+后来三个人 踩过各自的泥尘
+我握手术刀 他们敲代码 熬过晨昏
+我在县城 他们在成嘟 各守一扇门
+有人为了生计 把自己 活成了异乡人
+
+[Chorus]
+改天 改天 我们总说着这些
+一顿饭要排到 三个人的明天
+屏幕上还剩 二十秒的时间
+我们谁都没精力 再投入一枚从前
+
+[Interlude]
+
+[Bridge]
+安杰的儿子 已经比我还高
+俊杰的头发 退到了鬓角
+我在急诊室 把一张片子看到破晓
+黑白的片子里 认不出谁在变老
+
+[Bridge]
+生活钟如铁链 可我不再是陈国汉
+煮着一壶咖啡 奋战到夜半
+原来人到中年 只是读秒没走完
+Game over的警告 转了一圈 又一圈
+
+[Verse]
+那家街机厅 拆了很多年
+招牌上的灯 早烧断了线
+我们站在原地 不敢按下手边的键
+好像一按 就要各奔一边
+
+[Chorus]
+改天 改天 改到话都变短
+一句再见要攒 一年又一年
+新加坡的天空 成嘟的夜
+常江的水面 映出同一轮月
+
+
+[Outro]
+这一次 别再说改天
+三个杯子碰一下 已经那么难
+我在阳台上 捡起了键盘
+唱那首歌 好久不见
