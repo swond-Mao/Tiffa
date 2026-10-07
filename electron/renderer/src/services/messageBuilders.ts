@@ -180,3 +180,96 @@ export function extractUserImages(msg: TiffaHistoryMessage): MessageImage[] {
       name: (im as MessageImage).name,
     }));
 }
+
+// ── 子代理实时进度 ──────────────────────────────────────────────
+
+/** 内核 AgentProgress 的宽松视图（进度帧与 partialResult 共用） */
+export interface AgentProgressLike {
+  status?: string;
+  agent?: string;
+  id?: string;
+  task?: string;
+  currentTool?: string;
+  currentToolArgs?: string;
+  lastIntent?: string;
+  toolCount?: number;
+  requests?: number;
+  tokens?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  cost?: number;
+  durationMs?: number;
+  recentOutput?: string[];
+}
+
+const PROGRESS_LABEL: Record<string, string> = {
+  pending: '排队中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+  aborted: '已中止',
+};
+
+/** 折成一行并截断：进度文本会反复重绘，撑宽卡片等于没做 */
+function clip(s: unknown, max: number): string {
+  const one = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return one.length > max ? one.slice(0, max - 1) + '…' : one;
+}
+
+function fmtSec(ms?: number): string {
+  if (!ms || ms < 0) return '';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`;
+}
+
+/** 一批子代理进度 → 每个代理一行的人话摘要 */
+export function formatTaskProgress(list: unknown): string {
+  if (!Array.isArray(list) || list.length === 0) return '';
+  const rows = list as AgentProgressLike[];
+  const lines = rows.map((p, i) => {
+    const who = clip(p?.agent || p?.id || 'agent', 24);
+    const st = PROGRESS_LABEL[p?.status || ''] || p?.status || '?';
+    const bits: string[] = [st];
+    const doing = p?.currentTool ? `${p.currentTool} ${clip(p.currentToolArgs, 40)}` : clip(p?.lastIntent, 48);
+    if (doing && p?.status === 'running') bits.push(`▸ ${doing.trim()}`);
+    if (p?.toolCount) bits.push(`工具 ${p.toolCount}`);
+    if (p?.requests) bits.push(`轮次 ${p.requests}`);
+    if (p?.contextTokens) {
+      const cw = p.contextWindow ? `/${p.contextWindow}` : '';
+      bits.push(`ctx ${p.contextTokens}${cw}`);
+    }
+    const dur = fmtSec(p?.durationMs);
+    if (dur) bits.push(dur);
+    return `${i + 1}. ${who} — ${bits.join(' · ')}`;
+  });
+  // 卡住的代理最后跑一条输出，避免「看着像死了」
+  const running = rows.find((p) => p?.status === 'running');
+  const tail = running?.recentOutput?.filter(Boolean).slice(-1)[0];
+  if (tail) lines.push(`   ↳ ${clip(tail, 120)}`);
+  return lines.join('\n');
+}
+
+/** 从 tool_execution_update 的 partialResult 里取出可展示的文本 */
+export function extractToolUpdateText(partialResult: unknown): string {
+  if (partialResult == null) return '';
+  const pr = partialResult as {
+    progress?: unknown;
+    details?: { progress?: unknown };
+    content?: Array<{ type?: string; text?: string }>;
+  };
+  const prog = Array.isArray(pr.progress)
+    ? pr.progress
+    : Array.isArray(pr.details?.progress)
+      ? pr.details?.progress
+      : null;
+  const asTask = formatTaskProgress(prog);
+  if (asTask) return asTask;
+  if (Array.isArray(pr.content)) {
+    return pr.content
+      .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+      .map((c) => c.text as string)
+      .join('\n')
+      .slice(0, 4000);
+  }
+  return '';
+}

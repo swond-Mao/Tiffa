@@ -85,6 +85,11 @@ function ToolCallCard({ part }: { part: ToolPart }) {
   }, [part.toolName, part.args]);
 
   const statusLabel = part.status === 'running' ? '执行中' : part.status === 'error' ? '出错' : '完成';
+  // 卡片默认折叠（open 初值取 part.expanded），进度只写在体内就等于用户看不见。
+  // 故执行中时把摘要头两行提到标题行；一旦完成就让位给正常的折叠行为。
+  const liveProgress = part.status === 'running' && part.result
+    ? part.result.split('\n').filter(Boolean).slice(0, 2).join('  ')
+    : '';
   const argText = part.args || '';
   const hasDiff = part.hasDiff && !!part.result;
 
@@ -94,6 +99,18 @@ function ToolCallCard({ part }: { part: ToolPart }) {
         <span className="tool-call-name">{part.toolName}</span>
         {summary && <span className="tool-call-summary">{summary}</span>}
         <span className={`tool-call-status ${part.status}`}>{statusLabel}</span>
+        {liveProgress && (
+          <span
+            className="tool-call-live"
+            title={part.result}
+            style={{
+              marginLeft: 8, flex: 1, minWidth: 0, opacity: 0.72, fontSize: 12,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}
+          >
+            {liveProgress}
+          </span>
+        )}
       </div>
       <div className={`tool-call-body${open ? '' : ' collapsed'}`}>
         {hasDiff ? (
