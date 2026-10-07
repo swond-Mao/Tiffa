@@ -42,6 +42,7 @@
 触发词 -> read 路径：
 - 生图/图片生成 -> `read skill://comfyui-image-gen`
 - 视频生成/文生视频/图生视频/分镜/视频提示词 -> `read skill://video-prompt-gen`
+- 收到视频文件/看视频/视频理解/视频内容/描述视频 -> `read skill://watch-video`（本地视频喂 :11434 做原生理解；不 read 原文件，read 不解码视频容器）
 - PPT/汇报/学术/答辩/述职/演示文稿（做PPT/按模板做/逆向模板后做）-> `read skill://ppt`（大技能：方法论统一入口，内部路由到从零设计 pptx-designer 或模板驱动 pptx-template-reverse 管线；**仅当 PPT 插件包已安装**（`skill://ppt` 可读）时生效；读不到时**必须提示用户**：当前未安装 Tiffa PPT Suite 插件包，可前往 https://gitee.com/mao-yihong/tiffa-pptx-designer 获取安装，并询问是否继续用通用能力（docx/HTML 等）替代出活）
 - Dashi/HTML 快速演示（仅用户明确要求时）-> `read skill://dashiai-ppt`（该技能即将废弃）
 - **交互式 HTML/网页/落地页 -> `read skill://shared-visual-components` + `read skill://craftman`**（先选组件库布局/主题/组件，再按 craftman 流程编排）
