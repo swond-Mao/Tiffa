@@ -205,6 +205,9 @@ data/agent/managed-skills/computer-use/grounding.json
 # 属机器本地配置不入库；仓库只留同名 *.json.example 模板，comfy.py load_wf 缺失时自动恢复，
 # 本地调参不再污染 git 状态，换机器/重装也不会拿别人的模型名去跑）
 data/agent/managed-skills/comfyui-image-gen/workflow_*.json
+# 同上：retired/ 归档目录也只留 *.json.example 模板。真实 json 绑本机 checkpoint 名，
+# 上面那条模式不带 **，匹配不到子目录，故显式补一条（曾因漏这条把 3 个真实 json 提进库）。
+data/agent/managed-skills/comfyui-image-gen/retired/workflow_*.json
 # PPT 商业插件包（专有许可，作为独立技能包分发；不随开源仓库，本地安装保留文件）
 data/agent/managed-skills/ppt/
 data/agent/managed-skills/pptx-designer/
@@ -228,3 +231,8 @@ data/agent/managed-skills/comfyui-image-gen/backup-*/
 # 技能收敛实验的临时副本（comfyui-converge 等），真源在 managed-skills 下，
 # 只留本地对照，不入库
 temp/
+
+# OpenBenchHub 参考客户端：从站点下载的第三方传输客户端（obh_agent/obh_cli/obh_images/
+# obh_suite，UA=OpenBenchHub-CLI/0.4.1），非 tiffa 产品代码，且依赖外部 rfc8785。
+# 凭据本身不在此目录（走 DPAPI 存到 credential_path），但整目录属外来工具，不随仓库分发。
+obh-cli/
