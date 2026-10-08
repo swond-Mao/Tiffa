@@ -9,29 +9,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useUiStore } from '../stores/useUiStore';
 import { useProjectsStore } from '../stores/useProjectsStore';
-import { escapeHtml, sanitizeHtml } from '../services/utils';
+import { escapeHtml, LANG_MAP, sanitizeHtml } from '../services/utils';
+import Markdown from './Markdown';
 
 // ── 常量（等价旧版）──
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico'];
-const LANG_MAP: Record<string, string> = {
-  '.js': 'javascript',
-  '.ts': 'typescript',
-  '.py': 'python',
-  '.css': 'css',
-  '.json': 'json',
-  '.yml': 'yaml',
-  '.yaml': 'yaml',
-  '.bat': 'bash',
-  '.sh': 'bash',
-  '.xml': 'xml',
-  '.sql': 'sql',
-  '.rs': 'rust',
-  '.go': 'go',
-  '.java': 'java',
-  '.cpp': 'cpp',
-  '.c': 'c',
-};
 const FILE_ICONS: Record<string, string> = {
   '.js': '{}',
   '.ts': '{}',
@@ -636,31 +619,15 @@ function FilePanel() {
             <iframe srcDoc={drawer.src} sandbox="allow-scripts allow-same-origin" title={drawer.name} />
           )}
           {drawer?.kind === 'md' && drawer.src && (
-            <iframe srcDoc={simpleMarkdownRender(drawer.src)} sandbox="allow-scripts allow-same-origin" title={drawer.name} />
+            <div className="drawer-markdown">
+              <Markdown text={drawer.src} />
+            </div>
           )}
           {drawer?.kind === 'code' && drawer.codeHtml && <div dangerouslySetInnerHTML={{ __html: drawer.codeHtml }} />}
         </div>
       </div>
     </>
   );
-}
-
-/** 简易 Markdown → HTML（等价旧版 simpleMarkdownRender） */
-function simpleMarkdownRender(md: string): string {
-  let html = md
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/^\- (.+)$/gm, '<li>$1</li>')
-    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    .replace(/\n/g, '<br>');
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:system-ui,sans-serif;max-width:800px;margin:0 auto;padding:16px;color:#333;background:#fff;}h1{border-bottom:1px solid #eee;padding-bottom:8px;}h2{border-bottom:1px solid #eee;padding-bottom:6px;}code{background:#f4f4f4;padding:2px 6px;border-radius:3px;font-size:0.9em;}li{margin:4px 0;}</style></head><body>${html}</body></html>`;
 }
 
 // ── 主组件 ──

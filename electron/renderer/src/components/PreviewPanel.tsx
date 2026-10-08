@@ -25,6 +25,8 @@ import {
   previewRelease,
   subscribePreviewChanged,
 } from '../services/previewBridge';
+import Markdown, { CodeBlock } from './Markdown';
+import { LANG_MAP } from '../services/utils';
 
 function relTime(ts: number): string {
   const d = Math.max(0, Date.now() - ts);
@@ -36,6 +38,38 @@ function relTime(ts: number): string {
 
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp|ico)$/i;
 const SVG_RE = /\.svg$/i;
+const HTML_RE = /\.(html?|xhtml)$/i;
+const MD_RE = /\.(md|markdown|mdx)$/i;
+
+/** 可在渲染端读正文、转 DOM 渲染的文本/代码扩展名；其余交给回环服务按 MIME 处理 */
+const TEXT_EXTS: Record<string, true> = {
+  '.txt': true, '.log': true, '.json': true, '.csv': true, '.tsv': true,
+  '.js': true, '.mjs': true, '.cjs': true, '.jsx': true, '.ts': true, '.tsx': true,
+  '.py': true, '.rb': true, '.go': true, '.rs': true, '.java': true, '.c': true, '.h': true,
+  '.cpp': true, '.hpp': true, '.cs': true, '.php': true,
+  '.sh': true, '.bat': true, '.ps1': true, '.cmd': true,
+  '.css': true, '.scss': true, '.less': true, '.xml': true, '.yml': true, '.yaml': true,
+  '.toml': true, '.ini': true, '.cfg': true, '.conf': true, '.env': true,
+  '.sql': true, '.vue': true, '.svelte': true, '.kt': true, '.swift': true, '.lua': true,
+  '.pl': true, '.r': true, '.gradle': true, '.properties': true,
+};
+
+/** 预览分流：image→<img>，html/binary→跨源 iframe，md/code→渲染端读正文 */
+type PreviewKind = 'image' | 'html' | 'md' | 'code' | 'binary';
+
+function extOf(file: string): string {
+  const m = file.match(/\.[^./\\]+$/);
+  return (m ? m[0] : '').toLowerCase();
+}
+
+function classify(file: string | undefined): PreviewKind {
+  if (!file) return 'binary';
+  if (IMAGE_RE.test(file) || SVG_RE.test(file)) return 'image';
+  if (HTML_RE.test(file)) return 'html';
+  if (MD_RE.test(file)) return 'md';
+  if (TEXT_EXTS[extOf(file)]) return 'code';
+  return 'binary';
+}
 
 export default function PreviewPanel() {
   const items = usePreviewStore((s) => s.items);
@@ -54,12 +88,17 @@ export default function PreviewPanel() {
   const [loading, setLoading] = useState(false);
   /** 载入失败提示：回环服务挂了/文件被删时给一句话，不留白框 */
   const [failed, setFailed] = useState(false);
+  /** 文本类预览的正文（md/code 由渲染端自读，不再依赖回环服务的 MIME 解析） */
+  const [text, setText] = useState<string | null>(null);
   const panelRef = useRef<HTMLElement>(null);
 
   const active: PreviewItem | null = useMemo(
     () => items.find((x) => x.id === activeId) ?? items[items.length - 1] ?? null,
     [items, activeId],
   );
+  const activeFile = active?.file ?? null;
+  /** 预览类型：决定走 <img> / 跨源 iframe / 渲染端读正文的文本分支 */
+  const kind = useMemo(() => classify(activeFile ?? undefined), [activeFile]);
 
   // 订阅文件变更（热更新）：主进程 fs.watch → preview:changed → 换 ?v= 重载
   useEffect(() => subscribePreviewChanged((c) => {
@@ -70,6 +109,31 @@ export default function PreviewPanel() {
     setLoading(true);
     setFailed(false);
   }, [active?.id, active?.rev, reloadNonce]);
+
+  // 文本类（md/code）：渲染端读正文后按内容渲染。
+  // 根因：回环服务按扩展名发 MIME，文本类无对应类型即 octet-stream，浏览器当二进制 → 白屏。
+  // 改为读正文走 Markdown/CodeBlock（同域但只经安全渲染器；HTML 仍走跨源 iframe 不动）。
+  useEffect(() => {
+    if (kind !== 'md' && kind !== 'code') { setText(null); return; }
+    if (!activeFile) return;
+    let cancelled = false;
+    setText(null);
+    setLoading(true);
+    setFailed(false);
+    void (async () => {
+      try {
+        const r = (await window.tiffaDesktop.readFile(activeFile)) as { content?: string; error?: string } | undefined;
+        if (cancelled) return;
+        if (!r || r.error || r.content == null) setFailed(true);
+        else setText(r.content);
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [kind, activeFile, active?.rev, reloadNonce]);
 
   // ── 拖拽改宽（与 #sidebarResizeHandle 同构） ──
   useEffect(() => {
@@ -129,8 +193,6 @@ export default function PreviewPanel() {
   if (!visible || items.length === 0) return null;
 
   const src = active ? previewFrameSrc(active.url, active.rev) : '';
-  // SVG 走 <img> 而非 iframe：它没有 document 生命周期，塞进 iframe 会白屏一片
-  const asImage = !!active && (IMAGE_RE.test(active.file) || SVG_RE.test(active.file));
 
   return (
     <>
@@ -201,28 +263,34 @@ export default function PreviewPanel() {
               文件可能已被删除或移动，或预览服务已停止；让 AI 重新推送一次试试。
             </div>
           )}
-          {active && (
-            asImage ? (
-              <img
-                key={`${active.id}:${active.rev}:${reloadNonce}`}
-                className="preview-image"
-                src={src}
-                alt={active.title}
-                onLoad={() => setLoading(false)}
-                onError={() => { setLoading(false); setFailed(true); }}
-              />
-            ) : (
-              <iframe
-                key={`${active.id}:${active.rev}:${reloadNonce}`}
-                className="preview-frame"
-                title={active.title}
-                src={src}
-                // 不给 allow-same-origin：见文件顶部说明
-                sandbox="allow-scripts allow-popups allow-forms"
-                onLoad={() => setLoading(false)}
-                onError={() => { setLoading(false); setFailed(true); }}
-              />
-            )
+          {active && kind === 'image' && (
+            <img
+              key={`${active.id}:${active.rev}:${reloadNonce}`}
+              className="preview-image"
+              src={src}
+              alt={active.title}
+              onLoad={() => setLoading(false)}
+              onError={() => { setLoading(false); setFailed(true); }}
+            />
+          )}
+          {active && (kind === 'html' || kind === 'binary') && (
+            <iframe
+              key={`${active.id}:${active.rev}:${reloadNonce}`}
+              className="preview-frame"
+              title={active.title}
+              src={src}
+              // 不给 allow-same-origin：见文件顶部说明
+              sandbox="allow-scripts allow-popups allow-forms"
+              onLoad={() => setLoading(false)}
+              onError={() => { setLoading(false); setFailed(true); }}
+            />
+          )}
+          {active && (kind === 'md' || kind === 'code') && text != null && (
+            <div className="preview-text">
+              {kind === 'md'
+                ? <Markdown text={text} />
+                : <CodeBlock text={text} lang={LANG_MAP[extOf(active.file)] || ''} />}
+            </div>
           )}
         </div>
 

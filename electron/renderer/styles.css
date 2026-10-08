@@ -1140,6 +1140,12 @@ body {
   border-radius: 4px;
   background: #fff;
 }
+.drawer-markdown {
+  font-size: 12.5px;
+}
+.drawer-markdown .markdown-body {
+  font-size: 12.5px;
+}
 
 .file-tree {
   flex: 1;
@@ -5348,6 +5354,33 @@ html[data-mode="light"] .muse-tint {
   display: block;
   margin: auto;
   padding: 8px;
+}
+
+/* 文本类预览（md / 代码）：渲染端读正文后按内容渲染，自成一滚动区 */
+.preview-text {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  background: hsl(var(--bg-100));
+}
+.preview-text .markdown-body {
+  font-size: 13px;
+}
+.preview-text pre {
+  margin: 0;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: hsl(var(--bg-200));
+  border: 1px solid hsl(var(--border-200));
+  border-radius: var(--radius-md, 6px);
+  padding: 10px 12px;
+  overflow: auto;
+  white-space: pre;
+}
+.preview-text code {
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
 
 .preview-loading {

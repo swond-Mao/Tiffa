@@ -1,6 +1,27 @@
 /**
  * 通用工具函数（自 app.js 迁移）
  */
+/** 文件扩展名 → highlight.js 语言名（文件预览/抽屉代码块共用，单一来源） */
+export const LANG_MAP: Record<string, string> = {
+  '.js': 'javascript',
+  '.ts': 'typescript',
+  '.tsx': 'typescript',
+  '.jsx': 'javascript',
+  '.py': 'python',
+  '.css': 'css',
+  '.json': 'json',
+  '.yml': 'yaml',
+  '.yaml': 'yaml',
+  '.bat': 'bash',
+  '.sh': 'bash',
+  '.xml': 'xml',
+  '.sql': 'sql',
+  '.rs': 'rust',
+  '.go': 'go',
+  '.java': 'java',
+  '.cpp': 'cpp',
+  '.c': 'c',
+};
 
 /** 从 sessionPath 提取 sessionId（UUID） */
 export function extractSessionId(sessionPath?: string | null): string | null {

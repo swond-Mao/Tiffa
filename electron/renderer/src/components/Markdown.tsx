@@ -227,6 +227,18 @@ function PreBlock({ children }: { children?: ReactNode }) {
   );
 }
 
+/**
+ * 独立代码块：整段文本按语言交给 PreBlock 渲染（复用其懒高亮/折叠/复制按钮）。
+ * 供文件预览等「整篇皆代码」场景复用，避免各处重造高亮逻辑。
+ */
+export function CodeBlock({ text, lang }: { text: string; lang?: string }) {
+  return (
+    <PreBlock>
+      <code className={lang ? `language-${lang}` : undefined}>{text}</code>
+    </PreBlock>
+  );
+}
+
 interface MarkdownProps {
   text: string;
   className?: string;
